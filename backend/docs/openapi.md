@@ -42,15 +42,18 @@ At runtime, `swagger-ui-express` imports `spec.ts` directly, so the live `/api-d
 
 ## Pagination Contract (Portfolio API)
 
-The Portfolio API uses cursor-based pagination. The following behavior is part of the public contract and is covered by focused tests in `backend/src/test/portfolio.pagination.test.ts`:
+The Portfolio API pagination is cursor-based. The spec must document the contract below so clients and tests agree on what is persisted and what is returned.
 
-- **Stable cursor:** the cursor returned for a given page is deterministic and can be replayed to retrieve the same page while the underlying data is unchanged.
-- **Reported count:** the `total` count is stable across pages for a given query and is not affected by the page size.
-- **First and final page:** the first page returns the oldest items and the final page returns the newest items with no overlap. An empty result set returns an empty `items` array, `total: 0`, and a `null` next cursor.
-- **Items changing during pagination:** when items are inserted or deleted between page requests, the cursor prevents duplicate or missed rows for items that existed at the time the cursor was issued.
-- **No duplicate side effects:** pagination is read-only; repeating a request with the same cursor must not create, mutate, or duplicate portfolio records.
+- **Stable cursor:** the cursor is opaque to clients and is derived from the persisted record ordering key. It must not change between pages while concurrent writes are in flight.
 
-These edge cases are exercised with isolated DB and RPC doubles so the coverage is deterministic and independent of external services.
+- Paginated responses expose:
+  - `items`: the page of portfolio records.
+  - `nextCursor`: the cursor for the next page, or `null` when the last page has been returned.
+  - `total`: the reported count of records matching the query at the time the response was built.
+
+- **Consistency guarantee:** after a successful or failed write, the persisted record and the externally visible result (items, nextCursor, total) must agree. If a write is interrupted, the response must reflect the committed state rather than a partially applied one.
+
+- The spec documents this behavior on the Portfolio list endpoint's parameters (`cursor`, `limit`) and on its response schema (`items`, `nextCursor`, `total`). When this contract changes, update `spec.ts` and the focused pagination tests in the same change.
 
 ## CI Validation
 
