@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { trace } from '@opentelemetry/api'
-import { Horizon, SorobanRpc } from '@stellar/stellar-sdk'
+import { Horizon, rpc as SorobanRpc } from '@stellar/stellar-sdk'
 
 function getTracer() {
   return trace.getTracer('stellar-service', '1.0.0')

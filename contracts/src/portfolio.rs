@@ -304,7 +304,38 @@ pub fn emit_portfolio_rebalanced(env: &Env, portfolio_id: u64, timestamp: u64) {
     );
 }
 
+pub fn emit_rebalance_committed(
+    env: &Env,
+    portfolio_id: u64,
+    timestamp: u64,
+    trades: &Map<Address, i128>,
+    resulting_balances: &Map<Address, i128>,
+    total_fee_paid: i128,
+) {
+    env.events().publish(
+        (
+            symbol_short!("portfolio"),
+            Symbol::new(env, "rebalance_committed"),
+        ),
+        (
+            portfolio_id,
+            timestamp,
+            trades.clone(),
+            resulting_balances.clone(),
+            total_fee_paid,
+        ),
+    );
+}
 
+pub fn emit_allocation_updated(
+    env: &Env,
+    portfolio_id: u64,
+    old_allocations: Map<Address, u32>,
+    new_allocations: Map<Address, u32>,
+) {
+    env.events().publish(
+        (symbol_short!("portfolio"), Symbol::new(env, "alloc_upd")),
+        (portfolio_id, old_allocations, new_allocations),
     );
 }
 

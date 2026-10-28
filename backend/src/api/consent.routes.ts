@@ -166,8 +166,8 @@ function exportConsentAuditTrail(req: Request, res: Response) {
             documentVersion: e.documentVersion,
             version: e.documentVersion,
             categories: e.categories ?? [],
-            category: e.category ?? e.categories ?? [],
-            categoryDetails: e.categoryDetails ?? {
+            category: (e as any).category ?? e.categories ?? [],
+            categoryDetails: (e as any).categoryDetails ?? {
                 terms: (e.categories ?? []).includes('terms'),
                 privacy: (e.categories ?? []).includes('privacy'),
                 cookies: (e.categories ?? []).includes('cookies'),
@@ -242,7 +242,7 @@ consentRouter.post('/consent/audit/purge', requireJwtWhenEnabled, (req: Request,
 /** GDPR: Delete all data for a user (portfolios, history, consent). Requires JWT when enabled. */
 consentRouter.delete('/user/:address/data', requireJwtWhenEnabled, async (req: Request, res: Response) => {
     try {
-        const address = req.params.address
+        const address = req.params.address as string
         const userId = req.user?.address ?? address
         if (userId !== address) return fail(res, 403, 'FORBIDDEN', 'You can only delete your own data')
         if (!address) return fail(res, 400, 'VALIDATION_ERROR', 'address is required')

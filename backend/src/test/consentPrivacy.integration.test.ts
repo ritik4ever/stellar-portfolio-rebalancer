@@ -30,6 +30,9 @@ beforeAll(async () => {
     process.env.RATE_LIMIT_BURST_MAX = '200'
     process.env.RATE_LIMIT_AUTH_MAX = '100'
 
+    const { redisProbe } = await import('../queue/connection.js')
+    vi.spyOn(redisProbe, 'isAvailable').mockResolvedValue(false)
+
     const express = (await import('express')).default
     const cors = (await import('cors')).default
     const { portfolioRouter } = await import('../api/routes.js')
@@ -281,11 +284,20 @@ describe('consent and privacy API', () => {
             .expect(200)
 
         const token = generateAccessToken(owner)
-        const exportRes = await request(app)
+        let exportRes = await request(app)
             .get(`/api/portfolio/${portfolioId}/export`)
             .query({ format: 'json' })
             .set('Authorization', `Bearer ${token}`)
-            .expect(200)
+        
+        if (exportRes.status === 202) {
+            const jobId = exportRes.body.data.jobId
+            exportRes = await request(app)
+                .get(`/api/portfolio/${portfolioId}/export/status/${jobId}`)
+                .set('Authorization', `Bearer ${token}`)
+                .expect(200)
+        } else {
+            expect(exportRes.status).toBe(200)
+        }
 
         expect(exportRes.headers['content-type']).toContain('application/json')
         expect(exportRes.headers['content-disposition']).toContain('attachment; filename=')

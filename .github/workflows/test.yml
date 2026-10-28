@@ -57,6 +57,17 @@ jobs:
         shard: [1, 2, 3, 4]
         total: [4]
 
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -75,6 +86,7 @@ jobs:
         env:
           QUARANTINE_MODE: ${{ env.QUARANTINE_MODE }}
           NODE_ENV: test
+          REDIS_URL: redis://127.0.0.1:6379
         run: |
           npm run test:shard -- \
             --shard=${{ matrix.shard }}/${{ matrix.total }} \
@@ -87,6 +99,7 @@ jobs:
         with:
           name: backend-blob-${{ matrix.shard }}-of-${{ matrix.total }}
           path: backend/.vitest-reports/
+          include-hidden-files: true
           retention-days: 7
 
   # ---------------------------------------------------------------------------

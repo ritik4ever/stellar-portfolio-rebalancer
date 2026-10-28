@@ -69,7 +69,7 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
             {/* Header */}
-            <nav className="flex items-center justify-between p-6 max-w-7xl mx-auto">
+            <nav className="relative z-40 flex items-center justify-between p-6 max-w-7xl mx-auto">
                 <div className="flex items-center space-x-2">
                     <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
                         <TrendingUp className="w-5 h-5 text-white" />

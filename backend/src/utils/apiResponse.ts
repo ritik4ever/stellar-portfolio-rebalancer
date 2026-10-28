@@ -54,7 +54,7 @@ export function fail(
     // API keys, bearer tokens). They are redacted before serialization, and
     // server errors never expose their `details` payload at all.
     const safeMessage = sanitizeErrorMessage(message)
-    const safeDetails = status >= 500 ? undefined : sanitizeErrorDetails(details)
+    const safeDetails = status === 500 ? undefined : sanitizeErrorDetails(details)
     const payload: ApiResponseEnvelope<null> = {
         success: false,
         data: null,

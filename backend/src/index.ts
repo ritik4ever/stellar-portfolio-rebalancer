@@ -133,6 +133,10 @@ export async function main(argv: string[] = process.argv): Promise<void> {
         res.status(200).type('text/plain').send('ok')
     })
 
+    app.get('/api/health', (_req: Request, res: Response) => {
+        res.status(200).json({ status: 'ok' })
+    })
+
     app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(spec as Record<string, unknown>))
 
     const enableApiDocs = process.env.ENABLE_API_DOCS || (config.nodeEnv !== 'production' ? 'true' : 'false')

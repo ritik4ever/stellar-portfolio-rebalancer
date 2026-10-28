@@ -149,15 +149,9 @@ async function runRoundtrip() {
       'Step 3/5: Checking applied migrations before rollback');
 
     // Count migrations to rollback
-    const appliedCount = (appliedResult.stdout.match(/version = \$/g) || []).length;
-    if (appliedCount > 0) {
-      await runCommand('npm', ['run', 'db:migrate', '--', '--rollback', '999'],
-        `Step 3/5: Rollback ${appliedCount} migrations`);
-    } else {
-      log('Step 3/5: No migrations to rollback');
-    }
+    await runCommand('npm', ['run', 'db:migrate', '--', '--rollback', '999'],
+      'Step 3/5: Rollback all migrations');
 
-    // Step 4: Apply all migrations again
     await runCommand('npm', ['run', 'db:migrate'], 'Step 4/5: Apply all migrations again');
 
     // Step 5: Dump schema after re-apply

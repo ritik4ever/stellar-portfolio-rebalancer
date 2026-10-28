@@ -8,7 +8,7 @@
 import http from 'http';
 
 const BASE_URL = process.env.BACKEND_URL || 'http://localhost:3000';
-const DURATION_MS = 5 * 60 * 1000; // 5 minutes
+const DURATION_MS = process.env.DURATION_MS ? parseInt(process.env.DURATION_MS, 10) : 5 * 60 * 1000;
 const CONCURRENT_REQUESTS = 10;
 const REQUEST_INTERVAL_MS = 100; // Request every 100ms per worker
 

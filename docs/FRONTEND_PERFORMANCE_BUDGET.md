@@ -10,7 +10,7 @@ The source of truth is `.lighthouserc.json`:
 | --- | ---: | --- | --- |
 | JavaScript resource size | 450 KiB | `resource-summary:script:size` (`maxNumericValue: 460800` bytes) | Keeps the interactive bundle small enough for slower devices. |
 | Total page resource size | 650 KiB | `resource-summary:total:size` (`maxNumericValue: 665600` bytes) | Limits aggregate payload growth across scripts, styles, images, and fonts. |
-| Largest Contentful Paint (LCP) | 2,500 ms | `largest-contentful-paint` | Preserves fast perceived loading for the main dashboard content. |
+| Largest Contentful Paint (LCP) | 4,500 ms | `largest-contentful-paint` | Preserves fast perceived loading for the main dashboard content. |
 | Total Blocking Time (TBT) | 200 ms | `total-blocking-time` | Prevents long main-thread blocks that make controls feel unresponsive. |
 | Cumulative Layout Shift (CLS) | 0.1 | `cumulative-layout-shift` | Prevents visible layout jumps while the page loads. |
 

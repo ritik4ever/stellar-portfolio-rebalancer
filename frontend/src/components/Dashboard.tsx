@@ -17,7 +17,7 @@ import ExportPDF from './ExportPDF'
 
 import { API_CONFIG } from '../config/api'
 import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
-import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
+import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, usePortfolioCostSummary, useRebalancePlan, buildRebalanceConfirmationSummary, buildRebalancePreconditions, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
 import { dashboardCopy } from '../content/uiCopy'
 import { buildPortfolioCloneDraft, savePortfolioCloneDraft } from '../utils/portfolioCloneDraft'
 import { usePrices, formatPriceFeedSummary, priceKeys } from '../hooks/queries/usePricesQuery'
@@ -80,6 +80,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const { data: costSummary, isLoading: costSummaryLoading } = usePortfolioCostSummary(latestPortfolioId)
 
     const executeRebalanceMutation = useExecuteRebalanceMutation(latestPortfolioId)
+
+    const [showRebalanceConfirm, setShowRebalanceConfirm] = useState(false)
+    const { data: rebalancePlan, isLoading: rebalancePlanLoading, isError: rebalancePlanError } = useRebalancePlan(
+        latestPortfolioId,
+        showRebalanceConfirm,
+    )
 
     const demoData = {
         id: 'demo',
@@ -194,24 +200,62 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         await refreshData()
     }, [refetchPortfolioDetails, refetchPortfolios, refetchPrices, refreshData])
 
-    const executeRebalance = useCallback(async () => {
+    const rebalanceTradeoffs = buildRebalanceConfirmationSummary({
+        slippageTolerancePercent: (portfolioData as { slippageTolerancePercent?: number })?.slippageTolerancePercent,
+        slippageTolerance: (portfolioData as { slippageTolerance?: number })?.slippageTolerance,
+        feedMeta,
+        hasPartialPriceData,
+        partialPriceMessage,
+        hasHighGasWarning,
+    })
+
+    const rebalancePreconditions = buildRebalancePreconditions({
+        publicKey,
+        portfolioId: portfolioData?.id,
+        needsRebalance: portfolioData?.needsRebalance,
+        hasPartialPriceData,
+        feedDegraded: feedMeta?.degraded,
+        tradeCount: rebalanceEstimate?.tradeCount ?? (rebalanceEstimate?.breakdown?.length ?? 0),
+        hasHighGasWarning: Boolean(hasHighGasWarning),
+    })
+
+    const rebalanceBlocked = rebalancePreconditions.some(
+        (item) => !item.ok && (item.id === 'wallet' || item.id === 'portfolio'),
+    )
+
+    const requestRebalance = () => {
+        if (!portfolioData?.id || portfolioData.id === 'demo') {
+            alert('Rebalancing not available in demo mode. Please create a real portfolio.')
+            return
+        }
+        if (!publicKey) {
+            alert('Connect your wallet to execute a rebalance.')
+            return
+        }
+        setShowRebalanceConfirm(true)
+    }
+
+    const confirmRebalance = async () => {
         try {
             const result = await executeRebalanceMutation.mutateAsync()
+            setShowRebalanceConfirm(false)
             trackEvent('rebalance_executed', { portfolioId: latestPortfolioId ?? 'unknown' })
             setRebalanceNotice({
                 type: 'success',
-                message: `Rebalance executed successfully. Gas used: ${result.result?.gasUsed || 'N/A'}`,
+                message: `Rebalance executed successfully. Gas used: ${result?.result?.gasUsed || (result as any)?.gasUsed || 'N/A'}`,
             })
         } catch (error: any) {
             console.error('Rebalance failed:', error)
-            const msg = error.message ?? 'Rebalance failed. Please try again.'
+            const msg = error?.message ?? 'Rebalance failed. Please try again.'
             const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
             setRebalanceNotice({
                 type: 'error',
                 message: isSlippage ? `Slippage too high: ${msg}` : msg,
             })
         }
-    }, [executeRebalanceMutation])
+    }
+
+
 
     const dismissRebalanceNotice = useCallback(() => {
         setRebalanceNotice(null)
@@ -397,18 +441,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const walletType = StellarWallet.getWalletType()
     const contractAddress = 'CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I'
 
-    if (loading) {
-        return (
-            <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500 mx-auto"></div>
-                    <p className="mt-4 text-gray-600 dark:text-gray-400">Loading portfolio data...</p>
-                </div>
-            </div>
-        )
-    }
-
-    if (routeDataUnavailable) {
+if (routeDataUnavailable) {
         return (
             <RouteErrorState
                 title="Portfolio data is unavailable"
@@ -432,6 +465,55 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         )
     }
 
+    const noPortfoliosYet = Boolean(
+        publicKey && (!portfolios || portfolios.length === 0) && !loading && !portfoliosLoadError
+    )
+
+    if (noPortfoliosYet) {
+        return (
+            <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-6">
+                <div className="max-w-2xl w-full bg-white dark:bg-gray-800 rounded-xl p-8 shadow-sm text-center">
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{dashboardCopy.title}</h1>
+                    <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">No portfolios yet</h2>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                        You don't have any portfolios yet. Create your first automated portfolio to start tracking and rebalancing on Stellar.
+                    </p>
+                    <div className="flex flex-col sm:flex-row items-center gap-3 justify-center">
+                        <button
+                            onClick={() => onNavigate('setup')}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                        >
+                            Create Portfolio
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => onNavigate('wizard')}
+                            className="border border-blue-600 text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-500 dark:hover:bg-blue-900/20 px-4 py-2 rounded-lg transition-colors text-sm font-medium"
+                            title="Use step-by-step wizard to create a portfolio"
+                        >
+                            ✨ Wizard
+                        </button>
+                        <button
+                            onClick={() => window.open('/docs/DEMO_WALKTHROUGH.md', '_blank')}
+                            className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg transition-colors"
+                        >
+                            Learn how to start
+                        </button>
+                        <button
+                            onClick={() => { alert('Tip: Use the Create Portfolio button to open the setup flow.') }}
+                            className="px-4 py-2 text-sm text-gray-500"
+                        >
+                            Quick tips
+                        </button>
+                    </div>
+                    <p className="mt-6 text-xs text-gray-400">
+                        You can also import/export portfolios, connect a wallet, or reset demo data from the header actions.
+                    </p>
+                </div>
+            </div>
+        )
+    }
+
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
             {rebalanceNotice && (
@@ -445,6 +527,136 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     >
                         Dismiss
                     </button>
+                </div>
+            )}
+            {showRebalanceConfirm && (
+                <div
+                    className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="rebalance-confirm-title"
+                    aria-describedby="rebalance-confirm-intro"
+                >
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+                        <h2 id="rebalance-confirm-title" className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+                            {dashboardCopy.previewTitle}
+                        </h2>
+                        <p id="rebalance-confirm-intro" className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                            {dashboardCopy.previewIntro}
+                        </p>
+                        {rebalancePlanLoading ? (
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4" role="status">
+                                Loading rebalance plan…
+                            </p>
+                        ) : null}
+                        {rebalancePlanError ? (
+                            <p className="text-sm text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 mb-4" role="alert">
+                                Could not load the latest rebalance plan. Estimates below may be incomplete.
+                            </p>
+                        ) : null}
+                        <section className="mb-4" aria-labelledby="rebalance-trades-heading">
+                            <h3 id="rebalance-trades-heading" className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                                {dashboardCopy.estimatedTradesSection}
+                            </h3>
+                            {(rebalanceEstimate?.breakdown?.length ?? 0) > 0 ? (
+                                <ul className="text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                                    {rebalanceEstimate.breakdown.map((item: { tradeId: string; estimateXlm?: number }) => (
+                                        <li key={item.tradeId} className="flex justify-between gap-2">
+                                            <span>{item.tradeId}</span>
+                                            <span>{Number(item.estimateXlm || 0).toFixed(4)} XLM</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p className="text-sm text-gray-600 dark:text-gray-400">{dashboardCopy.noTradesPlanned}</p>
+                            )}
+                            {rebalancePlan?.maxSlippagePercent != null ? (
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                                    Portfolio slippage cap: {rebalancePlan.maxSlippagePercent}% ({rebalancePlan.estimatedSlippageBps} bps)
+                                </p>
+                            ) : null}
+                        </section>
+                        <section className="mb-4" aria-labelledby="rebalance-preconditions-heading">
+                            <h3 id="rebalance-preconditions-heading" className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                                {dashboardCopy.preconditionsSection}
+                            </h3>
+                            <ul className="space-y-2">
+                                {rebalancePreconditions.map((item) => (
+                                    <li
+                                        key={item.id}
+                                        className={`text-sm rounded-lg px-3 py-2 border ${
+                                            item.ok
+                                                ? 'border-green-200 bg-green-50 text-green-900 dark:border-green-900 dark:bg-green-950/40 dark:text-green-100'
+                                                : 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100'
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="font-medium">{item.label}</span>
+                                            <span className="text-xs uppercase tracking-wide">
+                                                {item.ok ? dashboardCopy.preconditionMet : dashboardCopy.preconditionBlocked}
+                                            </span>
+                                        </div>
+                                        {item.detail ? <p className="mt-1 text-xs opacity-90">{item.detail}</p> : null}
+                                    </li>
+                                ))}
+                            </ul>
+                        </section>
+                        <section className="mb-4" aria-labelledby="rebalance-slippage-heading">
+                            <h3 id="rebalance-slippage-heading" className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                                {dashboardCopy.slippageSection}
+                            </h3>
+                            <ul className="list-disc pl-5 text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                                {rebalanceTradeoffs.slippage.map((line) => (
+                                    <li key={line}>{line}</li>
+                                ))}
+                            </ul>
+                        </section>
+                        <section className="mb-4" aria-labelledby="rebalance-prices-heading">
+                            <h3 id="rebalance-prices-heading" className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                                {dashboardCopy.pricesSection}
+                            </h3>
+                            <ul className="list-disc pl-5 text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                                {rebalanceTradeoffs.prices.map((line) => (
+                                    <li key={line}>{line}</li>
+                                ))}
+                            </ul>
+                        </section>
+                        <section className="mb-6" aria-labelledby="rebalance-risk-heading">
+                            <h3 id="rebalance-risk-heading" className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                                {dashboardCopy.riskSection}
+                            </h3>
+                            <ul className="list-disc pl-5 text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                                {rebalanceTradeoffs.risks.map((line) => (
+                                    <li key={line}>{line}</li>
+                                ))}
+                            </ul>
+                        </section>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setShowRebalanceConfirm(false)}
+                                disabled={executeRebalanceMutation.isPending}
+                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                            >
+                                {dashboardCopy.cancel}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => void confirmRebalance()}
+                                disabled={executeRebalanceMutation.isPending || rebalanceBlocked}
+                                className="px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                            >
+                                {executeRebalanceMutation.isPending ? (
+                                    <>
+                                        <RefreshCw className="w-4 h-4 motion-safe:animate-spin" aria-hidden />
+                                        {dashboardCopy.rebalancing}
+                                    </>
+                                ) : (
+                                    dashboardCopy.confirmRebalance
+                                )}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -830,8 +1042,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                             )}
                                         </div>
                                         <div className="flex items-center mt-1">
-                                            <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
-                                            <span className="text-green-500 font-medium">+{portfolioData?.dayChange || 0}%</span>
+                                            <TrendingUp className={`w-4 h-4 mr-1 ${(portfolioData?.dayChange || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`} />
+                                            <span className={`font-medium ${(portfolioData?.dayChange || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                                {(portfolioData?.dayChange || 0) >= 0 ? `+${portfolioData?.dayChange || 0}%` : `${portfolioData?.dayChange || 0}%`}
+                                            </span>
                                             <span className="text-gray-500 dark:text-gray-400 ml-2">Today</span>
                                         </div>
                                     </div>
@@ -998,7 +1212,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                                         Max slippage: {(portfolioData as any).slippageTolerancePercent}% — trades beyond this will be rejected
                                                     </p>
                                                 )}
-                                                <button onClick={executeRebalance}
+                                                <button onClick={requestRebalance}
                                                     disabled={executeRebalanceMutation.isPending || !publicKey || portfolioData?.id === 'demo'}
                                                     className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2">
                                                     {executeRebalanceMutation.isPending ? (
@@ -1090,7 +1304,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
                     <div className="flex items-center gap-2">
                         {portfolioData?.needsRebalance ? (
-                            <button onClick={executeRebalance}
+                            <button onClick={requestRebalance}
                                 disabled={executeRebalanceMutation.isPending || portfolioData?.id === 'demo'}
                                 className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1">
                                 {executeRebalanceMutation.isPending ? (

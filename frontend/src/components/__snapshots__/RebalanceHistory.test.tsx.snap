@@ -43,7 +43,7 @@ exports[`RebalanceHistory > snapshots > matches snapshot in empty state 1`] = `
       >
         <svg
           aria-hidden="true"
-          class="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600"
+          class="lucide lucide-clock w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600"
           fill="none"
           height="24"
           stroke="currentColor"
@@ -59,8 +59,8 @@ exports[`RebalanceHistory > snapshots > matches snapshot in empty state 1`] = `
             cy="12"
             r="10"
           />
-          <polyline
-            points="12 6 12 12 16 14"
+          <path
+            d="M12 6v6l4 2"
           />
         </svg>
         <p>
@@ -125,7 +125,7 @@ exports[`RebalanceHistory > snapshots > matches snapshot in error state 1`] = `
       >
         <svg
           aria-hidden="true"
-          class="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600"
+          class="lucide lucide-clock w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600"
           fill="none"
           height="24"
           stroke="currentColor"
@@ -141,8 +141,8 @@ exports[`RebalanceHistory > snapshots > matches snapshot in error state 1`] = `
             cy="12"
             r="10"
           />
-          <polyline
-            points="12 6 12 12 16 14"
+          <path
+            d="M12 6v6l4 2"
           />
         </svg>
         <p>
@@ -243,7 +243,8 @@ exports[`RebalanceHistory > snapshots > matches snapshot with fetched history da
                 class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center"
               >
                 <svg
-                  class="w-5 h-5 text-green-600"
+                  aria-hidden="true"
+                  class="lucide lucide-circle-check-big lucide-check-circle w-5 h-5 text-green-600"
                   fill="none"
                   height="24"
                   stroke="currentColor"
@@ -255,10 +256,10 @@ exports[`RebalanceHistory > snapshots > matches snapshot with fetched history da
                   xmlns="http://www.w3.org/2000/svg"
                 >
                   <path
-                    d="M22 11.08V12a10 10 0 1 1-5.93-9.14"
+                    d="M21.801 10A10 10 0 1 1 17 3.335"
                   />
-                  <polyline
-                    points="22 4 12 14.01 9 11.01"
+                  <path
+                    d="m9 11 3 3L22 4"
                   />
                 </svg>
               </div>
@@ -294,7 +295,8 @@ exports[`RebalanceHistory > snapshots > matches snapshot with fetched history da
                   class="flex items-center"
                 >
                   <svg
-                    class="w-4 h-4 mr-1"
+                    aria-hidden="true"
+                    class="lucide lucide-calendar w-4 h-4 mr-1"
                     fill="none"
                     height="24"
                     stroke="currentColor"
@@ -305,31 +307,21 @@ exports[`RebalanceHistory > snapshots > matches snapshot with fetched history da
                     width="24"
                     xmlns="http://www.w3.org/2000/svg"
                   >
+                    <path
+                      d="M8 2v3"
+                    />
+                    <path
+                      d="M16 2v3"
+                    />
                     <rect
                       height="18"
                       rx="2"
-                      ry="2"
                       width="18"
                       x="3"
-                      y="4"
+                      y="3"
                     />
-                    <line
-                      x1="16"
-                      x2="16"
-                      y1="2"
-                      y2="6"
-                    />
-                    <line
-                      x1="8"
-                      x2="8"
-                      y1="2"
-                      y2="6"
-                    />
-                    <line
-                      x1="3"
-                      x2="21"
-                      y1="10"
-                      y2="10"
+                    <path
+                      d="M3 9h18"
                     />
                   </svg>
                   <span
@@ -343,7 +335,7 @@ exports[`RebalanceHistory > snapshots > matches snapshot with fetched history da
                     at
                   </span>
                   <span>
-                    11:30:00 AM
+                    10:30:00 AM
                   </span>
                 </div>
                 <span
@@ -355,7 +347,8 @@ exports[`RebalanceHistory > snapshots > matches snapshot with fetched history da
                   class="flex items-center"
                 >
                   <svg
-                    class="w-4 h-4 mr-1"
+                    aria-hidden="true"
+                    class="lucide lucide-clock w-4 h-4 mr-1"
                     fill="none"
                     height="24"
                     stroke="currentColor"
@@ -371,11 +364,11 @@ exports[`RebalanceHistory > snapshots > matches snapshot with fetched history da
                       cy="12"
                       r="10"
                     />
-                    <polyline
-                      points="12 6 12 12 16 14"
+                    <path
+                      d="M12 6v6l4 2"
                     />
                   </svg>
-                  529 days ago
+                  649 days ago
                 </div>
               </div>
               <div
@@ -392,7 +385,8 @@ exports[`RebalanceHistory > snapshots > matches snapshot with fetched history da
             </div>
           </div>
           <svg
-            class="w-4 h-4 text-gray-400 mt-2"
+            aria-hidden="true"
+            class="lucide lucide-arrow-right w-4 h-4 text-gray-400 mt-2"
             fill="none"
             height="24"
             stroke="currentColor"

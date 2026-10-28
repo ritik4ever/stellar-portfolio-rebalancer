@@ -38,7 +38,7 @@ jobs:
       - name: Setup Rust (wasm32 target)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none, wasm32-unknown-unknown
 
       - name: Cache Cargo registry + build artefacts
         uses: actions/cache@v4
@@ -53,7 +53,13 @@ jobs:
 
       - name: Build contract (release WASM)
         working-directory: contracts
-        run: cargo build --target wasm32-unknown-unknown --release
+        run: |
+          export SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1
+          export STELLAR_CLI_VERSION="25.2.0"
+          export SOROBAN_CLI_VERSION="25.2.0"
+          cargo build --target wasm32v1-none --release
+          mkdir -p target/wasm32-unknown-unknown/release
+          cp target/wasm32v1-none/release/portfolio_rebalancer.wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm
 
       - name: Measure WASM size and compare against baseline
         id: size_check
@@ -126,59 +132,64 @@ jobs:
 
       - name: Post PR comment with size delta
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
-            const baseline = '${{ steps.size_check.outputs.baseline }}';
-            const actual   = '${{ steps.size_check.outputs.actual }}';
-            const delta    = '${{ steps.size_check.outputs.delta }}';
-            const pct      = '${{ steps.size_check.outputs.pct }}';
-            const failed   = '${{ steps.size_check.outputs.failed }}' === 'true';
-            const threshold = process.env.WASM_SIZE_THRESHOLD_PCT;
+            try {
+              const baseline = '${{ steps.size_check.outputs.baseline }}';
+              const actual   = '${{ steps.size_check.outputs.actual }}';
+              const delta    = '${{ steps.size_check.outputs.delta }}';
+              const pct      = '${{ steps.size_check.outputs.pct }}';
+              const failed   = '${{ steps.size_check.outputs.failed }}' === 'true';
+              const threshold = process.env.WASM_SIZE_THRESHOLD_PCT;
 
-            const sign = delta >= 0 ? '+' : '';
-            const icon = failed ? '❌' : (delta < 0 ? '✅' : '✅');
-            const status = failed
-              ? `**Regression detected** — size grew by ${sign}${delta} bytes (${sign}${pct}%), exceeding the ±${threshold}% threshold.`
-              : `Size change is within the ±${threshold}% threshold.`;
+              const sign = delta >= 0 ? '+' : '';
+              const icon = failed ? '❌' : (delta < 0 ? '✅' : '✅');
+              const status = failed
+                ? `**Regression detected** — size grew by ${sign}${delta} bytes (${sign}${pct}%), exceeding the ±${threshold}% threshold.`
+                : `Size change is within the ±${threshold}% threshold.`;
 
-            const body = [
-              `### ${icon} Contract WASM Size Check`,
-              '',
-              `| | Bytes |`,
-              `|---|---|`,
-              `| Baseline | ${Number(baseline).toLocaleString()} |`,
-              `| This PR  | ${Number(actual).toLocaleString()} |`,
-              `| Delta    | ${sign}${Number(delta).toLocaleString()} (${sign}${pct}%) |`,
-              '',
-              status,
-              '',
-              failed
-                ? `To accept this size increase, update \`BASELINE\` in \`contracts/wasm-size-baseline.txt\` to \`${actual}\` in this PR.`
-                : '',
-            ].join('\n');
+              const body = [
+                `### ${icon} Contract WASM Size Check`,
+                '',
+                `| | Bytes |`,
+                `|---|---|`,
+                `| Baseline | ${Number(baseline).toLocaleString()} |`,
+                `| This PR  | ${Number(actual).toLocaleString()} |`,
+                `| Delta    | ${sign}${Number(delta).toLocaleString()} (${sign}${pct}%) |`,
+                '',
+                status,
+                '',
+                failed
+                  ? `To accept this size increase, update \`BASELINE\` in \`contracts/wasm-size-baseline.txt\` to \`${actual}\` in this PR.`
+                  : '',
+              ].join('\n');
 
-            // Upsert: replace an existing comment if re-running.
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c =>
-              c.user.type === 'Bot' && c.body.includes('Contract WASM Size Check')
-            );
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
+              // Upsert: replace an existing comment if re-running.
+              const { data: comments } = await github.rest.issues.listComments({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body,
               });
+              const existing = comments.find(c =>
+                c.user.type === 'Bot' && c.body.includes('Contract WASM Size Check')
+              );
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body,
+                });
+              }
+            } catch (err) {
+              core.info('Skipping PR comment due to permissions on fork: ' + err.message);
             }

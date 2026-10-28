@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createHash } from 'node:crypto'
 import { contractEventIndexerService } from '../services/contractEventIndexer.js'
 import { databaseService } from '../services/databaseService.js'
-import { SorobanRpc } from '@stellar/stellar-sdk'
+import { rpc as SorobanRpc } from '@stellar/stellar-sdk'
 import { BACKEND_CONTRACT_EVENT_SCHEMA_VERSION } from '../config/contractEventSchema.js'
 
 // Mock dependencies
