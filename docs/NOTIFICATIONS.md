@@ -76,6 +76,48 @@ During network partitions, worker restarts, or process termination:
 - Both completed and failed rebalances (manual or automated) trigger corresponding notification events and delivery attempts.
 - Rebalance status (`completed` | `failed`) and failure reasons are rendered consistently across templates and recorded in notification logs.
 
+## Webhook Delivery Retry State Consistency (SPR-2026-173)
+
+Webhook endpoints are not idempotent by default: a retried `POST` looks exactly like a first attempt. The delivery path therefore makes the attempt identity explicit and keeps the dead-letter record in agreement with what actually happened.
+
+### Stable delivery identity
+
+Every webhook `POST` carries an `X-Webhook-Delivery-Id` header:
+
+- The caller's `deliveryId` when one is supplied (for example `manual-rebalance-<portfolioId>-<timestamp>`).
+- Otherwise a deterministic id derived from the user, event type, timestamp and title (`deriveWebhookDeliveryId()` in `backend/src/services/webhookDeliverySafety.ts`).
+
+The value is identical for every retry of one notification and is reused on a dead-letter replay, so a receiver can drop a repeat POST. It is also recorded on the dead-letter entry and in the delivery error, which is what makes the persisted record traceable back to the request the endpoint saw.
+
+### Which failures are retried
+
+| Classification | Examples | Behaviour |
+|----------------|----------|-----------|
+| `retryable` | connection refused, DNS failure, explicit non-2xx response (5xx/4xx) | Retried with the configured backoff, up to `WEBHOOK_RETRY_COUNT + 1` attempts |
+| `ambiguous` | request timeout (`AbortError` after the request was dispatched), `ECONNRESET`/`EPIPE`/`UND_ERR_SOCKET` while waiting for the response | **Not retried**; logged as `uncertain` with reason `delivery_unknown` |
+
+An ambiguous outcome means the endpoint may already have processed the payload. The delivery is logged as `uncertain` and is **never** moved to the dead-letter queue, because replaying it could duplicate the side effect. When triaging, look for the log line `[Webhook] Delivery outcome unknown; not moving to the dead-letter queue to avoid a duplicate replay` and confirm delivery with the endpoint owner using the `X-Webhook-Delivery-Id` value before re-triggering the notification manually.
+
+### Dead-letter entries
+
+- Only definitive failures are queued, so every listed entry is known **not** to have succeeded and is safe to replay.
+- `attemptsExhausted` is the number of attempts that were actually made; `stoppedEarly` is `true` when the retry loop ended before using the full attempt budget (for example when the caller aborted the delivery).
+- `deliveryId` links the entry to its `notification_logs` rows (`dbGetNotificationLogs(userId, limit, deliveryId)`), and `errorMessage` is the real failure reason rather than a generic message.
+- Entries are deduplicated per `deliveryId`: concurrent or repeated work for one delivery produces a single entry, in Redis via `SADD dead_letter:webhook:delivery_ids` and in the in-memory fallback via a delivery-id set. The slot is released when the entry is replayed or deleted, so a delivery that fails again later can be queued again.
+
+### Admin endpoints
+
+All require the admin role and read/write the same persisted records the delivery path writes.
+
+| Method & path | Behaviour |
+|---------------|-----------|
+| `GET /api/v1/admin/notifications/dead-letter` | Paginated listing (`page`, `pageSize`/`limit`, `userId`, `eventType`, `search`) with `summary` counts per event type |
+| `POST /api/v1/admin/notifications/dead-letter/:id/replay` | Claims the entry, replays it through `deliverWithBackoff`, removes it on success. On failure it is re-queued with `attemptsExhausted + 1` and the request returns `502 REPLAY_FAILED` |
+| `POST /api/v1/admin/notifications/dead-letter/batch-replay` | `{ ids: [...] }` or `{ replayAll: true }`; returns `results { total, succeeded, failed, failedIds }` and re-queues every failed item |
+| `DELETE /api/v1/admin/notifications/dead-letter/:id` | Drops an entry without replaying it (`404` when it does not exist) |
+
+A replay sends `X-Webhook-Replay: true` and the original `X-Webhook-Delivery-Id`, and its delivery attempt is logged to `notification_logs` under the same `deliveryId`, so the queue, the log trail and the request the endpoint received always tell the same story.
+
 
 ## Event Types
 

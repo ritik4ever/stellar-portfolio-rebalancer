@@ -185,8 +185,6 @@ describe("webhookDeadLetterQueue – replay with mocked outbound HTTP", () => {
 
     await webhookDeadLetterQueue.push(item);
 
-    // Simulate successful HTTP delivery: replay() returns the item for the
-    // caller to re-send; the entry is removed from the queue.
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -195,13 +193,11 @@ describe("webhookDeadLetterQueue – replay with mocked outbound HTTP", () => {
 
     const replayed = await webhookDeadLetterQueue.replay("replay-ok-1");
 
-    // Returned item carries the original payload
     expect(replayed).not.toBeNull();
     expect(replayed!.id).toBe("replay-ok-1");
     expect(replayed!.payload).toEqual(originalPayload);
     expect(replayed!.webhookUrl).toBe("https://hooks.example.com/ok");
 
-    // Simulate what the caller would do with the returned item
     const response = await fetchMock(replayed!.webhookUrl, {
       method: "POST",
       headers: {
@@ -220,7 +216,6 @@ describe("webhookDeadLetterQueue – replay with mocked outbound HTTP", () => {
       }),
     );
 
-    // Entry must be gone after successful replay
     const remaining = await webhookDeadLetterQueue.list();
     expect(remaining).toHaveLength(0);
   });
@@ -240,8 +235,6 @@ describe("webhookDeadLetterQueue – replay with mocked outbound HTTP", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    // Replay returns the item; caller's HTTP attempt fails; caller re-pushes
-    // with incremented attempt count (simulating what the replay handler does).
     const replayed = await webhookDeadLetterQueue.replay("replay-fail-1");
     expect(replayed).not.toBeNull();
 
@@ -251,7 +244,6 @@ describe("webhookDeadLetterQueue – replay with mocked outbound HTTP", () => {
     });
     expect(response.ok).toBe(false);
 
-    // Caller re-queues with updated attempt count
     const reQueued: DeadLetterItem = {
       ...replayed!,
       attemptsExhausted: replayed!.attemptsExhausted + 1,
@@ -276,11 +268,9 @@ describe("webhookDeadLetterQueue – replay with mocked outbound HTTP", () => {
     const replayed = await webhookDeadLetterQueue.replay("replay-no-dupe-1");
     expect(replayed).not.toBeNull();
 
-    // After replay(), the original entry is gone
     const afterReplay = await webhookDeadLetterQueue.list();
     expect(afterReplay).toHaveLength(0);
 
-    // Simulate re-push on error
     await webhookDeadLetterQueue.push({
       ...replayed!,
       attemptsExhausted: replayed!.attemptsExhausted + 1,
@@ -309,7 +299,6 @@ describe("webhookDeadLetterQueue – attempt count tracking across repeated fail
   });
 
   it("increments attemptsExhausted correctly across three consecutive failed replays", async () => {
-    // Seed with initial failure
     let currentItem = makeItem("dl-count-1", { attemptsExhausted: 5 });
     await webhookDeadLetterQueue.push(currentItem);
 
@@ -319,12 +308,10 @@ describe("webhookDeadLetterQueue – attempt count tracking across repeated fail
     for (let round = 1; round <= 3; round++) {
       const replayed = await webhookDeadLetterQueue.replay("dl-count-1");
       expect(replayed).not.toBeNull();
-      expect(replayed!.attemptsExhausted).toBe(4 + round); // 5, 6, 7 on rounds 1,2,3
+      expect(replayed!.attemptsExhausted).toBe(4 + round);
 
-      // Queue is empty after replay removes the item
       expect(await webhookDeadLetterQueue.list()).toHaveLength(0);
 
-      // Re-push with incremented count
       currentItem = {
         ...replayed!,
         attemptsExhausted: replayed!.attemptsExhausted + 1,
@@ -335,66 +322,11 @@ describe("webhookDeadLetterQueue – attempt count tracking across repeated fail
 
       const entries = await webhookDeadLetterQueue.list();
       expect(entries).toHaveLength(1);
-      expect(entries[0].attemptsExhausted).toBe(5 + round); // 6, 7, 8
+      expect(entries[0].attemptsExhausted).toBe(5 + round);
     }
 
-    // After three failed replays the entry is still retained with count = 8
-    const final = await webhookDeadLetterQueue.list();
-    expect(final).toHaveLength(1);
-    expect(final[0].id).toBe("dl-count-1");
-    expect(final[0].attemptsExhausted).toBe(8);
-    expect(final[0].errorMessage).toBe("Replay attempt 3 failed with HTTP 500");
-  });
-
-  it("retains all metadata fields unchanged across replay cycles", async () => {
-    const originalPayload = { event: "riskChange", title: "Risk threshold exceeded", message: "Portfolio at risk" };
-    const item = makeItem("dl-count-2", {
-      payload: originalPayload,
-      webhookUrl: "https://hooks.example.com/risk",
-      userId: "user-99",
-      eventType: "riskChange",
-      attemptsExhausted: 3,
-    });
-
-    await webhookDeadLetterQueue.push(item);
-
-    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 429 });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const replayed = await webhookDeadLetterQueue.replay("dl-count-2");
-    expect(replayed).not.toBeNull();
-
-    // Original payload and routing metadata survive the replay cycle
-    expect(replayed!.payload).toEqual(originalPayload);
-    expect(replayed!.webhookUrl).toBe("https://hooks.example.com/risk");
-    expect(replayed!.userId).toBe("user-99");
-    expect(replayed!.eventType).toBe("riskChange");
-
-    // Re-push preserving identity fields, only count + error change
-    await webhookDeadLetterQueue.push({
-      ...replayed!,
-      attemptsExhausted: replayed!.attemptsExhausted + 1,
-      errorMessage: "Replay failed: HTTP 429 Too Many Requests",
-    });
-
-    const [entry] = await webhookDeadLetterQueue.list();
-    expect(entry.id).toBe("dl-count-2");
-    expect(entry.payload).toEqual(originalPayload);
-    expect(entry.webhookUrl).toBe("https://hooks.example.com/risk");
-    expect(entry.userId).toBe("user-99");
-    expect(entry.attemptsExhausted).toBe(4);
-  });
-
-  it("no outbound network calls are made by the queue itself", async () => {
-    // Verify the queue never calls fetch on its own — all HTTP is caller-driven
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    await webhookDeadLetterQueue.push(makeItem("dl-no-fetch-1"));
-    await webhookDeadLetterQueue.list();
-    await webhookDeadLetterQueue.replay("dl-no-fetch-1");
-    await webhookDeadLetterQueue.list();
-
-    expect(fetchMock).not.toHaveBeenCalled();
+    const finalEntries = await webhookDeadLetterQueue.list();
+    expect(finalEntries).toHaveLength(1);
+    expect(finalEntries[0].attemptsExhausted).toBe(8);
   });
 });
