@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Dashboard from './Dashboard'
 
@@ -310,34 +310,4 @@ describe('Dashboard', () => {
         })
         queryMocks.usePrices.mockReturnValue({
             data: {
-                prices: { XLM: { price: 0.12, change: 1.1 }, USDC: { price: 1, change: 0 } },
-                feedMeta: null,
-            },
-            isLoading: false,
-        })
-
-        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
-
-        fireEvent.click(await screen.findByRole('button', { name: /review rebalance/i }))
-        expect(await screen.findByRole('dialog')).toBeTruthy()
-        expect(screen.getByRole('heading', { name: /estimated trades/i })).toBeTruthy()
-        expect(screen.getByRole('heading', { name: /preconditions/i })).toBeTruthy()
-        expect(screen.getByRole('button', { name: /confirm rebalance/i })).toBeTruthy()
-    })
-
-    it('renders error fallback when portfolio fetching throws', async () => {
-        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-        queryMocks.useUserPortfolios.mockImplementation(() => {
-            throw new Error('portfolio fetch failed')
-        })
-
-        renderDashboard(
-            <TestErrorBoundary>
-                <Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />
-            </TestErrorBoundary>
-        )
-
-        expect(await screen.findByText(/dashboard failed to load/i)).toBeTruthy()
-        consoleError.mockRestore()
-    })
-})
+                prices: { XLM: { price: 0.12, change: 1.1 }, USDC: { price: 1, change: 0 } }

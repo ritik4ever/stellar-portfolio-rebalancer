@@ -8,6 +8,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { DeadLetterItem } from '../services/webhookDeadLetter.js'
+import { queryDeadLetterItems, postDeadLetterPayload } from '../services/webhookDeadLetter.js'
 
 vi.mock('../utils/logger.js', () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -40,9 +41,7 @@ describe('dead-letter listing (#1393)', () => {
     })
 
     describe('payload and failure reason', () => {
-        it('keeps the failure reason and original payload on every entry', async () => {
-            const { queryDeadLetterItems } = await import('../services/webhookDeadLetter.js')
-
+        it('keeps the failure reason and original payload on every entry', () => {
             const listing = queryDeadLetterItems([item()])
 
             expect(listing.items[0].errorMessage).toBe('Webhook responded with status 500')
@@ -58,39 +57,29 @@ describe('dead-letter listing (#1393)', () => {
             item({ id: 'c', userId: 'GUSER2', eventType: 'riskChange', webhookUrl: 'https://other.example.com/z' }),
         ]
 
-        it('filters by user', async () => {
-            const { queryDeadLetterItems } = await import('../services/webhookDeadLetter.js')
-
+        it('filters by user', () => {
             const listing = queryDeadLetterItems(all, { userId: 'GUSER2' })
 
             expect(listing.items.map(i => i.id)).toEqual(['b', 'c'])
             expect(listing.pagination.total).toBe(2)
         })
 
-        it('filters by event type', async () => {
-            const { queryDeadLetterItems } = await import('../services/webhookDeadLetter.js')
-
+        it('filters by event type', () => {
             expect(queryDeadLetterItems(all, { eventType: 'riskChange' }).items.map(i => i.id)).toEqual(['c'])
         })
 
-        it('searches across id, user, url and error message', async () => {
-            const { queryDeadLetterItems } = await import('../services/webhookDeadLetter.js')
-
+        it('searches across id, user, url and error message', () => {
             expect(queryDeadLetterItems(all, { search: 'other.example' }).items.map(i => i.id)).toEqual(['c'])
             expect(queryDeadLetterItems(all, { search: 'status 500' }).items).toHaveLength(3)
         })
 
-        it('combines filters', async () => {
-            const { queryDeadLetterItems } = await import('../services/webhookDeadLetter.js')
-
+        it('combines filters', () => {
             const listing = queryDeadLetterItems(all, { userId: 'GUSER2', eventType: 'rebalance' })
 
             expect(listing.items.map(i => i.id)).toEqual(['b'])
         })
 
-        it('returns an empty listing when nothing matches', async () => {
-            const { queryDeadLetterItems } = await import('../services/webhookDeadLetter.js')
-
+        it('returns an empty listing when nothing matches', () => {
             const listing = queryDeadLetterItems(all, { userId: 'nobody' })
 
             expect(listing.items).toEqual([])
@@ -100,9 +89,7 @@ describe('dead-letter listing (#1393)', () => {
     })
 
     describe('summary', () => {
-        it('counts entries per event type and reports the time span', async () => {
-            const { queryDeadLetterItems } = await import('../services/webhookDeadLetter.js')
-
+        it('counts entries per event type and reports the time span', () => {
             const listing = queryDeadLetterItems([
                 item({ id: 'a', eventType: 'rebalance', timestamp: '2026-08-01T00:00:00Z' }),
                 item({ id: 'b', eventType: 'rebalance', timestamp: '2026-08-03T00:00:00Z' }),
@@ -119,18 +106,14 @@ describe('dead-letter listing (#1393)', () => {
     describe('pagination', () => {
         const many = Array.from({ length: 120 }, (_, i) => item({ id: `dl-${i}` }))
 
-        it('applies a default page size', async () => {
-            const { queryDeadLetterItems } = await import('../services/webhookDeadLetter.js')
-
+        it('applies a default page size', () => {
             const listing = queryDeadLetterItems(many)
 
             expect(listing.items).toHaveLength(50)
             expect(listing.pagination).toMatchObject({ page: 1, pageSize: 50, total: 120, totalPages: 3, hasMore: true })
         })
 
-        it('pages without overlap or gaps', async () => {
-            const { queryDeadLetterItems } = await import('../services/webhookDeadLetter.js')
-
+        it('pages without overlap or gaps', () => {
             const first = queryDeadLetterItems(many, { page: 1, pageSize: 40 })
             const second = queryDeadLetterItems(many, { page: 2, pageSize: 40 })
             const third = queryDeadLetterItems(many, { page: 3, pageSize: 40 })
@@ -140,9 +123,7 @@ describe('dead-letter listing (#1393)', () => {
             expect(third.pagination.hasMore).toBe(false)
         })
 
-        it('clamps out-of-range and oversized inputs', async () => {
-            const { queryDeadLetterItems } = await import('../services/webhookDeadLetter.js')
-
+        it('clamps out-of-range and oversized inputs', () => {
             expect(queryDeadLetterItems(many, { page: 999, pageSize: 40 }).pagination.page).toBe(3)
             expect(queryDeadLetterItems(many, { pageSize: 100000 }).pagination.pageSize).toBe(500)
             expect(queryDeadLetterItems(many, { pageSize: 0 }).pagination.pageSize).toBe(1)
@@ -151,7 +132,6 @@ describe('dead-letter listing (#1393)', () => {
 
     describe('shared replay POST', () => {
         it('posts the original payload to the webhook url', async () => {
-            const { postDeadLetterPayload } = await import('../services/webhookDeadLetter.js')
             const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 })
             vi.stubGlobal('fetch', fetchMock)
 
@@ -168,7 +148,6 @@ describe('dead-letter listing (#1393)', () => {
         })
 
         it('throws on a non-2xx response so the caller can re-queue', async () => {
-            const { postDeadLetterPayload } = await import('../services/webhookDeadLetter.js')
             vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 502 }))
 
             await expect(postDeadLetterPayload(item(), 1000)).rejects.toThrow('502')

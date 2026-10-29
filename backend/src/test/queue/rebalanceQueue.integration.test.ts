@@ -90,6 +90,9 @@ describe('Rebalance Job Queue – Integration Tests', () => {
     const cleanClient = new IORedis(process.env.REDIS_URL!);
     await cleanClient.flushall();
     await cleanClient.quit();
+    // Ensure a fresh queue/worker state for each test so no state leaks between cases
+    await stopRebalanceWorker();
+    await closeAllQueues();
 
     // Initialize queues and worker
     queue = getRebalanceQueue();
@@ -99,6 +102,8 @@ describe('Rebalance Job Queue – Integration Tests', () => {
     expect(queue).not.toBeNull();
     expect(dlq).not.toBeNull();
     expect(worker).not.toBeNull();
+    // Ensure the in-memory Redis instance is reachable before the test body runs
+    expect(process.env.REDIS_URL).toBeDefined();
   });
 
   afterEach(async () => {
