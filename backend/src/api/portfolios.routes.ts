@@ -1271,9 +1271,16 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
 })
 
 portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
-    try {
-        const portfolioId = req.params.id as string;
+        return fail(
+            res,
+            500,
+            'INTERNAL_ERROR',
+            'Rebalance execution failed',
+        );
+    }
+});
 
+    try {
         console.log(`[INFO] Attempting manual rebalance for portfolio: ${portfolioId}`);
 
         // Try to acquire lock
@@ -1301,15 +1308,101 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                 return fail(res, 400, 'BAD_REQUEST', riskCheck.reason ?? 'Rebalance blocked by risk checks', { alerts: riskCheck.alerts });
             }
 
+            // Record pending event BEFORE execution so interrupted rebalances have an audit record.
+            const pendingEvent = await rebalanceHistoryService.recordRebalanceEvent({
+                portfolioId,
+                trigger: 'Manual Rebalancing',
+                trades: 0,
+                gasUsed: '0 XLM',
+                status: 'pending',
+                isAutomatic: false,
+            });
+            pendingHistoryId = pendingEvent?.id;
+
+            const capturedVersion = portfolio.version;
             const result = await stellarService.executeRebalance(portfolioId, mapRebalanceOptions(req.body));
 
             logger.info('Rebalance executed', { portfolioId, status: result.status, explanation: result.explanation });
 
+            logger.info('Rebalance executed', {
+                portfolioId,
+                status: result.status,
+                explanation: result.explanation,
+            });
+
             const isFailed = result.status === 'failed';
             markRebalanceInactive(portfolioId, { status: isFailed ? 'failed' : 'completed' });
             const errorReason = isFailed
-                ? (result.failureReason || result.explanation?.failureReason || result.error || 'Rebalance execution failed')
+                ? (
+                    result.failureReason ||
+                    result.explanation?.failureReason ||
+                    result.error ||
+                    'Rebalance execution failed'
+                )
                 : undefined;
+
+            if (isFailed) {
+                await rebalanceHistoryService.recordRebalanceEvent({
+                    portfolioId,
+                    trigger: 'Manual Rebalancing',
+                    trades: result.trades ?? 0,
+                    gasUsed: result.gasUsed ?? '0 XLM',
+                    feePaid: result.feePaid
+                        ?? result.feeEstimate?.totalFeeXlm
+                        ?? result.gasFeeXlm,
+                    slippageBps: result.slippageBps
+                        ?? result.actualSlippageBps
+                        ?? result.estimatedTotalSlippageBps,
+                    status: 'failed',
+                    isAutomatic: false,
+                    error: errorReason,
+                    details: {
+                        actor: 'user',
+                        source: 'api',
+                        explanation: result.explanation,
+                        failureReason: errorReason,
+                    },
+                });
+
+                return fail(
+                    res,
+                    422,
+                    'REBALANCE_FAILED',
+                    errorReason,
+                    { result },
+                );
+            }
+
+            // Persist the successful rebalance using optimistic concurrency control.
+            try {
+                const persisted = await portfolioStorage.updatePortfolio(
+                    portfolioId,
+                    {
+                        lastRebalance: new Date().toISOString(),
+                        balances: result.newBalances ?? portfolio.balances,
+                        totalValue: result.newTotalValue ?? portfolio.totalValue,
+                    },
+                    capturedVersion,
+                );
+
+                if (!persisted) {
+                    logger.warn(
+                        'Portfolio state persistence returned false after successful rebalance',
+                        { portfolioId, capturedVersion },
+                    );
+                }
+            } catch (persistErr) {
+                // The trade has already executed; report persistence failures explicitly.
+                logger.error(
+                    'Portfolio state persistence failed after successful rebalance',
+                    {
+                        portfolioId,
+                        error: getErrorMessage(persistErr),
+                        conflictError: persistErr instanceof ConflictError,
+                    },
+                );
+            }
+
 
             await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
@@ -1318,7 +1411,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                 gasUsed: result.gasUsed ?? '0 XLM',
                 feePaid: result.feePaid ?? result.feeEstimate?.totalFeeXlm ?? result.gasFeeXlm,
                 slippageBps: result.slippageBps ?? result.actualSlippageBps ?? result.estimatedTotalSlippageBps,
-                status: isFailed ? 'failed' : 'completed',
+status: 'completed',
                 isAutomatic: false,
                 error: errorReason,
                 persistenceContext: {
@@ -1435,9 +1528,33 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
         if (error instanceof ConflictError) {
             return fail(res, 409, 'CONFLICT', 'Rebalance already in progress for this portfolio');
         }
-        logger.error('[ERROR] Manual rebalance failed', { error: getErrorObject(error) });
-        return fail(res, 500, 'INTERNAL_ERROR', 'Rebalance execution failed');
-    }
+ try {
+            await rebalanceHistoryService.recordRebalanceEvent({
+                portfolioId,
+                trigger: 'Manual Rebalancing',
+                trades: 0,
+                gasUsed: '0 XLM',
+                status: 'failed',
+                isAutomatic: false,
+                error: getErrorMessage(error),
+            });
+        } catch (histErr) {
+            logger.error('[ERROR] Failed to persist failure history event', {
+                portfolioId,
+                error: getErrorObject(histErr),
+            });
+        }
+
+        logger.error('[ERROR] Manual rebalance failed', {
+            error: getErrorObject(error),
+        });
+
+        return fail(
+            res,
+            500,
+            'INTERNAL_ERROR',
+            'Rebalance execution failed',
+        );
 
 });
 

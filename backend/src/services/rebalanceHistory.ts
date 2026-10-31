@@ -16,6 +16,7 @@ import type { RebalanceCostSummary, RebalanceHistoryQueryOptions } from '../db/r
 import { getFeatureFlags } from '../config/featureFlags.js'
 import type { PricesMap } from '../types/index.js'
 import { logger } from '../utils/logger.js'
+<<<<<<< HEAD
 import {
     bucketPortfolioId,
     recordPortfolioPersistenceOutcome,
@@ -31,6 +32,9 @@ function getSafeDatabaseErrorCode(error: unknown): string {
     const code = error.code
     return typeof code === 'string' && /^[A-Z0-9]{5}$/.test(code) ? code : 'unknown'
 }
+=======
+import { randomUUID } from 'node:crypto'
+>>>>>>> 8ea814a (update made)
 
 export interface RebalanceEvent {
     id: string
@@ -78,6 +82,18 @@ export interface RebalanceEvent {
         gasBreakdown?: Array<{ tradeId: string, fromAsset?: string, toAsset?: string, feeXlm: number }>
         feePaid?: number
         slippageBps?: number
+        stateTransition?: 'committed' | 'unknown'
+        eventSource?: 'offchain' | 'simulated' | 'onchain'
+        actor?: 'user' | 'system' | 'admin' | 'scheduler'
+        source?: 'dashboard' | 'api' | 'contract' | 'scheduler' | 'auto_rebalance'
+        triggerMetadata?: Record<string, unknown>
+        onChainConfirmed?: boolean
+        onChainEventType?: string
+        onChainTxHash?: string
+        onChainLedger?: number
+        onChainContractId?: string
+        onChainPagingToken?: string
+        isSimulated?: boolean
     }
 }
 
@@ -131,11 +147,16 @@ export class RebalanceHistoryService {
         gasPerTradeXlm?: number
         gasWarning?: boolean
         gasBreakdown?: Array<{ tradeId: string, fromAsset?: string, toAsset?: string, feeXlm: number }>
+<<<<<<< HEAD
         persistenceContext?: {
             source: PortfolioPersistenceSource
             retryAvailable?: boolean
             stateTransition?: PortfolioPersistenceTransition
         }
+=======
+        /** Additional details to merge into the event details object. */
+        details?: Partial<RebalanceEvent['details']>
+>>>>>>> 8ea814a (update made)
     }): Promise<RebalanceEvent> {
         const featureFlags = getFeatureFlags()
         const eventSource: RebalanceEvent['eventSource'] = eventData.eventSource
@@ -158,8 +179,13 @@ export class RebalanceHistoryService {
             gasPerTradeXlm: eventData.gasPerTradeXlm,
             gasWarning: eventData.gasWarning,
             gasBreakdown: eventData.gasBreakdown,
+<<<<<<< HEAD
             ...(eventData.details ?? {}),
         } as RebalanceEvent['details']
+=======
+            ...eventData.details
+        }
+>>>>>>> 8ea814a (update made)
         const feePaid = this.deriveFeePaid(eventData, details)
         const slippageBps = this.deriveSlippageBps(eventData)
 
@@ -183,12 +209,43 @@ export class RebalanceHistoryService {
         const actor = eventData.actor ?? (eventData.isAutomatic ? 'system' : 'user')
         const source = eventData.source ?? (eventData.isAutomatic ? 'auto_rebalance' : 'dashboard')
 
+<<<<<<< HEAD
         const persistedDetails = {
             ...(details as Record<string, unknown>),
             feePaid,
             slippageBps,
             ...(eventData.details ?? {}),
         } as Record<string, unknown>
+=======
+        // Add extra fields to details for storage in JSONB column
+        details.eventSource = eventSource
+        details.actor = actor
+        details.source = source
+        details.triggerMetadata = eventData.triggerMetadata
+        details.onChainConfirmed = eventData.onChainConfirmed
+        details.onChainEventType = eventData.onChainEventType
+        details.onChainTxHash = eventData.onChainTxHash
+        details.onChainLedger = eventData.onChainLedger
+        details.onChainContractId = eventData.onChainContractId
+        details.onChainPagingToken = eventData.onChainPagingToken
+        details.isSimulated = eventData.isSimulated
+
+        // Record event in database
+        const inserted = await dbInsertRebalanceEvent({
+            id: randomUUID(),
+            portfolioId: eventData.portfolioId,
+            trigger: eventData.trigger,
+            trades: eventData.trades,
+            gasUsed: eventData.gasUsed,
+            feePaid,
+            slippageBps,
+            status: eventData.status,
+            isAutomatic: eventData.isAutomatic ?? false,
+            riskAlerts: eventData.riskAlerts ?? [],
+            error: eventData.error,
+            details,
+        })
+>>>>>>> 8ea814a (update made)
 
         const insertedTimestamp =
             eventData.timestamp instanceof Date
