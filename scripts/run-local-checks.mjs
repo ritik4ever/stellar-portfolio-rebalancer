@@ -8,6 +8,7 @@ const CHECKS = {
   'pre-commit': [
     { cwd: '.', script: 'validate:env-examples', label: 'Environment examples and docs validation' },
     { cwd: '.', script: 'validate:compose-resources', label: 'Compose resource limits mirror' },
+    { cwd: '.', script: 'validate:docker-startup', label: 'Docker startup smoke verification', optional: true },
     { cwd: '.', script: 'validate:funding', label: 'FUNDING.json validation' },
     { cwd: '.', script: 'validate:release-verification', label: 'Release verification inputs and provenance validation', optional: true },
     { cwd: '.', script: 'validate:env-ref', label: 'Environment reference verification and recovery validation', optional: true },
@@ -19,6 +20,7 @@ const CHECKS = {
   'pre-push': [
     { cwd: '.', script: 'validate:env-examples', label: 'Environment examples and docs validation' },
     { cwd: '.', script: 'validate:compose-resources', label: 'Compose resource limits mirror' },
+    { cwd: '.', script: 'validate:docker-startup', label: 'Docker startup smoke verification', optional: true },
     { cwd: '.', script: 'validate:funding', label: 'FUNDING.json validation' },
     { cwd: '.', script: 'validate:release-verification', label: 'Release verification inputs and provenance validation', optional: true },
     { cwd: '.', script: 'validate:env-ref', label: 'Environment reference verification and recovery validation', optional: true },

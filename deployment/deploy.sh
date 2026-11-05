@@ -4,6 +4,7 @@ set -euo pipefail
 
 PRODUCTION_DEPLOY=false
 DRY_RUN=false
+STARTUP_SMOKE=false
 HEALTH_URL="${DEPLOY_HEALTH_URL:-${HEALTH_CHECK_URL:-http://localhost:3001/ready}}"
 HEALTH_TIMEOUT="${DEPLOY_HEALTH_TIMEOUT:-10}"
 HEALTH_RETRIES="${DEPLOY_HEALTH_RETRIES:-5}"
@@ -37,11 +38,12 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 usage() {
-    echo "Usage: $0 [--production] [--dry-run] [--health-url URL] [--health-timeout SECONDS] [--health-retries N] [--health-interval SECONDS] [--rollback-window SECONDS] [--rollback-command CMD] [--alert-command CMD]"
+    echo "Usage: $0 [--production] [--dry-run] [--startup-smoke] [--health-url URL] [--health-timeout SECONDS] [--health-retries N] [--health-interval SECONDS] [--rollback-window SECONDS] [--rollback-command CMD] [--alert-command CMD]"
     echo ""
     echo "Examples:"
     echo "  $0 --production --health-url http://localhost:3001/health"
     echo "  $0 --production --dry-run --health-url http://localhost:3001/health"
+    echo "  $0 --startup-smoke"
 }
 
 print_status() {
@@ -212,6 +214,9 @@ parse_args() {
                 ;;
             --dry-run)
                 DRY_RUN=true
+                ;;
+            --startup-smoke)
+                STARTUP_SMOKE=true
                 ;;
             --health-url)
                 [ "$#" -ge 2 ] || { print_error "Missing value for --health-url"; exit 1; }
@@ -388,6 +393,13 @@ main() {
 
     echo "🌟 Stellar Portfolio Rebalancer Deployment Script"
     echo "================================================"
+
+    if [ "${STARTUP_SMOKE}" = "true" ]; then
+        local script_dir
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        node "${script_dir}/docker-startup-smoke.mjs"
+        return 0
+    fi
 
     if [ "${DRY_RUN}" = "true" ]; then
         print_status "Dry-run mode enabled; no live deployment or rollback will execute."

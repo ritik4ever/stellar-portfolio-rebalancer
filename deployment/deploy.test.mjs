@@ -5,6 +5,42 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import {
+  runDockerStartupSmokeCheck,
+  simulateApiBeforeDatabaseSmokeCheck,
+  simulateServiceStartupOrder,
+  verifyComposeStartupContract,
+} from './docker-startup-smoke.mjs';
+
+function resolveBashExecutable() {
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          'C:\\Program Files\\Git\\bin\\bash.exe',
+          'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+          'bash',
+        ]
+      : ['bash'];
+
+  for (const candidate of candidates) {
+    if (candidate === 'bash' || existsSync(candidate)) {
+      const check = spawnSync(candidate, ['--version'], { encoding: 'utf8' });
+      if (check.status === 0) {
+        return candidate;
+      }
+    }
+  }
+  return 'bash';
+}
+
+const BASH_BIN = resolveBashExecutable();
+
+function createLfScriptCopy(scriptPath, tempDir) {
+  const raw = readFileSync(scriptPath, 'utf8').replace(/\r\n/g, '\n');
+  const target = path.join(tempDir, path.basename(scriptPath));
+  writeFileSync(target, raw, 'utf8');
+  return target;
+}
 
 function resolveBashBinary() {
   const candidates =
@@ -102,7 +138,7 @@ function runHealthCheck(mode) {
         CURL_MODE: mode,
       },
       encoding: 'utf8',
-    }
+    },
   );
 
   rmSync(stateDir, { recursive: true, force: true });
