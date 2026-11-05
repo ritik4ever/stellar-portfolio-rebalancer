@@ -111,4 +111,34 @@ describe('sanitizeErrorDetails', () => {
         expect(sanitizeErrorDetails(null)).toBeNull()
         expect(sanitizeErrorDetails(undefined)).toBeUndefined()
     })
+
+    it('keeps a sanitized upstream cause chain for diagnosis without stacks or credentials', () => {
+        const upstream = new Error('database request failed: password=hunter2')
+        upstream.stack = 'Error: database request failed\n    at /srv/app/database.ts:10:2'
+        const error = new Error('portfolio lookup failed', { cause: upstream })
+
+        const sanitized = sanitizeErrorDetails(error)
+        const serialized = JSON.stringify(sanitized)
+
+        expect(sanitized).toEqual({
+            name: 'Error',
+            message: 'portfolio lookup failed',
+            cause: {
+                name: 'Error',
+                message: 'database request failed: password=[REDACTED]',
+            },
+        })
+        expect(serialized).not.toContain('hunter2')
+        expect(serialized).not.toContain('/srv/app')
+    })
+
+    it('bounds circular detail payloads instead of recursing indefinitely', () => {
+        const details: Record<string, unknown> = { context: 'upstream response' }
+        details.self = details
+
+        expect(sanitizeErrorDetails(details)).toEqual({
+            context: 'upstream response',
+            self: '[Circular]',
+        })
+    })
 })
