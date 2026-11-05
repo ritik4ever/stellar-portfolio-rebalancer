@@ -1318,6 +1318,20 @@
                         },
                         "total": {
                           "type": "integer"
+                        },
+                        "itemsChanged": {
+                          "type": "boolean",
+                          "description": "Whether the matching item count changed since the supplied cursor was issued."
+                        },
+                        "changeKind": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "items_inserted",
+                            "items_deleted",
+                            "count_drift"
+                          ],
+                          "description": "Detected change in the matching item count during traversal."
                         }
                       }
                     },
