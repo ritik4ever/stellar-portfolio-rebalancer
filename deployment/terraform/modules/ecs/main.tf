@@ -301,6 +301,13 @@ resource "aws_appautoscaling_target" "ecs_target" {
   resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.main.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
+
+  lifecycle {
+    precondition {
+      condition     = var.ecs_min_capacity <= var.ecs_max_capacity
+      error_message = "ecs_min_capacity must not exceed ecs_max_capacity; otherwise the rollout cannot establish a valid scaling range."
+    }
+  }
 }
 
 resource "aws_appautoscaling_policy" "scale_out" {

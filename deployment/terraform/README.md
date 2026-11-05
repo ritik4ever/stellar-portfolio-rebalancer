@@ -36,6 +36,20 @@ terraform apply -var-file=production.tfvars
 
 ## Deployment
 
+Before planning or applying either workspace, validate the configuration from
+the initialized working directory. Terraform variable validation rejects
+malformed network, naming, capacity, availability-zone, and blue/green
+rollback settings during planning, before resources are applied:
+
+```bash
+terraform validate
+terraform plan -var-file=<workspace>.tfvars
+```
+
+The deployment workflow runs `terraform validate` before each plan. Keep the
+plan review step intact; `terraform apply` should only receive a reviewed plan
+from the same workspace and variable file.
+
 ### Staging
 
 Staging deploys automatically on push to the `staging` branch via GitHub Actions.
