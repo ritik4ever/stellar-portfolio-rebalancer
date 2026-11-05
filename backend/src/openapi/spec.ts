@@ -858,7 +858,7 @@ const spec: Record<string, any> = {
             post: {
                 tags: ['Portfolio'],
                 summary: 'Execute rebalance',
-                description: 'Run rebalance for a portfolio. May return 409 if rebalance already in progress.',
+                description: 'Run rebalance for a portfolio. May return 409 if rebalance already in progress. If execution completes but history persistence fails, the response still reports the result with historyPersisted set to false so clients do not retry and duplicate trades.',
                 parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
                 requestBody: {
                     content: {
@@ -892,6 +892,10 @@ const spec: Record<string, any> = {
                                             type: 'object',
                                             properties: {
                                                 result: { $ref: '#/components/schemas/RebalanceResult' },
+                                                historyPersisted: {
+                                                    type: 'boolean',
+                                                    description: 'Whether the rebalance history event was saved. A false value does not make the completed execution safe to retry.',
+                                                },
                                             },
                                         },
                                         error: { type: 'object', nullable: true },

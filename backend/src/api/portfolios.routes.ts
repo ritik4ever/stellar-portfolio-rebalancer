@@ -1311,27 +1311,38 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                 ? (result.failureReason || result.explanation?.failureReason || result.error || 'Rebalance execution failed')
                 : undefined;
 
-            await rebalanceHistoryService.recordRebalanceEvent({
-                portfolioId,
-                trigger: 'Manual Rebalancing',
-                trades: result.trades ?? 0,
-                gasUsed: result.gasUsed ?? '0 XLM',
-                feePaid: result.feePaid ?? result.feeEstimate?.totalFeeXlm ?? result.gasFeeXlm,
-                slippageBps: result.slippageBps ?? result.actualSlippageBps ?? result.estimatedTotalSlippageBps,
-                status: isFailed ? 'failed' : 'completed',
-                isAutomatic: false,
-                error: errorReason,
-                persistenceContext: {
-                    source: 'api',
+            let historyPersisted = true;
+            try {
+                await rebalanceHistoryService.recordRebalanceEvent({
+                    portfolioId,
+                    trigger: 'Manual Rebalancing',
+                    trades: result.trades ?? 0,
+                    gasUsed: result.gasUsed ?? '0 XLM',
+                    feePaid: result.feePaid ?? result.feeEstimate?.totalFeeXlm ?? result.gasFeeXlm,
+                    slippageBps: result.slippageBps ?? result.actualSlippageBps ?? result.estimatedTotalSlippageBps,
+                    status: isFailed ? 'failed' : 'completed',
+                    isAutomatic: false,
+                    error: errorReason,
+                    persistenceContext: {
+                        source: 'api',
+                        retryAvailable: false,
+                        stateTransition: isFailed ? 'unknown' : 'committed',
+                    },
+                    details: {
+                        actor: 'user',
+                        source: 'api',
+                        explanation: result.explanation,
+                        ...(isFailed && errorReason ? { failureReason: errorReason } : {}),
+                    },
+                });
+            } catch (historyError) {
+                historyPersisted = false;
+                logger.error('[REBALANCE] Execution returned but history persistence failed; stopping to prevent duplicate trades', {
                     stateTransition: isFailed ? 'unknown' : 'committed',
-                },
-                details: {
-                    actor: 'user',
-                    source: 'api',
-                    explanation: result.explanation,
-                    ...(isFailed && errorReason ? { failureReason: errorReason } : {}),
-                },
-            });
+                    retryable: false,
+                    errorType: historyError instanceof Error ? historyError.name : 'NonError',
+                });
+            }
 
             const deliveryId = `manual-rebalance-${portfolioId}-${Date.now()}`;
             try {
@@ -1342,7 +1353,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                     title: isFailed ? 'Manual Portfolio Rebalance Failed' : 'Manual Portfolio Rebalance Completed',
                     message: isFailed
                         ? `Manual rebalance failed: ${errorReason}`
-                        : `Your portfolio rebalance completed. ${result.trades ?? 0} trades executed with ${result.gasUsed ?? '0 XLM'} gas used.`,
+                        : `Your portfolio rebalance completed. ${result.trades ?? 0} trades executed with ${result.gasUsed ?? '0 XLM'} gas used.${historyPersisted ? '' : ' The rebalance history could not be saved and will not be retried to avoid duplicate trades.'}`,
                     deliveryId,
                     data: {
                         portfolioId,
@@ -1350,6 +1361,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                         gasUsed: result.gasUsed,
                         trigger: 'manual',
                         status: isFailed ? 'failed' : 'completed',
+                        historyPersisted,
                         ...(isFailed && errorReason ? { failureReason: errorReason } : {}),
                     },
                     timestamp: new Date().toISOString(),
@@ -1361,7 +1373,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                 });
             }
 
-            return ok(res, { result });
+            return ok(res, { result, historyPersisted });
         } catch (innerError) {
             markRebalanceInactive(portfolioId, { status: 'failed' });
             // Preserve state consistency during interrupted or failed rebalances:

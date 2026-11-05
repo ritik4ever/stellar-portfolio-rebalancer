@@ -97,24 +97,35 @@ export async function processRebalanceJob(
       const rebalanceResult =
         await stellarService.executeRebalance(portfolioId);
 
-      await rebalanceHistoryService.recordRebalanceEvent({
-        portfolioId,
-        trigger:
-          triggeredBy === "auto"
-            ? "Automatic Rebalancing"
-            : "Manual Rebalancing",
-        trades: rebalanceResult.trades ?? 0,
-        gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
-        feePaid: rebalanceResult.feePaid ?? rebalanceResult.feeEstimate?.totalFeeXlm ?? rebalanceResult.gasFeeXlm,
-        slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
-        status: "completed",
-        isAutomatic: triggeredBy === "auto",
-        persistenceContext: {
-          source: "worker",
-          retryAvailable,
+      let historyPersisted = true;
+      try {
+        await rebalanceHistoryService.recordRebalanceEvent({
+          portfolioId,
+          trigger:
+            triggeredBy === "auto"
+              ? "Automatic Rebalancing"
+              : "Manual Rebalancing",
+          trades: rebalanceResult.trades ?? 0,
+          gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+          feePaid: rebalanceResult.feePaid ?? rebalanceResult.feeEstimate?.totalFeeXlm ?? rebalanceResult.gasFeeXlm,
+          slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
+          status: "completed",
+          isAutomatic: triggeredBy === "auto",
+          persistenceContext: {
+            source: "worker",
+            retryAvailable: false,
+            stateTransition: "committed",
+          },
+        });
+      } catch (historyError) {
+        historyPersisted = false;
+        logger.error("[WORKER:rebalance] Rebalance committed but history persistence failed; stopping to prevent duplicate trades", {
+          jobId: job.id,
           stateTransition: "committed",
-        },
-      });
+          retryable: false,
+          errorType: historyError instanceof Error ? historyError.name : "NonError",
+        });
+      }
 
       try {
         await notificationService.notify({
@@ -122,7 +133,7 @@ export async function processRebalanceJob(
           portfolioId,
           eventType: "rebalance",
           title: "Portfolio Rebalanced",
-          message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades ?? 0} trades executed with ${rebalanceResult.gasUsed ?? "0 XLM"} gas used.`,
+          message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades ?? 0} trades executed with ${rebalanceResult.gasUsed ?? "0 XLM"} gas used.${historyPersisted ? "" : " The rebalance history could not be saved and will not be retried to avoid duplicate trades."}`,
           deliveryId: `rebalance-job-${job.id}`,
           data: {
             portfolioId,
@@ -131,6 +142,7 @@ export async function processRebalanceJob(
             trigger: triggeredBy,
             status: "completed",
             jobId: job.id,
+            historyPersisted,
           },
           timestamp: new Date().toISOString(),
         });
@@ -146,10 +158,12 @@ export async function processRebalanceJob(
       logger.info("[WORKER:rebalance] Rebalance completed", {
         portfolioId,
         trades: rebalanceResult.trades,
+        historyPersisted,
       });
       broadcastJobCompletion(job.id || "unknown", portfolioId, triggeredBy, {
         trades: rebalanceResult.trades ?? 0,
         gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+        historyPersisted,
         timestamp: new Date().toISOString(),
       });
       if (triggeredBy === "auto") {
@@ -158,6 +172,7 @@ export async function processRebalanceJob(
           jobId: job.id,
           trades: rebalanceResult.trades ?? 0,
           status: "completed",
+          historyPersisted,
         });
       }
     } catch (err) {

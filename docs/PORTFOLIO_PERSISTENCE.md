@@ -79,17 +79,22 @@ prefix may change the name). Its bounded labels are:
 | Label | Values | Meaning |
 |-------|--------|---------|
 | `source` | `api`, `worker`, `other` | Persistence caller |
-| `outcome` | `success`, `delayed`, `blocked` | Write succeeded, will be retried, or cannot be retried |
+| `outcome` | `success`, `delayed`, `blocked` | Write succeeded, can be safely retried, or must stop |
 | `event_status` | `completed`, `failed`, `pending` | Rebalance event status being persisted |
 | `state_transition` | `committed`, `not_committed`, `unknown` | Whether the portfolio transition is known to have committed |
 
 Structured logs use the same dimensions and include the write operation,
 duration, a bounded portfolio bucket, and a safe database error code when
 available. They do not include the raw portfolio ID or database error message.
-Worker write failures are `delayed` only when another BullMQ attempt is
-configured; exhausted worker attempts and synchronous API write failures are
-`blocked`. A persistence failure still propagates to the caller, and the
-counter/log signal does not change retry or state-transition behavior.
+Writes attempted after `executeRebalance` returns are never retried by
+re-running the rebalance. If history persistence fails, the worker completes
+the job and reports `historyPersisted: false` in its completion notification;
+the manual API also returns the execution result with `historyPersisted: false`.
+Both paths log a bounded diagnostic and record the committed (or unknown)
+transition as `blocked`. This explicit stop avoids replaying trades that may
+already have been submitted. Retryable failures before execution commits retain
+the queue's bounded retry policy and are reported as `delayed` while attempts
+remain.
 
 ---
 
