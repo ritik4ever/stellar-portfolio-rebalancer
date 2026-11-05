@@ -392,6 +392,7 @@ This project uses a **versioned migration framework** for PostgreSQL. Schema cha
 | Roll back last migration | `cd backend && npm run db:migrate -- --rollback` |
 | Roll back last N migrations | `cd backend && npm run db:migrate -- --rollback 2` |
 | Show status | `cd backend && npm run db:migrate -- --status` |
+| Verify migrations from scratch (smoke check) | `cd backend && MIGRATION_VERIFY_DATABASE_URL=postgresql://user:pass@localhost:5432/postgres npm run db:migrate:verify` |
 
 Requires `DATABASE_URL` in the environment (e.g. in `.env` or CI).
 
@@ -456,11 +457,12 @@ Each migration has a **down** file (e.g. `001_initial_schema.down.sql`) that rev
 
 ## Version history and CI
 
-- **Version history** is stored in the `schema_migrations` table (`version`, `name`, `applied_at`).
+- **Version history** is stored in the `schema_migrations` table (`version`, `name`, `applied_at`). A migration is identified by the pair `(version, name)`, so several migrations may share a version (today `009`, `011` and `013` do).
 - **Migrations live in the repo** under `backend/src/db/migrations/` with naming:
   - `NNN_description.up.sql` – forward migration
   - `NNN_description.down.sql` – rollback for that version
-- **Deterministic order:** Migrations run in ascending order of `NNN`. The same list of files produces the same order in every environment.
+- **Deterministic order:** Migrations run in ascending order of `NNN`, and migrations that share an `NNN` run in alphabetical order of their name. The same list of files produces the same order in every environment.
+- **Atomic migrations:** Each migration (and each rollback) runs in a single transaction together with its `schema_migrations` row. A migration that fails or is interrupted leaves no partial schema and no version row, so it is safe to fix the SQL and re-run.
 - **CI:** The backend workflow can run `npm run db:migrate -- --dry-run` to verify migration files and that the runner works. For full reproducibility, run real migrations in CI against a Postgres service container and then run tests (see workflow example below).
 
 ---
@@ -470,6 +472,44 @@ Each migration has a **down** file (e.g. `001_initial_schema.down.sql`) that rev
 1. Add two files in `backend/src/db/migrations/`:
    - `003_short_description.up.sql` – forward SQL
    - `003_short_description.down.sql` – rollback SQL
-2. Use the next sequential number; do not renumber existing migrations.
+2. Use the next sequential number; do not renumber existing migrations. Because applied migrations are recorded by `(version, name)`, renumbering would make the runner treat them as new.
 3. Document rollback behavior in this file if it’s non-obvious.
 4. Run `npm run db:migrate -- --dry-run` to confirm, then apply with `npm run db:migrate`.
+
+---
+
+## Verifying migrations
+
+`npm run db:migrate:verify` is a repeatable smoke check that a maintainer can run from a clean environment to confirm the **schema version** and the **rollback boundary**. It needs only a PostgreSQL server where the role may create databases:
+
+```bash
+cd backend
+npm ci
+MIGRATION_VERIFY_DATABASE_URL=postgresql://user:pass@localhost:5432/postgres npm run db:migrate:verify
+```
+
+`DATABASE_URL` is used when `MIGRATION_VERIFY_DATABASE_URL` is unset. The check creates throwaway databases named `migration_verify_*`, drops them afterwards and never touches the database in the URL. The runner is executed with a scrubbed environment (only `DATABASE_URL`, no `PG*` variables, no `.env`), so the result does not depend on your shell. Exit code `0` means every scenario passed; any failure exits `1` and prints what differed.
+
+| Scenario | What it proves |
+|----------|----------------|
+| Migration files | Every `.up.sql` has a `.down.sql`, `(version, name)` pairs are unique, and `manifest.json` checksums match the files. |
+| Empty database | All migrations apply and are recorded exactly once, in order. The schema version (highest applied `version`) equals the latest migration file. A second run is a no-op. `--rollback 1` removes exactly the newest migration and moves the schema version to the previous one; re-applying restores an identical schema. |
+| Historical rows | A database at schema version `002` that holds portfolios and rebalance events is migrated to the latest version with the existing rows unchanged. |
+| Interrupted migration | (a) If the schema changes landed but the version row was never written, the next run records it without altering the schema. (b) A migration with a failing statement exits non-zero and leaves no partial tables and no version row; fixing it and re-running succeeds. (c) A database created by an older runner (`schema_migrations` with `PRIMARY KEY (version)`) is upgraded in place to `(version, name)`. |
+
+On success it prints the result you are verifying, for example:
+
+```
+Schema version:    015 (20 migrations)
+Rollback boundary: 015_refresh_token_families -> 014_portfolio_archiving
+```
+
+The rollback boundary is the newest migration: `npm run db:migrate -- --rollback` undoes exactly that one and leaves the schema at the previous version. Every migration has a down file, so the boundary can be moved back one migration at a time.
+
+The same scenarios run in CI (`migration-dry-run` job, PostgreSQL leg) and as a Vitest test that is skipped unless `MIGRATION_VERIFY_DATABASE_URL` is set:
+
+```bash
+MIGRATION_VERIFY_DATABASE_URL=postgresql://user:pass@localhost:5432/postgres npm test -- migrationSmoke
+```
+
+`MIGRATIONS_DIR` can point the runner at another directory of migration files. The smoke check uses it to inject a deliberately broken migration; leave it unset otherwise.
