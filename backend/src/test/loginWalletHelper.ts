@@ -9,7 +9,7 @@ export async function loginWithWalletChallenge(app: Application, kp: Keypair) {
         .send({ address })
         .expect(200)
     const challenge = challengeRes.body.data.challenge as string
-    const sig = kp.sign(Buffer.from(challenge, 'utf8')).toString('base64')
+    const sig = Buffer.from(kp.sign(Buffer.from(challenge, 'utf8'))).toString('base64')
     const loginRes = await request(app)
         .post('/api/auth/login')
         .send({ address, signature: sig })

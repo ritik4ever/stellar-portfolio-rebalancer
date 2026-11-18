@@ -82,10 +82,10 @@ portfoliosRouter.get('/portfolios/summary', validateQuery(portfolioSummaryQueryS
             let nextCalled = false
             requireJwt(req, res, () => { nextCalled = true })
             if (!nextCalled) return
+        }
 
-            if (req.user?.address !== userAddress) {
-                return fail(res, 403, 'FORBIDDEN', 'You can only view your own portfolios')
-            }
+        if (authConfig.enabled && !allowPublicInDemo && req.user?.address !== userAddress) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only view your own portfolios')
         }
 
         const portfolios = await portfolioStorage.getUserPortfolios(userAddress)
@@ -852,7 +852,7 @@ portfoliosRouter.get('/portfolio/:id/export/status/:jobId', requireJwtWhenEnable
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
         
         const authConfig = getAuthConfig()
-        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
+        if (authConfig.enabled && req.user && portfolio.userAddress !== req.user.address) {
             return fail(res, 403, 'FORBIDDEN', 'You can only check your own export')
         }
 
@@ -918,10 +918,10 @@ portfoliosRouter.get('/user/:address/portfolios', async (req: Request, res: Resp
             let nextCalled = false
             requireJwt(req, res, () => { nextCalled = true })
             if (!nextCalled) return
+        }
 
-            if (req.user?.address !== address) {
-                return fail(res, 403, 'FORBIDDEN', 'You can only view your own portfolios')
-            }
+        if (authConfig.enabled && !allowPublicInDemo && req.user?.address !== address) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only view your own portfolios')
         }
 
         const includeArchived = req.query.include_archived === 'true'
@@ -1060,10 +1060,6 @@ portfoliosRouter.post('/portfolio/:id/clone', ...protectedWriteLimiter, idempote
             let nextCalled = false
             requireJwt(req, res, () => { nextCalled = true })
             if (!nextCalled) return
-
-            if (req.user?.address !== original.userAddress) {
-                return fail(res, 403, 'FORBIDDEN', 'You can only clone your own portfolio')
-            }
         }
 
         const overrides = { ...parsed.data }
@@ -1183,7 +1179,7 @@ portfoliosRouter.post('/portfolios/rebalance-plans', validateRequest(batchRebala
     }
 })
 
-portfoliosRouter.post('/portfolio/:id/rebalance/dry-run', async (req: Request, res: Response) => {
+portfoliosRouter.post('/portfolio/:id/rebalance/dry-run', requireJwtWhenEnabled, async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
@@ -1206,6 +1202,11 @@ portfoliosRouter.post('/portfolio/:id/rebalance/dry-run', async (req: Request, r
             if (req.user && portfolio.userAddress && req.user.address !== portfolio.userAddress) {
                 return fail(res, 403, 'FORBIDDEN', 'You can only preview dry-run for your own portfolio')
             }
+        }
+
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only dry-run your own portfolio')
         }
 
         const rawOverrides = (req.body as any)?.options?.slippageOverrides ?? (req.body as any)?.tradeSlippageOverrides

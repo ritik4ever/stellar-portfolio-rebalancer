@@ -171,7 +171,7 @@ function createKeyGenerator(prefix: string) {
 // guard for rate-limit skipping is now isTrustedHealthProbe().
 // ---------------------------------------------------------------------------
 /** @internal Use isTrustedHealthProbe() in middleware skip functions. */
-function isProbePath(path: string): boolean {
+export function isProbePath(path: string): boolean {
   return ["/health", "/ready", "/readiness", "/metrics"].includes(path);
 }
 

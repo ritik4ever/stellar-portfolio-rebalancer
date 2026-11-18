@@ -34,7 +34,7 @@ describe('Stellar address authentication (#886)', () => {
 
     it('verifyChallenge issues tokens when signature is valid', async () => {
         const nonce = createChallenge(address)
-        const signature = keypair.sign(Buffer.from(nonce, 'utf8')).toString('base64')
+        const signature = Buffer.from(keypair.sign(Buffer.from(nonce, 'utf8'))).toString('base64')
 
         const tokens = await verifyChallenge(address, signature)
 
@@ -51,13 +51,13 @@ describe('Stellar address authentication (#886)', () => {
 
     it('verifyChallenge throws when no challenge exists for address', async () => {
         const freshKeypair = Keypair.random()
-        const sig = freshKeypair.sign(Buffer.from('nonce', 'utf8')).toString('base64')
+        const sig = Buffer.from(freshKeypair.sign(Buffer.from('nonce', 'utf8'))).toString('base64')
         await expect(verifyChallenge(freshKeypair.publicKey(), sig)).rejects.toBeInstanceOf(InvalidSignatureError)
     })
 
     it('challenge is consumed after successful verification (one-time use)', async () => {
         const nonce = createChallenge(address)
-        const signature = keypair.sign(Buffer.from(nonce, 'utf8')).toString('base64')
+        const signature = Buffer.from(keypair.sign(Buffer.from(nonce, 'utf8'))).toString('base64')
 
         await verifyChallenge(address, signature)
 

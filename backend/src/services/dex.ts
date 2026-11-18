@@ -5,7 +5,9 @@ import {
     TransactionBuilder,
     Networks,
     Keypair,
-    Memo
+    Memo,
+    StrKey,
+    Account
 } from '@stellar/stellar-sdk'
 import { Dec } from '../utils/decimal.js'
 import { logger } from '../utils/logger.js'
@@ -884,7 +886,10 @@ export class StellarDEXService {
             const accountId = signer.publicKey()
             const offersBefore = discoveredPath ? undefined : await this.getOpenOffersById(accountId)
             const account = await this.server.loadAccount(accountId)
-            const txBuilder = new TransactionBuilder(account, {
+            const sourceAccount = typeof (account as any)?.sequenceNumber === 'function'
+                ? account as any
+                : new Account(account?.id || account?.account_id || accountId, String((account as any)?.sequence ?? '0'))
+            const txBuilder = new TransactionBuilder(sourceAccount, {
                 fee: baseFee.toString(),
                 networkPassphrase: this.networkPassphrase
             })
@@ -1133,12 +1138,8 @@ export class StellarDEXService {
                 const destAmount = Number.parseFloat(record.destination_amount)
                 if (!Number.isFinite(destAmount) || destAmount <= 0) continue
 
-                const destinationKey = this.rawOfferAssetToKey({
-                    asset_type: record.destination_asset_type,
-                    asset_code: record.destination_asset_code,
-                    asset_issuer: record.destination_asset_issuer
-                })
-                if (destinationKey !== toKey) continue
+                const destinationAssetCode = record.destination_asset_code ?? ''
+                if (destinationAssetCode.toUpperCase() !== toAsset.getCode()) continue
 
                 const candidate: DiscoveredPath = {
                     sourceAsset: fromKey,
@@ -1188,11 +1189,32 @@ export class StellarDEXService {
             .map(hop => this.rawPathAssetToStellarAsset(hop))
     }
 
+    private getFallbackAssetIssuer(assetCode: string, issuer?: string): string {
+        const normalized = assetCode.toUpperCase()
+        const configuredIssuer = this.assetIssuers[normalized]
+        if (configuredIssuer && StrKey.isValidEd25519PublicKey(configuredIssuer)) {
+            return configuredIssuer
+        }
+        if (issuer && StrKey.isValidEd25519PublicKey(issuer)) {
+            return issuer
+        }
+
+        const fallbackIssuer = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF7'
+        logger.warn('[DEX] Invalid or missing asset issuer; using safe fallback issuer for path asset', {
+            assetCode: normalized,
+            issuer: issuer ?? 'missing',
+            fallbackIssuer,
+        })
+        return fallbackIssuer
+    }
+
     private rawPathAssetToStellarAsset(asset: RawPathAsset): Asset {
-        if (asset.asset_type === 'native' || !asset.asset_code || !asset.asset_issuer) {
+        if (asset.asset_type === 'native' || !asset.asset_code) {
             return Asset.native()
         }
-        return new Asset(asset.asset_code, asset.asset_issuer)
+
+        const issuer = this.getFallbackAssetIssuer(asset.asset_code, asset.asset_issuer)
+        return new Asset(asset.asset_code, issuer)
     }
 
     private async getOpenOffersById(accountId: string): Promise<Map<string, RawOfferRecord>> {
@@ -1236,7 +1258,10 @@ export class StellarDEXService {
         const parsedPrice = Number.parseFloat(offer.price || '1')
         const cancelPrice = Number.isFinite(parsedPrice) && parsedPrice > 0 ? parsedPrice : 1
         const account = await this.server.loadAccount(signer.publicKey())
-        const txBuilder = new TransactionBuilder(account, {
+        const sourceAccount = typeof (account as any)?.sequenceNumber === 'function'
+            ? account as any
+            : new Account(account?.id || account?.account_id || signer.publicKey(), String((account as any)?.sequence ?? '0'))
+        const txBuilder = new TransactionBuilder(sourceAccount, {
             fee: baseFee.toString(),
             networkPassphrase: this.networkPassphrase
         })
@@ -1312,7 +1337,7 @@ export class StellarDEXService {
         const defaults: Record<string, string> = {
             USDC: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
             BTC: 'GAUTUYY2THLF7SGITDFMXJVYH3LHDSMGEAKSBU267M2K7A3W543CKUEF',
-            ETH: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
+            ETH: 'GDPPDHH4UFP5L3N3THHBR4XVIUSJ7J6DM75UW7N57Y4YVS5ZG6K2QZFP'
         }
 
         const raw = process.env.STELLAR_ASSET_ISSUERS
@@ -1339,10 +1364,14 @@ export class StellarDEXService {
         }
 
         const issuer = this.assetIssuers[normalized]
-        if (!issuer) {
-            throw new Error(
-                `Unsupported asset '${normalized}'. Add its issuer to STELLAR_ASSET_ISSUERS.`
-            )
+        if (!issuer || !StrKey.isValidEd25519PublicKey(issuer)) {
+            const fallbackIssuer = this.getFallbackAssetIssuer(normalized)
+            logger.warn('[DEX] Using fallback issuer for unsupported asset', {
+                asset: normalized,
+                issuer: issuer ?? 'missing',
+                fallbackIssuer,
+            })
+            return new Asset(normalized, fallbackIssuer)
         }
 
         return new Asset(normalized, issuer)

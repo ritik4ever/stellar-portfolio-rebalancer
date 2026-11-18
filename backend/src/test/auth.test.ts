@@ -34,7 +34,7 @@ describe('requireAdmin middleware', () => {
         const { requireAdmin } = await import('../middleware/auth.js')
 
         const timestamp = Date.now().toString()
-        const sig = kp.sign(Buffer.from(timestamp, 'utf8')).toString('base64')
+        const sig = Buffer.from(kp.sign(Buffer.from(timestamp, 'utf8'))).toString('base64')
         const next = vi.fn()
         const req = {
             headers: {

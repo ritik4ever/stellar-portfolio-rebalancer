@@ -92,7 +92,7 @@ function authHeader(address: string): Record<string, string> {
 
 function makeAdminHeaders(kp: Keypair) {
     const msg = Date.now().toString()
-    const sig = kp.sign(Buffer.from(msg, 'utf8')).toString('base64')
+    const sig = Buffer.from(kp.sign(Buffer.from(msg, 'utf8'))).toString('base64')
     return {
         'x-public-key': kp.publicKey(),
         'x-message': msg,
