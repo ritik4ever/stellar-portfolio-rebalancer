@@ -6971,7 +6971,17 @@ fn test_target_weight_invariant_accepts_exact_100_percent() {
     let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
 
     let asset1 = Address::generate(&env);
     let asset2 = Address::generate(&env);
@@ -7166,9 +7176,31 @@ fn test_target_weight_update_requires_owner_signature() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let stranger = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
 
-    let asset1 = Address::generate(&env);
+    let asset1 = env.register_stellar_asset_contract(admin.clone());
+    let asset_amount = 100_0000000;
+    StellarAssetClient::new(&env, &asset1)
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &asset1,
+                fn_name: "mint",
+                args: (&user, &asset_amount).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .mint(&user, &asset_amount);
     let asset2 = Address::generate(&env);
 
     let mut allocations = Map::new(&env);
@@ -7203,11 +7235,42 @@ fn test_target_weight_update_requires_owner_signature() {
             &CURRENT_SLIPPAGE_POLICY_VERSION,
         );
 
+    let deposit_amount = 50_0000000;
+    client
+        .mock_auths(&[MockAuth {
+            address: &user,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "deposit",
+                args: (
+                    &pid,
+                    &asset1,
+                    &deposit_amount,
+                    &String::from_str(&env, ""),
+                )
+                    .into_val(&env),
+                sub_invokes: &[MockAuthInvoke {
+                    contract: &asset1,
+                    fn_name: "transfer",
+                    args: (&user, &contract_id, &deposit_amount).into_val(&env),
+                    sub_invokes: &[],
+                }],
+            },
+        }])
+        .deposit(
+            &pid,
+            &asset1,
+            &deposit_amount,
+            &String::from_str(&env, ""),
+        );
+
+    let token = TokenClient::new(&env, &asset1);
     let mut new_allocations = Map::new(&env);
     new_allocations.set(asset1.clone(), 6000);
     new_allocations.set(asset2.clone(), 4000);
+    let portfolio_before_rogue_update = client.get_portfolio(&pid);
 
-    // Stranger attempts to update allocations; must fail authorization
+    // Stranger attempts a valid 100% allocation update; authorization fails.
     let rogue_update = client
         .mock_auths(&[MockAuth {
             address: &stranger,
@@ -7227,9 +7290,49 @@ fn test_target_weight_update_requires_owner_signature() {
 
     // Stored target weights preserved
     let portfolio = client.get_portfolio(&pid);
-    assert_eq!(portfolio.target_allocations.get(asset1.clone()).unwrap(), 5000);
-    assert_eq!(portfolio.target_allocations.get(asset2.clone()).unwrap(), 5000);
+    assert_eq!(portfolio, portfolio_before_rogue_update);
+    assert_eq!(token.balance(&user), asset_amount - deposit_amount);
+    assert_eq!(token.balance(&contract_id), deposit_amount);
     assert_eq!(count_alloc_upd_events(&env), 0);
+
+    // The owner can submit weights whose integer sum is exactly 10,000 bps.
+    let owner_update = client
+        .mock_auths(&[MockAuth {
+            address: &user,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "update_allocations",
+                args: (&pid, &new_allocations).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_update_allocations(&pid, &new_allocations);
+    assert_eq!(owner_update, Ok(Ok(())));
+    assert_eq!(count_alloc_upd_events(&env), 1);
+
+    // Even the owner cannot increase one asset above 100% (10,001 bps).
+    let portfolio_before_invalid_update = client.get_portfolio(&pid);
+    let mut overallocated = Map::new(&env);
+    overallocated.set(asset1.clone(), 10_001);
+    let invalid_owner_update = client
+        .mock_auths(&[MockAuth {
+            address: &user,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "update_allocations",
+                args: (&pid, &overallocated).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_update_allocations(&pid, &overallocated);
+    assert_eq!(invalid_owner_update, Err(Ok(Error::InvalidAllocation)));
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio, portfolio_before_invalid_update);
+    assert_eq!(token.balance(&user), asset_amount - deposit_amount);
+    assert_eq!(token.balance(&contract_id), deposit_amount);
+    assert_eq!(count_alloc_upd_events(&env), 0);
+    assert!(!has_host_event(&env, "alloc_upd"));
 }
 
 #[test]
@@ -7585,8 +7688,8 @@ fn test_target_weight_bounds_create_portfolio_boundaries() {
         &CURRENT_SLIPPAGE_POLICY_VERSION,
     );
     assert!(res_exact.is_ok());
-    assert_eq!(client.get_user_portfolio_count(&user), 1);
     assert_eq!(count_portfolio_created_events(&env), 1);
+    assert_eq!(client.get_user_portfolio_count(&user), 1);
 }
 
 #[test]
