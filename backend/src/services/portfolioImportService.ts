@@ -33,6 +33,10 @@ function normalizeAssetCode(input: string): string {
   return input.trim().toUpperCase()
 }
 
+function isBlankCsvRow(cols: string[]): boolean {
+  return cols.length === 0 || cols.every(col => col.trim() === '')
+}
+
 function isFiniteNumber(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n)
 }
@@ -183,6 +187,12 @@ class IncrementalCsvParser {
     }
     this.row.push(this.field.trim())
     const result = this.row
+    if (result.length === 0 || result.every(cell => cell.trim() === '')) {
+      this.row = []
+      this.field = ''
+      this.rowHasContent = false
+      return
+    }
     this.row = []
     this.field = ''
     this.rowHasContent = false
@@ -265,6 +275,7 @@ export function parseCsvText(
   const errors: BulkImportRowError[] = []
 
   for (let i = 1; i < allRows.length; i++) {
+    if (isBlankCsvRow(allRows[i])) continue
     const rowNum = i + 1 // 1-based data row (including header row at 1)
     const { row, errors: rowErrors } = toAllocationRow(allRows[i], assetIdx, pctIdx, rowNum)
     rows.push(row)
@@ -298,6 +309,8 @@ export async function* parseCsvStream(
   let headerErrored = false
 
   function* handleRow(cols: string[]): Generator<CsvStreamRowResult> {
+    if (isBlankCsvRow(cols)) return
+
     if (!header) {
       header = cols.map(h => h.replace(/^\uFEFF/, '').trim().toLowerCase())
       assetIdx = resolveHeaderIndex(header, 'asset', options.headerMap)

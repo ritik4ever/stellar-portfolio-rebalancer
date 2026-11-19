@@ -177,7 +177,7 @@ router.post('/challenge', authRateLimiter, (req: Request, res: Response) => {
  *
  * Example (curl):
  *   nonce=$(curl -s -X POST .../auth/challenge -d '{"address":"G..."}' | jq -r .data.nonce)
- *   sig=$(node -e "const {Keypair}=require('@stellar/stellar-sdk'); const kp=Keypair.fromSecret('S...'); console.log(kp.sign(Buffer.from('$nonce')).toString('base64'))")
+ *   sig=$(node -e "const {Keypair}=require('@stellar/stellar-sdk'); const kp=Keypair.fromSecret('S...'); console.log(Buffer.from(kp.sign(Buffer.from('$nonce'))).toString('base64'))")
  *   curl -X POST .../auth/verify -d "{\"address\":\"G...\",\"signature\":\"$sig\"}"
  */
 router.post('/verify', authRateLimiter, async (req: Request, res: Response) => {
