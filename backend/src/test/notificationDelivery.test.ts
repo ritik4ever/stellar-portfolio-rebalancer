@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as notificationDb from "../db/notificationDb.js";
 import {
-  deliverStateForFailureKind,
+  deliveryStateForFailureKind,
   deliverWithBackoff,
   NotificationDeliveryError,
 } from "../services/notificationDelivery.js";
@@ -48,8 +48,8 @@ describe("deliverWithBackoff", () => {
   it("retries with configured backoff before succeeding", async () => {
     const execute = vi
       .fn()
-      .mockRejectedOnce(new Error("temporary failure"))
-      .mockResolvedOnce(undefined);
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce(undefined);
 
     const promise = deliverWithBackoff(
       {
@@ -89,7 +89,7 @@ describe("deliverWithBackoff", () => {
   });
 
   it("logs delayed work after exhausting max attempts on a retryable failure", async () => {
-    const execute = vi.fn().mockRejected(new Error("persistent failure"));
+    const execute = vi.fn().mockRejectedValue(new Error("persistent failure"));
 
     const promise = deliverWithBackoff(
       {
@@ -127,7 +127,7 @@ describe("deliverWithBackoff", () => {
       reason: "delivery_unknown",
       idempotencyKey: "<abc@example.com>",
     });
-    const execute = vi.fn().mockRejected(ambiguous);
+    const execute = vi.fn().mockRejectedValue(ambiguous);
 
     const promise = deliverWithBackoff(
       {
@@ -180,7 +180,7 @@ describe("deliverWithBackoff", () => {
       reason: "rejected",
       idempotencyKey: "<def@example.com>",
     });
-    const execute = vi.fn().mockRejected(permanent);
+    const execute = vi.fn().mockRejectedValue(permanent);
 
     const promise = deliverWithBackoff(
       {
@@ -217,7 +217,7 @@ describe("deliverWithBackoff", () => {
   });
 
   it("retries webhook up to 5 times with exponential backoff", async () => {
-    const execute = vi.fn().mockRejected(new Error("HTTP 503"));
+    const execute = vi.fn().mockRejectedValue(new Error("HTTP 503"));
 
     const promise = deliverWithBackoff(
       {

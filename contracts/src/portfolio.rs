@@ -304,6 +304,10 @@ pub fn emit_portfolio_rebalanced(env: &Env, portfolio_id: u64, timestamp: u64) {
     );
 }
 
+
+    );
+}
+
 pub fn emit_cooldown_override(env: &Env, portfolio_id: u64, admin: Address, timestamp: u64) {
     env.events().publish(
         (

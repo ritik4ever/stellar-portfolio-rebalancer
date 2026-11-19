@@ -12,6 +12,14 @@ normal metrics endpoint — no separate scrape target.
 | `stellar_portfolio_notification_delivery_total` | counter | `channel`, `outcome`, `reason`, `event_type` |
 | `stellar_portfolio_notification_delivery_attempts_total` | counter | `channel`, `outcome` |
 | `stellar_portfolio_notification_delivery_duration_seconds` | histogram | `channel`, `outcome` |
+| `stellar_portfolio_webhook_delivery_outcome_total` | counter | `outcome`, `reason`, `event_type` |
+
+The webhook counter carries the attempt-level `success` / `delayed` / `blocked`
+vocabulary described in [webhook-delivery-outcomes.md](webhook-delivery-outcomes.md).
+It exists alongside the per-channel totals because a webhook attempt can fail in
+ways the channel-level counter cannot express (a receiver-requested `429` versus
+a permanent `400`, for example), and because it is emitted for both the retrying
+provider and the one-shot `fireWebhook` helper.
 
 - `channel`: `email`, `webhook`, `slack`, `sms`, `telegram`
 - `outcome`: `success` / `failure` on the totals; the attempts counter also uses

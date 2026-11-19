@@ -56,7 +56,7 @@ persisted.
 
 | State | Effect |
 | --- | --- |
-| Abort fires during a backoff sleep | `finally` block logs `"Delivery aborted before completion"` with `deliveryState: "deliayed"` (source typo preserved) |
+| Abort fires during a backoff sleep | `finally` block logs `"Delivery aborted before completion"` with `deliveryState: "delayed"` |
 | `inFlightDeliveries` map | Cleaned up in the `finally` block; the promise is removed |
 | `completedDeliveries` map | **No entry is written** — neither `sent` nor `uncertain` |
 | Next call with the same `deliveryId` | **Not deduplicated** — treated as a fresh delivery |
@@ -87,9 +87,13 @@ Test file: `backend/src/test/webhookWorkerRestart.test.ts` (6 tests).
 
 ---
 
-## Known source issues pinned by these tests
+## Known source issues pinned by these tests (both repaired by SPR-2026-174)
 
-| File | Issue | Test impact |
+| File | Was | Now |
 | --- | --- | --- |
-| `notifications/webhook.ts` | `import crypto from 'cypto'` — typo for `'crypto'` | Test mocks `'cypto'` to redirect to `node:crypto` |
-| `services/notificationDelivery.ts` | `deliveryState: "deliayed"` in the abort finally block — typo for `"delayed"` | `ABORT_DELIVERY_STATE` constant in the test pins the exact value so a future fix surfaces as a test failure |
+| `notifications/webhook.ts` | `import crypto from 'cypto'` — typo for `'crypto'` | Imports node `crypto`; the `vi.mock('cypto')` shim was removed |
+| `services/notificationDelivery.ts` | `deliveryState: "deliayed"` in the abort finally block — typo for `"delayed"` | Writes `delayed`, the same vocabulary as every other delivery record |
+
+See [webhook-delivery-outcomes.md](webhook-delivery-outcomes.md) for how to tell
+success, delayed and blocked webhook work apart from logs, metrics and the
+dead-letter queue.

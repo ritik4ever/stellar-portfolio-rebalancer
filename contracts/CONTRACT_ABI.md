@@ -196,7 +196,12 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
     - Weights must sum to exactly `TARGET_WEIGHT_SUM_BPS` (`10_000` bps / 100.00%) in integer units.
     - Under-allocation (e.g. 9,999 bps) and over-allocation (e.g. 10,001 bps) return `Err(Error::InvalidAllocation)`.
     - Atomic failure guarantee: stored target allocations, current balances, and contract token funds are preserved on failure, and no `alloc_upd` event is emitted.
-- **Event payload:** `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)`
+- **Event specification & state alignment (SPR-2026-194):**
+  - **Topics:** `(symbol_short!("portfolio"), Symbol::new(env, "alloc_upd"))`
+  - **Payload:** `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)`
+  - **Ordering:** Emitted strictly once, immediately following committed persistence to storage (`DataKey::PortfolioV2(portfolio_id)`).
+  - **Unchanged funds on failure:** When an update fails (e.g. invalid target weights, unauthorized signer, or unsupported asset) after committed calls (such as deposits or earlier allocation updates), no event is emitted for the rejected call. Previously committed events retain their exact ordering and single-emission guarantee.
+  - **Consumer state reconstruction:** Off-chain listeners and indexers can decode `old_allocations` and `new_allocations` to reconstruct both prior and updated stored weights and verify invariant consistency across committed state transitions without encountering phantom events from rejected attempts.
 
 ### `check_invariants(env: Env, portfolio_id: u64) -> Result<(), Error>`
 
@@ -247,6 +252,8 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 ### `execute_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error>`
 
 - **Purpose:** Validates post-trade balances against slippage tolerance (per `slippage_policy_version` on the portfolio), updates `last_rebalance`, and emits `("portfolio","rebalanced")`.
+- **Committed event:** After all token legs and portfolio state succeed, emits one `("portfolio","rebalance_committed")` event with `(portfolio_id, timestamp, trades, resulting_balances, total_fee_paid)`. `resulting_balances` is a complete post-commit map. Failed invocations emit no committed event and roll back the full invocation.
+- **Persistent lifetime:** Portfolio entries renew below 17,280 ledgers remaining, extending to 518,400 ledgers (one-day threshold and thirty-day extension at five seconds per ledger). An already expired entry cannot be recovered.
 - **Parameters:**
   - `portfolio_id`: Portfolio to rebalance.
   - `actual_balances`: Actual balances used for slippage checks.

@@ -4,13 +4,22 @@ import { dirname, join } from "path";
 import { randomUUID, createHash } from "node:crypto";
 
 import type { RebalanceEvent } from "./rebalanceHistory.js";
+import type { BacktestRecord, BacktestStatus, BacktestMetricsSummary, BacktestWindowDecision, BacktestRebalanceEvent, AbsentDayDetail } from "./backtest.js";
 import { getFeatureFlags } from "../config/featureFlags.js";
 import { logger } from "../utils/logger.js";
 import { ConflictError, BackupVerificationError } from "../types/index.js";
 
 import type { Portfolio } from "../types/index.js";
+import { isRebalanceActiveSync } from "./portfolioPersistenceBoundary.js";
 import { AssetRegistryConflictError } from "./assetRegistryValidation.js";
 import { dbQueryDuration } from "../observability/metrics.js";
+import {
+  encodePortfolioCursor,
+  decodePortfolioCursor,
+  diagnosePaginationChange,
+  type PortfolioPageCursor,
+  type PortfolioPaginationResult,
+} from "../utils/portfolioPagination.js";
 
 const SLOW_QUERY_THRESHOLD_MS = 100;
 
@@ -34,6 +43,42 @@ export interface RebalanceHistoryQueryOptions {
   endTimestamp?: string;
 }
 
+/** Payload accepted when recording a rebalance event. */
+export interface RebalanceEventInput {
+  portfolioId: string;
+  trigger: string;
+  trades: number;
+  gasUsed: string;
+  status: "completed" | "failed" | "pending";
+  isAutomatic?: boolean;
+  riskAlerts?: any[];
+  error?: string;
+  details?: any;
+  timestamp?: string;
+  eventSource?: "offchain" | "simulated" | "onchain";
+  actor?: "user" | "system" | "admin" | "scheduler";
+  source?: "dashboard" | "api" | "contract" | "scheduler" | "auto_rebalance";
+  triggerMetadata?: Record<string, unknown>;
+  onChainConfirmed?: boolean;
+  onChainEventType?: string;
+  onChainTxHash?: string;
+  onChainLedger?: number;
+  onChainContractId?: string;
+  onChainPagingToken?: string;
+  isSimulated?: boolean;
+  reasonCode?: string;
+}
+
+/**
+ * Outcome of a rebalance event write. `inserted` is false when the event was
+ * already recorded (on-chain replay of the same paging token) and the stored
+ * row was returned untouched (#2104).
+ */
+export interface RebalanceEventOutcome {
+  event: RebalanceEvent;
+  inserted: boolean;
+}
+
 // ─────────────────────────────────────────────
 // Types (mirrored from portfolioStorage.ts)
 // ─────────────────────────────────────────────
@@ -52,6 +97,7 @@ interface PortfolioRow {
   version: number;
   strategy?: string;
   strategy_config?: string;
+  archived_at?: string | null;
 }
 
 interface PortfolioDraftRow {
@@ -110,6 +156,7 @@ interface ConsentAuditRow {
   ip_address: string | null;
   user_agent: string | null;
   document_version: string | null;
+  categories: string | null;
 }
 
 export interface ConsentRecord {
@@ -131,6 +178,7 @@ export interface ConsentAuditEvent {
   ipAddress: string | null;
   userAgent: string | null;
   documentVersion: string | null;
+  categories?: string[];
 }
 
 /**
@@ -164,7 +212,8 @@ CREATE TABLE IF NOT EXISTS portfolios (
     total_value   REAL NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
     last_rebalance TEXT NOT NULL,
-    version       INTEGER NOT NULL DEFAULT 1
+    version       INTEGER NOT NULL DEFAULT 1,
+    archived_at   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS rebalance_history (
@@ -270,7 +319,8 @@ CREATE TABLE IF NOT EXISTS consent_audit_events (
     timestamp   TEXT NOT NULL,
     ip_address  TEXT,
     user_agent  TEXT,
-    document_version TEXT
+    document_version TEXT,
+    categories  TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
@@ -336,6 +386,37 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
 CREATE INDEX IF NOT EXISTS idx_admin_audit_log_actor ON admin_audit_log (actor);
 CREATE INDEX IF NOT EXISTS idx_admin_audit_log_action ON admin_audit_log (action);
 CREATE INDEX IF NOT EXISTS idx_admin_audit_log_timestamp ON admin_audit_log (timestamp);
+
+CREATE TABLE IF NOT EXISTS backtest_records (
+    id            TEXT PRIMARY KEY,
+    portfolio_id  TEXT,
+    allocations   TEXT NOT NULL DEFAULT '{}',
+    threshold     REAL NOT NULL,
+    initial_value REAL NOT NULL,
+    days          INTEGER NOT NULL,
+    from_date     TEXT,
+    to_date       TEXT,
+    start_date    TEXT,
+    end_date      TEXT,
+    start_timestamp INTEGER,
+    end_timestamp INTEGER,
+    status        TEXT NOT NULL CHECK (status IN ('completed', 'failed', 'running')),
+    has_leap_day  INTEGER NOT NULL DEFAULT 0,
+    leap_day_included INTEGER NOT NULL DEFAULT 0,
+    included_days TEXT NOT NULL DEFAULT '[]',
+    absent_day_reasons TEXT NOT NULL DEFAULT '{}',
+    absent_days   TEXT NOT NULL DEFAULT '[]',
+    decision      TEXT,
+    events        TEXT NOT NULL DEFAULT '[]',
+    result        TEXT,
+    error         TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_records_portfolio ON backtest_records(portfolio_id);
+CREATE INDEX IF NOT EXISTS idx_backtest_records_status ON backtest_records(status);
+CREATE INDEX IF NOT EXISTS idx_backtest_records_created_at ON backtest_records(created_at DESC);
 `;
 
 // ─────────────────────────────────────────────
@@ -354,6 +435,7 @@ export interface AssetDbRecord {
   contractAddress?: string;
   issuerAccount?: string;
   coingeckoId?: string;
+  issuerMetadata?: any;
   enabled: boolean;
   lastRefreshedAt?: string;
   isQuarantined: boolean;
@@ -370,6 +452,7 @@ interface AssetDbRow {
   contract_address: string | null;
   issuer_account: string | null;
   coingecko_id: string | null;
+  issuer_metadata: string | null;
   enabled: number;
   last_refreshed_at: string | null;
   is_quarantined: number;
@@ -386,6 +469,7 @@ const ASSET_COLUMNS = [
   "contract_address",
   "issuer_account",
   "coingecko_id",
+  "issuer_metadata",
   "enabled",
   "last_refreshed_at",
   "is_quarantined",
@@ -397,12 +481,21 @@ const ASSET_COLUMNS = [
 ].join(", ");
 
 function assetRowToRecord(row: AssetDbRow): AssetDbRecord {
+  let parsedMetadata: any = undefined;
+  if (row.issuer_metadata) {
+    try {
+      parsedMetadata = JSON.parse(row.issuer_metadata);
+    } catch {
+      parsedMetadata = undefined;
+    }
+  }
   return {
     symbol: row.symbol,
     name: row.name,
     contractAddress: row.contract_address ?? undefined,
     issuerAccount: row.issuer_account ?? undefined,
     coingeckoId: row.coingecko_id ?? undefined,
+    issuerMetadata: parsedMetadata,
     enabled: row.enabled === 1,
     lastRefreshedAt: row.last_refreshed_at ?? undefined,
     isQuarantined: row.is_quarantined === 1,
@@ -594,6 +687,7 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
           `portfolio(${row.id}).strategy_config`,
         )
       : undefined,
+    archivedAt: row.archived_at ?? undefined,
   };
 }
 
@@ -690,10 +784,15 @@ export class DatabaseService {
 
     for (const pragma of pragmas) {
       try {
-        const row = this.db
-          .prepare(`PRAGMA ${pragma.name}`)
-          .get() as { [key: string]: string };
-        const current = row[pragma.name];
+        const row = (this.db.prepare(`PRAGMA ${pragma.name}`).get() as Record<string, any>) || {};
+        const rawVal = row[pragma.name];
+        let current = String(rawVal ?? '');
+        if (pragma.name === 'synchronous') {
+            if (rawVal === 0 || rawVal === '0') current = 'off';
+            else if (rawVal === 1 || rawVal === '1') current = 'normal';
+            else if (rawVal === 2 || rawVal === '2') current = 'full';
+            else if (rawVal === 3 || rawVal === '3') current = 'extra';
+        }
         const expected = pragma.expected;
         const status = expected ? (current.toLowerCase() === expected.toLowerCase() ? "ok" : "warning") : "info";
 
@@ -835,9 +934,13 @@ export class DatabaseService {
       );
       logger.info("[DB] Migration: added strategy_config column to portfolios");
     }
-    if (!cols.some((c) => c.name === "name")) {
-      this.db.exec("ALTER TABLE portfolios ADD COLUMN name TEXT");
-      logger.info("[DB] Migration: added name column to portfolios");
+    if (!cols.some((c) => c.name === "archived_at")) {
+      this.db.exec("ALTER TABLE portfolios ADD COLUMN archived_at TEXT");
+      logger.info("[DB] Migration: added archived_at column to portfolios");
+    }
+    if (!cols.some((c) => c.name === "archived_at")) {
+      this.db.exec("ALTER TABLE portfolios ADD COLUMN archived_at TEXT");
+      logger.info("[DB] Migration: added archived_at column to portfolios");
     }
 
     const consentCols = this.db
@@ -869,11 +972,16 @@ export class DatabaseService {
           timestamp   TEXT NOT NULL,
           ip_address  TEXT,
           user_agent  TEXT,
-          document_version TEXT
+          document_version TEXT,
+          categories  TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
           ON consent_audit_events (user_id, timestamp);
     `);
+    const auditCols = this.db.pragma("table_info(consent_audit_events)") as Array<{ name: string }>;
+    if (auditCols.length > 0 && !auditCols.some((c) => c.name === "categories")) {
+      this.db.exec("ALTER TABLE consent_audit_events ADD COLUMN categories TEXT");
+    }
   }
 
   private _seedDefaultAssets(): void {
@@ -1087,20 +1195,60 @@ export class DatabaseService {
     });
   }
 
-  getUserPortfolios(userAddress: string): Portfolio[] {
+  getUserPortfolios(userAddress: string, includeArchived = false): Portfolio[] {
     return this._withTiming("getUserPortfolios", () => {
       try {
+        const query = includeArchived
+          ? "SELECT * FROM portfolios WHERE user_address = ?"
+          : "SELECT * FROM portfolios WHERE user_address = ? AND (archived_at IS NULL OR archived_at = '')";
         const rows = this.db
           .prepare<
             [string],
             PortfolioRow
-          >("SELECT * FROM portfolios WHERE user_address = ?")
+          >(query)
           .all(userAddress);
         return rows.map(rowToPortfolio);
       } catch (err) {
         throw new Error(
           `Failed to retrieve portfolios for user '${userAddress}': ${err}`,
         );
+      }
+    });
+  }
+
+  getPortfolios(userAddress: string, includeArchived = false): Portfolio[] {
+    return this.getUserPortfolios(userAddress, includeArchived);
+  }
+
+  archivePortfolio(id: string): boolean {
+    return this._withTiming("archivePortfolio", () => {
+      try {
+        const now = new Date().toISOString();
+        const res = this.db
+          .prepare(
+            "UPDATE portfolios SET archived_at = ? WHERE id = ? AND (archived_at IS NULL OR archived_at = '')",
+          )
+          .run(now, id);
+        return res.changes > 0;
+      } catch (err) {
+        this.logger.error(`Failed to archive portfolio '${id}': ${err}`);
+        return false;
+      }
+    });
+  }
+
+  restorePortfolio(id: string): boolean {
+    return this._withTiming("restorePortfolio", () => {
+      try {
+        const res = this.db
+          .prepare(
+            "UPDATE portfolios SET archived_at = NULL WHERE id = ? AND archived_at IS NOT NULL AND archived_at != ''",
+          )
+          .run(id);
+        return res.changes > 0;
+      } catch (err) {
+        this.logger.error(`Failed to restore portfolio '${id}': ${err}`);
+        return false;
       }
     });
   }
@@ -1135,6 +1283,15 @@ export class DatabaseService {
 
         const current = rowToPortfolio(row);
         const merged = { ...current, ...updates };
+
+        if (updates.allocations !== undefined && isRebalanceActiveSync(id)) {
+          throw new ConflictError(
+            current.version ?? -1,
+            `Cannot edit allocations while portfolio ${id} is actively rebalancing`,
+            "rebalancing",
+            "conflict_rebalancing"
+          );
+        }
 
         if (expectedVersion !== undefined) {
           // Compare-and-set: only update when version matches
@@ -1176,13 +1333,15 @@ export class DatabaseService {
             .prepare(
               `
                     UPDATE portfolios
-                    SET user_address = ?, allocations = ?, threshold = ?, balances = ?,
+                    SET user_address = ?, name = ?, description = ?, allocations = ?, threshold = ?, balances = ?,
                         total_value = ?, last_rebalance = ?, version = version + 1
                     WHERE id = ?
                 `,
             )
             .run(
               merged.userAddress,
+              merged.name ?? null,
+              merged.description ?? null,
               JSON.stringify(merged.allocations),
               merged.threshold,
               JSON.stringify(merged.balances),
@@ -1200,15 +1359,99 @@ export class DatabaseService {
     });
   }
 
-  getAllPortfolios(): Portfolio[] {
+  /**
+   * Edit allocations at the service boundary, documenting committed version,
+   * execution state, and a stable result.
+   */
+  async editAllocations(
+    id: string,
+    allocations: Record<string, number>,
+    expectedVersion?: number
+  ): Promise<import("../types/index.js").AllocationEditDecision> {
+    const { applyAllocationEdit } = await import("./portfolioPersistenceBoundary.js");
+    return applyAllocationEdit({
+      portfolioId: id,
+      allocations,
+      expectedVersion,
+      storage: this as any,
+    });
+  }
+
+  getAllPortfolios(includeArchived = false): Portfolio[] {
     return this._withTiming("getAllPortfolios", () => {
       try {
+        const query = includeArchived
+          ? "SELECT * FROM portfolios"
+          : "SELECT * FROM portfolios WHERE (archived_at IS NULL OR archived_at = '')";
         const rows = this.db
-          .prepare<[], PortfolioRow>("SELECT * FROM portfolios")
+          .prepare<[], PortfolioRow>(query)
           .all();
         return rows.map(rowToPortfolio);
       } catch (err) {
         throw new Error(`Failed to retrieve all portfolios: ${err}`);
+      }
+    });
+  }
+
+  searchPortfoliosPage(options: {
+    search?: string;
+    address?: string;
+    includeArchived?: boolean;
+    limit?: number;
+    cursor?: string;
+  }): { portfolios: Portfolio[]; nextCursor: string | null; total: number } {
+    return this._withTiming("searchPortfoliosPage", () => {
+      try {
+        const { search, address, includeArchived = false, limit = 20, cursor } = options;
+        let portfolios: Portfolio[] = [];
+        if (address) {
+          portfolios = this.getUserPortfolios(address, includeArchived);
+        } else if (search) {
+          portfolios = this.searchPortfolios(search, 1000, 0);
+        } else {
+          portfolios = this.getAllPortfolios(includeArchived);
+        }
+
+        if (search && address) {
+          const q = search.toLowerCase();
+          portfolios = portfolios.filter(
+            (p) =>
+              (p.name && p.name.toLowerCase().includes(q)) ||
+              (p.description && p.description.toLowerCase().includes(q)),
+          );
+        }
+
+        const total = portfolios.length;
+
+        portfolios.sort((a, b) => {
+          if (a.createdAt !== b.createdAt) {
+            return a.createdAt.localeCompare(b.createdAt);
+          }
+          return a.id.localeCompare(b.id);
+        });
+
+        let startIndex = 0;
+        if (cursor) {
+          const idx = portfolios.findIndex((p) => p.id === cursor);
+          if (idx !== -1) {
+            startIndex = idx + 1;
+          }
+        }
+
+        const page = portfolios.slice(startIndex, startIndex + limit);
+        const nextCursor =
+          startIndex + limit < portfolios.length && page.length > 0
+            ? page[page.length - 1].id
+            : null;
+
+        return {
+          portfolios: page,
+          nextCursor,
+          total,
+        };
+      } catch (err) {
+        this.logger.error(`Failed to search portfolios page: ${err}`);
+        return { portfolios: [], nextCursor: null, total: 0 };
       }
     });
   }
@@ -1251,6 +1494,117 @@ export class DatabaseService {
       } catch (err) {
         throw new Error(`Failed to count portfolios: ${err}`);
       }
+    });
+  }
+
+  archivePortfolio(id: string): boolean {
+    return this._withTiming("archivePortfolio", () => {
+      try {
+        const info = this.db
+          .prepare("UPDATE portfolios SET archived_at = ? WHERE id = ? AND archived_at IS NULL")
+          .run(new Date().toISOString(), id);
+        return info.changes > 0;
+      } catch (err) {
+        throw new Error(`Failed to archive portfolio: ${err}`);
+      }
+    });
+  }
+
+  restorePortfolio(id: string): boolean {
+    return this._withTiming("restorePortfolio", () => {
+      try {
+        const info = this.db
+          .prepare("UPDATE portfolios SET archived_at = NULL WHERE id = ? AND archived_at IS NOT NULL")
+          .run(id);
+        return info.changes > 0;
+      } catch (err) {
+        throw new Error(`Failed to restore portfolio: ${err}`);
+      }
+    });
+  }
+
+  searchPortfoliosPage(options: {
+    search?: string;
+    address?: string;
+    includeArchived?: boolean;
+    limit?: number;
+    cursor?: string | PortfolioPageCursor | null;
+  }): PortfolioPaginationResult<Portfolio> {
+    return this._withTiming("searchPortfoliosPage", () => {
+      const { search = "", address, includeArchived = false, limit = 20, cursor } = options;
+
+      let parsedCursor: PortfolioPageCursor | null = null;
+      let cursorStr: string | null = null;
+      if (typeof cursor === "string" && cursor.trim().length > 0) {
+        cursorStr = cursor.trim();
+        parsedCursor = decodePortfolioCursor(cursorStr);
+      } else if (cursor && typeof cursor === "object" && "createdAt" in cursor && "id" in cursor) {
+        parsedCursor = cursor;
+        cursorStr = encodePortfolioCursor(cursor);
+      }
+
+      const conditions: string[] = [];
+      const values: unknown[] = [];
+
+      if (address) {
+        conditions.push("user_address = ?");
+        values.push(address);
+      }
+      if (!includeArchived) {
+        conditions.push("archived_at IS NULL");
+      }
+      if (search && search.trim().length > 0) {
+        conditions.push("(name LIKE ? OR description LIKE ?)");
+        const like = `%${search.trim()}%`;
+        values.push(like, like);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+      const totalResult = this.db
+        .prepare(`SELECT COUNT(*) as cnt FROM portfolios ${whereClause}`)
+        .get(...values) as { cnt: number } | undefined;
+      const total = totalResult?.cnt ?? 0;
+
+      const pagedConditions = [...conditions];
+      const pagedValues = [...values];
+
+      if (parsedCursor) {
+        pagedConditions.push("((created_at > ?) OR (created_at = ? AND id > ?))");
+        pagedValues.push(parsedCursor.createdAt, parsedCursor.createdAt, parsedCursor.id);
+      }
+
+      const pagedWhere = pagedConditions.length > 0 ? `WHERE ${pagedConditions.join(" AND ")}` : "";
+      pagedValues.push(limit + 1);
+
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM portfolios ${pagedWhere} ORDER BY created_at ASC, id ASC LIMIT ?`
+        )
+        .all(...pagedValues) as PortfolioRow[];
+
+      const hasMore = rows.length > limit;
+      const pageRows = hasMore ? rows.slice(0, limit) : rows;
+      const last = pageRows[pageRows.length - 1];
+      const { itemsChanged, changeKind } = diagnosePaginationChange({
+        currentTotal: total,
+        cursor: parsedCursor,
+      });
+
+      const nextCursor = hasMore && last
+        ? encodePortfolioCursor({ createdAt: last.created_at, id: last.id, total })
+        : null;
+
+      return {
+        portfolios: pageRows.map(rowToPortfolio),
+        limit,
+        cursor: cursorStr,
+        nextCursor,
+        count: pageRows.length,
+        total,
+        itemsChanged,
+        changeKind,
+      };
     });
   }
 
@@ -1535,7 +1889,13 @@ export class DatabaseService {
           marketingFlag,
           marketingFlag,
         );
-      this.insertConsentAuditEvent(userId, "grant", now, opts.ipAddress, opts.userAgent, docVersion);
+      const categories: string[] = [];
+      if (opts.terms) categories.push("terms");
+      if (opts.privacy) categories.push("privacy");
+      if (opts.cookies) categories.push("cookies");
+      if (analyticsFlag === 1) categories.push("analytics");
+      if (marketingFlag === 1) categories.push("marketing");
+      this.insertConsentAuditEvent(userId, "grant", now, opts.ipAddress, opts.userAgent, docVersion, categories);
     });
     grant();
     logger.info("[DB] Consent recorded", { userId, documentVersion: docVersion });
@@ -1572,7 +1932,7 @@ export class DatabaseService {
           docVersion,
           now,
         );
-      this.insertConsentAuditEvent(userId, "revoke", now, opts.ipAddress, opts.userAgent, docVersion);
+      this.insertConsentAuditEvent(userId, "revoke", now, opts.ipAddress, opts.userAgent, docVersion, null);
     });
     revoke();
     logger.info("[DB] Consent revoked", { userId, documentVersion: docVersion });
@@ -1620,21 +1980,32 @@ getConsent(userId: string): ConsentRecord | undefined {
   getConsentAudit(userId: string): ConsentAuditEvent[] {
     const rows = this.db
       .prepare<[string], ConsentAuditRow>(
-        `SELECT id, user_id, action, timestamp, ip_address, user_agent, document_version
+        `SELECT id, user_id, action, timestamp, ip_address, user_agent, document_version, categories
          FROM consent_audit_events
          WHERE user_id = ?
-         ORDER BY timestamp ASC, id ASC`,
+         ORDER BY timestamp ASC, rowid ASC`,
       )
       .all(userId);
-    return rows.map((row) => ({
-      id: row.id,
-      userId: row.user_id,
-      action: row.action,
-      timestamp: row.timestamp,
-      ipAddress: row.ip_address,
-      userAgent: row.user_agent,
-      documentVersion: row.document_version,
-    }));
+    return rows.map((row) => {
+      let categories: string[] | undefined;
+      if (row.categories) {
+        try {
+          categories = JSON.parse(row.categories);
+        } catch {
+          categories = undefined;
+        }
+      }
+      return {
+        id: row.id,
+        userId: row.user_id,
+        action: row.action,
+        timestamp: row.timestamp,
+        ipAddress: row.ip_address,
+        userAgent: row.user_agent,
+        documentVersion: row.document_version,
+        categories,
+      };
+    });
   }
 
   private insertConsentAuditEvent(
@@ -1644,11 +2015,13 @@ getConsent(userId: string): ConsentRecord | undefined {
     ipAddress?: string,
     userAgent?: string,
     documentVersion?: string | null,
+    categories?: string[] | null,
   ): void {
+    const categoriesJson = categories ? JSON.stringify(categories) : null;
     this.db
       .prepare(
-        `INSERT INTO consent_audit_events (id, user_id, action, timestamp, ip_address, user_agent, document_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO consent_audit_events (id, user_id, action, timestamp, ip_address, user_agent, document_version, categories)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         generateId(),
@@ -1658,6 +2031,7 @@ getConsent(userId: string): ConsentRecord | undefined {
         ipAddress ?? null,
         userAgent ?? null,
         documentVersion ?? null,
+        categoriesJson,
       );
   }
 
@@ -1670,7 +2044,7 @@ getConsent(userId: string): ConsentRecord | undefined {
       Date.now() - retentionDays * 24 * 60 * 60 * 1000,
     ).toISOString();
     const result = this.db
-      .prepare("DELETE FROM consent_audit_events WHERE timestamp < ?")
+      .prepare("DELETE FROM consent_audit_events WHERE timestamp <= ?")
       .run(cutoff);
     const count = result.changes;
     if (count > 0) {
@@ -1720,30 +2094,21 @@ getConsent(userId: string): ConsentRecord | undefined {
   // Rebalance history methods
   // ──────────────────────────────────────────
 
-  recordRebalanceEvent(eventData: {
-    portfolioId: string,
-    trigger: string,
-    trades: number,
-    gasUsed: string,
-    status: "completed" | "failed" | "pending";
-    isAutomatic?: boolean;
-    riskAlerts?: any[];
-    error?: string;
-    details?: any;
-    timestamp?: string;
-    eventSource?: "offchain" | "simulated" | "onchain";
-    actor?: "user" | "system" | "admin" | "scheduler";
-    source?: "dashboard" | "api" | "contract" | "scheduler" | "auto_rebalance";
-    triggerMetadata?: Record<string, unknown>;
-    onChainConfirmed?: boolean;
-    onChainEventType?: string;
-    onChainTxHash?: string;
-    onChainLedger?: number;
-    onChainContractId?: string;
-    onChainPagingToken?: string;
-    isSimulated?: boolean;
-    reasonCode?: string;
-  }): RebalanceEvent {
+  recordRebalanceEvent(eventData: RebalanceEventInput): RebalanceEvent {
+    return this.recordRebalanceEventOnce(eventData).event;
+  }
+
+  /**
+   * Records a rebalance event at most once per on-chain paging token and
+   * reports whether this call created the row.
+   *
+   * The paging-token unique index is the durable deduplication boundary, so a
+   * replayed page keeps the originally recorded row and reports
+   * `inserted: false` instead of counting as new work (#2104).
+   */
+  recordRebalanceEventOnce(
+    eventData: RebalanceEventInput,
+  ): RebalanceEventOutcome {
     try {
       const mergedDetails = {
         ...(eventData.details ?? {}),
@@ -1823,10 +2188,10 @@ getConsent(userId: string): ConsentRecord | undefined {
             )
             .get(event.onChainPagingToken);
           if (!existing) throw new Error("Replayed event could not be retrieved");
-          return rowToEvent(existing);
+          return { event: rowToEvent(existing), inserted: false };
         }
 
-        return event;
+        return { event, inserted: true };
       } catch (err) {
         throw new Error(
           `Failed to record rebalance event for portfolio '${eventData.portfolioId}': ${err}`,
@@ -1846,7 +2211,12 @@ getConsent(userId: string): ConsentRecord | undefined {
             .prepare<
               [string, number],
               RebalanceHistoryRow
-            >("SELECT * FROM rebalance_history WHERE portfolio_id = ? ORDER BY timestamp DESC LIMIT ?")
+            >(
+                `SELECT * FROM rebalance_history
+                 WHERE portfolio_id = ?
+                 ORDER BY timestamp DESC, on_chain_paging_token DESC NULLS LAST, id DESC
+                 LIMIT ?`
+              )
             .all(portfolioId, limit);
           return rows.map(rowToEvent);
         }
@@ -1855,7 +2225,11 @@ getConsent(userId: string): ConsentRecord | undefined {
           .prepare<
             [number],
             RebalanceHistoryRow
-          >("SELECT * FROM rebalance_history ORDER BY timestamp DESC LIMIT ?")
+          >(
+            `SELECT * FROM rebalance_history
+             ORDER BY timestamp DESC, on_chain_paging_token DESC NULLS LAST, id DESC
+             LIMIT ?`
+          )
           .all(limit);
         return rows.map(rowToEvent);
       } catch (err) {
@@ -2676,6 +3050,123 @@ getConsent(userId: string): ConsentRecord | undefined {
     });
   }
 
+  getContractEventIndexerState(
+    name = "soroban_event_indexer",
+  ): IndexerCursorState {
+    return this._withTiming("getContractEventIndexerState", () => {
+      try {
+        const row = this.db
+          .prepare<
+            [string],
+            {
+              name: string;
+              cursor: string | null;
+              latest_ledger: number | null;
+              updated_at: string | null;
+              last_successful_sync_at: string | null;
+              last_failed_sync_at: string | null;
+              last_error: string | null;
+            }
+          >("SELECT * FROM contract_event_indexer_state WHERE name = ?")
+          .get(name);
+
+        if (row) {
+          return {
+            name: row.name,
+            cursor: row.cursor || undefined,
+            latestLedger: row.latest_ledger ?? undefined,
+            updatedAt: row.updated_at ?? undefined,
+            lastSuccessfulSyncAt: row.last_successful_sync_at ?? undefined,
+            lastFailedSyncAt: row.last_failed_sync_at ?? undefined,
+            lastError: row.last_error ?? undefined,
+          };
+        }
+
+        const legacyCursor = this.getIndexerState(`${name}.cursor`);
+        const legacyLatestLedger =
+          Number(this.getIndexerState(`${name}.latest_ledger`) || 0) || undefined;
+        return {
+          name,
+          cursor: legacyCursor || undefined,
+          latestLedger: legacyLatestLedger,
+        };
+      } catch (err) {
+        throw new Error(
+          `Failed to retrieve contract event indexer state '${name}': ${err}`,
+        );
+      }
+    });
+  }
+
+  saveContractEventIndexerState(
+    state: Partial<Omit<IndexerCursorState, "name">>,
+    name = "soroban_event_indexer",
+  ): IndexerCursorState {
+    return this._withTiming("saveContractEventIndexerState", () => {
+      try {
+        const previous = this.getContractEventIndexerState(name);
+        const next: IndexerCursorState = {
+          ...previous,
+          ...state,
+          name,
+          updatedAt: new Date().toISOString(),
+        };
+
+        this.db
+          .prepare(
+            `
+              INSERT INTO contract_event_indexer_state
+                (name, cursor, latest_ledger, updated_at, last_successful_sync_at, last_failed_sync_at, last_error)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(name) DO UPDATE SET
+                cursor = excluded.cursor,
+                latest_ledger = excluded.latest_ledger,
+                updated_at = excluded.updated_at,
+                last_successful_sync_at = excluded.last_successful_sync_at,
+                last_failed_sync_at = excluded.last_failed_sync_at,
+                last_error = excluded.last_error
+            `,
+          )
+          .run(
+            name,
+            next.cursor ?? null,
+            next.latestLedger ?? null,
+            next.updatedAt,
+            next.lastSuccessfulSyncAt ?? null,
+            next.lastFailedSyncAt ?? null,
+            next.lastError ?? null,
+          );
+
+        this.setIndexerState(`${name}.cursor`, next.cursor ?? "");
+        this.setIndexerState(
+          `${name}.latest_ledger`,
+          next.latestLedger?.toString() ?? "",
+        );
+        return next;
+      } catch (err) {
+        throw new Error(
+          `Failed to save contract event indexer state '${name}': ${err}`,
+        );
+      }
+    });
+  }
+
+  resetContractEventIndexerState(
+    fromLedger?: number,
+    name = "soroban_event_indexer",
+  ): IndexerCursorState {
+    return this.saveContractEventIndexerState(
+      {
+        cursor: undefined,
+        latestLedger: fromLedger,
+        lastError: undefined,
+        lastFailedSyncAt: undefined,
+        lastSuccessfulSyncAt: undefined,
+      },
+      name,
+    );
+  }
+
   // ── generic key/value helpers (used by the Telegram chat link, #1396) ────
 
   getKvValue(key: string): string | undefined {
@@ -2833,6 +3324,224 @@ getConsent(userId: string): ConsentRecord | undefined {
 
       return { entries, total };
     });
+  }
+
+  // ─────────────────────────────────────────────
+  // Backtest records (SPR-2026-153)
+  // ─────────────────────────────────────────────
+
+  insertBacktestRecord(record: BacktestRecord): void {
+    this._withTiming("insertBacktestRecord", () => {
+      const stmt = this.db.prepare(`
+        INSERT INTO backtest_records (
+          id, portfolio_id, allocations, threshold, initial_value, days,
+          from_date, to_date, start_date, end_date, start_timestamp, end_timestamp,
+          status, has_leap_day, leap_day_included, included_days, absent_day_reasons,
+          absent_days, decision, events, result, error, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, datetime('now'))
+        )
+      `);
+      stmt.run(
+        record.id,
+        record.portfolioId ?? null,
+        JSON.stringify(record.allocations ?? {}),
+        record.threshold,
+        record.initialValue,
+        record.days,
+        record.from ?? null,
+        record.to ?? null,
+        record.startDate ?? null,
+        record.endDate ?? null,
+        record.startTimestamp ?? null,
+        record.endTimestamp ?? null,
+        record.status,
+        record.hasLeapDay ? 1 : 0,
+        record.leapDayIncluded ? 1 : 0,
+        JSON.stringify(record.includedDays ?? []),
+        JSON.stringify(record.absentDayReasons ?? {}),
+        JSON.stringify(record.absentDays ?? []),
+        record.decision ? JSON.stringify(record.decision) : null,
+        record.events ? JSON.stringify(record.events) : '[]',
+        record.result ? JSON.stringify(record.result) : null,
+        record.error ?? null,
+        record.createdAt ?? null,
+        record.updatedAt ?? null
+      );
+    });
+  }
+
+  updateBacktestRecord(id: string, updates: Partial<BacktestRecord>): void {
+    this._withTiming("updateBacktestRecord", () => {
+      const fields: string[] = [];
+      const values: unknown[] = [];
+
+      if (updates.status !== undefined) {
+        fields.push("status = ?");
+        values.push(updates.status);
+      }
+      if (updates.startDate !== undefined) {
+        fields.push("start_date = ?");
+        values.push(updates.startDate);
+      }
+      if (updates.endDate !== undefined) {
+        fields.push("end_date = ?");
+        values.push(updates.endDate);
+      }
+      if (updates.startTimestamp !== undefined) {
+        fields.push("start_timestamp = ?");
+        values.push(updates.startTimestamp);
+      }
+      if (updates.endTimestamp !== undefined) {
+        fields.push("end_timestamp = ?");
+        values.push(updates.endTimestamp);
+      }
+      if (updates.hasLeapDay !== undefined) {
+        fields.push("has_leap_day = ?");
+        values.push(updates.hasLeapDay ? 1 : 0);
+      }
+      if (updates.leapDayIncluded !== undefined) {
+        fields.push("leap_day_included = ?");
+        values.push(updates.leapDayIncluded ? 1 : 0);
+      }
+      if (updates.includedDays !== undefined) {
+        fields.push("included_days = ?");
+        values.push(JSON.stringify(updates.includedDays));
+      }
+      if (updates.absentDayReasons !== undefined) {
+        fields.push("absent_day_reasons = ?");
+        values.push(JSON.stringify(updates.absentDayReasons));
+      }
+      if (updates.absentDays !== undefined) {
+        fields.push("absent_days = ?");
+        values.push(JSON.stringify(updates.absentDays));
+      }
+      if (updates.decision !== undefined) {
+        fields.push("decision = ?");
+        values.push(updates.decision ? JSON.stringify(updates.decision) : null);
+      }
+      if (updates.events !== undefined) {
+        fields.push("events = ?");
+        values.push(updates.events ? JSON.stringify(updates.events) : '[]');
+      }
+      if (updates.result !== undefined) {
+        fields.push("result = ?");
+        values.push(updates.result ? JSON.stringify(updates.result) : null);
+      }
+      if (updates.error !== undefined) {
+        fields.push("error = ?");
+        values.push(updates.error);
+      }
+      if (updates.updatedAt !== undefined) {
+        fields.push("updated_at = ?");
+        values.push(updates.updatedAt);
+      } else {
+        fields.push("updated_at = datetime('now')");
+      }
+
+      if (fields.length === 1 && updates.updatedAt === undefined) return;
+
+      values.push(id);
+      this.db
+        .prepare(`UPDATE backtest_records SET ${fields.join(", ")} WHERE id = ?`)
+        .run(...values);
+    });
+  }
+
+  getBacktestRecord(id: string): BacktestRecord | null {
+    return this._withTiming("getBacktestRecord", () => {
+      const row = this.db
+        .prepare(`SELECT * FROM backtest_records WHERE id = ?`)
+        .get(id) as Record<string, unknown> | undefined;
+
+      if (!row) return null;
+      return this._mapBacktestRecordRow(row);
+    });
+  }
+
+  getBacktestRecordsByPortfolio(portfolioId: string, limit = 50, offset = 0): BacktestRecord[] {
+    return this._withTiming("getBacktestRecordsByPortfolio", () => {
+      const rows = this.db
+        .prepare(`SELECT * FROM backtest_records WHERE portfolio_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+        .all(portfolioId, limit, offset) as Array<Record<string, unknown>>;
+
+      return rows.map((r) => this._mapBacktestRecordRow(r));
+    });
+  }
+
+  listBacktestRecords(options?: {
+    portfolioId?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): BacktestRecord[] {
+    return this._withTiming("listBacktestRecords", () => {
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+
+      if (options?.portfolioId) {
+        conditions.push("portfolio_id = ?");
+        params.push(options.portfolioId);
+      }
+      if (options?.status) {
+        conditions.push("status = ?");
+        params.push(options.status);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      const limit = options?.limit ?? 50;
+      const offset = options?.offset ?? 0;
+
+      const rows = this.db
+        .prepare(`SELECT * FROM backtest_records ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+        .all(...params, limit, offset) as Array<Record<string, unknown>>;
+
+      return rows.map((r) => this._mapBacktestRecordRow(r));
+    });
+  }
+
+  private _mapBacktestRecordRow(row: Record<string, unknown>): BacktestRecord {
+    const parseJson = <T>(val: unknown, fallback: T): T => {
+      if (val == null) return fallback;
+      if (typeof val === "string") {
+        try {
+          return JSON.parse(val) as T;
+        } catch {
+          return fallback;
+        }
+      }
+      return val as T;
+    };
+
+    return {
+      id: String(row.id),
+      portfolioId: row.portfolio_id ? String(row.portfolio_id) : undefined,
+      allocations: parseJson<Record<string, number>>(row.allocations, {}),
+      threshold: Number(row.threshold),
+      initialValue: Number(row.initial_value),
+      days: Number(row.days),
+      from: row.from_date ? String(row.from_date) : undefined,
+      to: row.to_date ? String(row.to_date) : undefined,
+      startDate: row.start_date ? String(row.start_date) : undefined,
+      endDate: row.end_date ? String(row.end_date) : undefined,
+      startTimestamp: row.start_timestamp != null ? Number(row.start_timestamp) : undefined,
+      endTimestamp: row.end_timestamp != null ? Number(row.end_timestamp) : undefined,
+      status: row.status as BacktestStatus,
+      hasLeapDay: Boolean(row.has_leap_day),
+      leapDayIncluded: Boolean(row.leap_day_included),
+      includedDays: parseJson<string[]>(row.included_days, []),
+      absentDayReasons: parseJson<Record<string, string>>(row.absent_day_reasons, {}),
+      absentDays: parseJson<AbsentDayDetail[]>(row.absent_days, []),
+      decision: parseJson<BacktestWindowDecision | undefined>(row.decision, undefined),
+      events: parseJson<BacktestRebalanceEvent[] | undefined>(row.events, undefined),
+      result: parseJson<BacktestMetricsSummary | undefined>(row.result, undefined),
+      error: row.error ? String(row.error) : undefined,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
   }
 }
 

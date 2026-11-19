@@ -597,7 +597,7 @@ export class ContractEventIndexerService {
                     }
 
                     databaseService.ensurePortfolioExists(indexed.portfolioId, indexed.userAddress || 'ONCHAIN-INDEXER')
-                    databaseService.recordRebalanceEvent({
+                    const outcome = databaseService.recordRebalanceEventOnce({
                         portfolioId: indexed.portfolioId,
                         timestamp: indexed.timestamp,
                         trigger: indexed.trigger,
@@ -625,7 +625,9 @@ export class ContractEventIndexerService {
                             if (val !== undefined) this.seenEventKeys.delete(val)
                         }
                     }
-                    ingested++
+                    // A replayed page is deduplicated by the database, so only rows
+                    // this run actually created count as ingested work (#2104).
+                    if (outcome.inserted) ingested++
                 }
 
                 // Checkpoint only fully processed pages; partially committed pages can

@@ -4,7 +4,8 @@
  * Covers:
  *  1. Worker aborts via AbortSignal before success is recorded:
  *     - The finally block logs "Delivery aborted before completion" with
- *       deliveryState 'deliayed' (spelling preserved from source).
+ *       deliveryState 'delayed' (the SPR-2026-174 vocabulary: the work is
+ *       pending and a replay is safe).
  *     - `inFlightDeliveries` is cleaned up so the in-progress promise is gone.
  *     - No success or failed outcome is double-logged.
  *
@@ -58,11 +59,12 @@ import {
 // ─── Constants mirrored from source ───────────────────────────────────────────
 
 /**
- * The deliveryState written by the abort finally-block in the source.
- * The source has a deliberate(ish) typo: "deliayed" instead of "delayed".
- * This test pins that exact value so any future fix is caught intentionally.
+ * The deliveryState written by the abort finally-block in the source. The
+ * earlier `"deliayed"` typo was repaired in SPR-2026-174 so the abort record
+ * uses the same `success`/`delayed`/`blocked` vocabulary as every other
+ * operator-facing delivery record.
  */
-const ABORT_DELIVERY_STATE = "deliayed";
+const ABORT_DELIVERY_STATE = "delayed";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -103,7 +105,7 @@ describe("deliverWithBackoff – worker restart before recording success", () =>
 
   // ── 1. Abort logs the right finally-block outcome ────────────────────────
 
-  it("logs abort outcome with deliveryState 'deliayed' when AbortSignal fires before success", async () => {
+  it("logs abort outcome with deliveryState 'delayed' when AbortSignal fires before success", async () => {
     const controller = new AbortController();
 
     // execute always throws so the retry-sleep is entered, allowing abort to fire.

@@ -1,5 +1,11 @@
-import crypto from 'cypto';
+import crypto from 'crypto';
 import axios, { AxiosError } from 'axios';
+import {
+  redactWebhookEndpoint,
+  reportWebhookDeliveryAttemptStarted,
+  reportWebhookDeliveryOutcome,
+  type WebhookDeliveryState,
+} from '../services/webhookDeliveryOutcome.js';
 
 interface WebhookPayload {
   event_type: 'DRIFT_EXCEEDED' | 'REBALANCE_COMPLETED' | 'CIRCUIT_BREAKER_TRIGGERED';
@@ -24,9 +30,16 @@ export interface WebhookDeliveryResult {
   deduplicationKey: string;
   /** Whether this attempt should be retried. */
   retryable: boolean;
-  /** Human-readable outcome of the decision. */
+  /** Retry decision taken by the delivery layer. */
   outcome: 'delivered' | 'retry' | 'dead-letter';
-  /** Error message if the delivery failed. */
+  /**
+   * Operator-facing state for this attempt (SPR-2026-174): `success`,
+   * `delayed` (retry scheduled) or `blocked` (dead-letter / permanent failure).
+   */
+  deliveryState: WebhookDeliveryState;
+  /** Bounded, metric-safe reason for the outcome. */
+  reason: string;
+  /** Sanitized error message if the delivery failed. */
   error?: string;
 }
 
@@ -96,6 +109,19 @@ export const fireWebhook = async (
   const deduplicationKey = deliveryId;
 
   const baseResult = { deliveryId, deduplicationKey };
+  const source = redactWebhookEndpoint(url);
+  const startedAt = Date.now();
+
+  // Record the source and identity *before* the request so an attempt that
+  // starts but never reports a terminal outcome is visible as an interrupted
+  // worker rather than a silent success (SPR-2026-174).
+  reportWebhookDeliveryAttemptStarted({
+    source,
+    eventType: payload.event_type,
+    deliveryId,
+    attempt: 1,
+    maxAttempts: 1,
+  });
 
   try {
     const response = await axios.post(url, body, {
@@ -108,27 +134,55 @@ export const fireWebhook = async (
       timeout: 5000,
     });
 
+    const assessment = reportWebhookDeliveryOutcome({
+      source,
+      eventType: payload.event_type,
+      deliveryId,
+      attempt: 1,
+      maxAttempts: 1,
+      statusCode: response.status,
+      elapsedMs: Date.now() - startedAt,
+    });
+
     return {
       ...baseResult,
       delivered: true,
       statusCode: response.status,
       retryable: false,
       outcome: 'delivered',
+      deliveryState: assessment.state,
+      reason: assessment.reason,
     };
   } catch (error) {
     const axiosError = error as AxiosError | undefined;
+    // Network failures have no response; do not invent a status for them — the
+    // fabricated 429 previously made timeouts indistinguishable from a
+    // receiver-requested backoff.
     const statusCode = axiosError?.response?.status;
     const retryable = isRetryableStatus(statusCode);
     const errorMessage = axiosError?.message ?? 'Unknown webhook delivery error';
 
     if (!retryable) {
-      console.error('Webhook delivery failed, pushing to DLQ:', error);
+      const assessment = reportWebhookDeliveryOutcome({
+        source,
+        eventType: payload.event_type,
+        deliveryId,
+        attempt: 1,
+        maxAttempts: 1,
+        statusCode,
+        error,
+        willRetry: false,
+        elapsedMs: Date.now() - startedAt,
+      });
+
       return {
         ...baseResult,
         delivered: false,
         statusCode,
         retryable: false,
         outcome: 'dead-letter',
+        deliveryState: assessment.state,
+        reason: assessment.reason,
         error: errorMessage,
       };
     }
@@ -140,14 +194,30 @@ export const fireWebhook = async (
       DEFAULT_RETRY_AFTER_MS;
     const nextAttemptAt = Date.now() + retryAfterMs;
 
+    const assessment = reportWebhookDeliveryOutcome({
+      source,
+      eventType: payload.event_type,
+      deliveryId,
+      attempt: 1,
+      maxAttempts: 1,
+      statusCode,
+      error,
+      retryAfterMs,
+      nextAttemptAt,
+      willRetry: true,
+      elapsedMs: Date.now() - startedAt,
+    });
+
     return {
       ...baseResult,
       delivered: false,
-      statusCode: statusCode ?? 429,
+      statusCode,
       retryAfterMs,
       nextAttemptAt,
       retryable: true,
       outcome: 'retry',
+      deliveryState: assessment.state,
+      reason: assessment.reason,
       error: errorMessage,
     };
   }

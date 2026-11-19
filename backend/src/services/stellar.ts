@@ -324,6 +324,10 @@ export class StellarService {
         const span = getTracer().startSpan('stellar.dryRunRebalance')
         span.setAttribute('portfolio.id', portfolioId)
         try {
+            const portfolio = await this.getPortfolio(portfolioId)
+            if (!portfolio) {
+                throw new Error(`Portfolio ${portfolioId} not found`)
+            }
             return {
                 portfolioId,
                 canExecute: true,
