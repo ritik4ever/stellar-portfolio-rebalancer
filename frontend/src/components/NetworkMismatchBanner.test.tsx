@@ -8,16 +8,35 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-const mockSwitchAdapter = vi.hoisted(() => ({
-  name: 'Hana',
-  type: 'hana',
-  isAvailable: vi.fn(() => true),
-  connect: vi.fn(),
-  isConnected: vi.fn(),
-  disconnect: vi.fn(),
-  signTransaction: vi.fn(),
-  switchNetwork: vi.fn().mockResolvedValue(undefined),
+const { mockSwitchAdapter, mockDetectWalletNetwork } = vi.hoisted(() => ({
+  mockSwitchAdapter: {
+    name: 'Hana',
+    type: 'hana',
+    isAvailable: vi.fn(() => true),
+    connect: vi.fn(),
+    isConnected: vi.fn(),
+    disconnect: vi.fn(),
+    signTransaction: vi.fn(),
+    switchNetwork: vi.fn().mockResolvedValue(undefined),
+  },
+  mockDetectWalletNetwork: vi.fn().mockResolvedValue('testnet'),
 }))
+
+vi.mock('../utils/walletAdapters', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/walletAdapters')>()
+  return {
+    ...actual,
+    getAdapter: vi.fn(() => mockSwitchAdapter),
+  }
+})
+
+vi.mock('../utils/networkDetection', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/networkDetection')>()
+  return {
+    ...actual,
+    detectWalletNetwork: mockDetectWalletNetwork,
+  }
+})
 
 describe('NetworkMismatchBanner', () => {
   it('renders mismatch warning with network labels', () => {
@@ -85,14 +104,6 @@ describe('NetworkMismatchBanner', () => {
   })
 
   it('shows switch network button for wallets that support programmatic switch', async () => {
-    vi.mock('../utils/walletAdapters', async () => {
-      const actual = await vi.importActual('../utils/walletAdapters')
-      return {
-        ...actual,
-        getAdapter: vi.fn(() => mockSwitchAdapter),
-      }
-    })
-
     render(
       <NetworkMismatchBanner
         configuredNetwork="testnet"
@@ -106,22 +117,6 @@ describe('NetworkMismatchBanner', () => {
 
   it('dismisses banner after a successful simulated network switch', async () => {
     const onDismiss = vi.fn()
-
-    vi.mock('../utils/walletAdapters', async () => {
-      const actual = await vi.importActual('../utils/walletAdapters')
-      return {
-        ...actual,
-        getAdapter: vi.fn(() => mockSwitchAdapter),
-      }
-    })
-
-    vi.mock('../utils/networkDetection', async () => {
-      const actual = await vi.importActual('../utils/networkDetection')
-      return {
-        ...actual,
-        detectWalletNetwork: vi.fn().mockResolvedValue('testnet'),
-      }
-    })
 
     render(
       <NetworkMismatchBanner

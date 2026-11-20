@@ -55,7 +55,7 @@ jobs:
       run: npm run install:all
 
     - name: Install Playwright Browsers
-      run: npx playwright install --with-deps chromium
+      run: npx playwright install --with-deps chromium firefox
       working-directory: ./frontend
 
     - name: Setup Backend Database

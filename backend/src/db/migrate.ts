@@ -19,9 +19,10 @@ const MIGRATIONS_DIR = join(__dirname, 'migrations')
 const MANIFEST_PATH = join(MIGRATIONS_DIR, 'manifest.json')
 
 const MIGRATION_TABLE = `CREATE TABLE IF NOT EXISTS schema_migrations (
-    version VARCHAR(64) PRIMARY KEY,
+    version VARCHAR(64) NOT NULL,
     name VARCHAR(256) NOT NULL,
-    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (version, name)
 );`
 
 interface MigrationFile {
@@ -120,13 +121,21 @@ function discoverMigrations(): MigrationFile[] {
 
 async function ensureMigrationsTable(): Promise<void> {
     await getPool().query(MIGRATION_TABLE)
+    try {
+        await getPool().query(`
+            ALTER TABLE schema_migrations DROP CONSTRAINT IF EXISTS schema_migrations_pkey;
+            ALTER TABLE schema_migrations ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (version, name);
+        `)
+    } catch {
+        // Table created with composite key or already composite
+    }
 }
 
 async function getAppliedVersions(): Promise<string[]> {
-    const result = await getPool().query<{ version: string }>(
-        'SELECT version FROM schema_migrations ORDER BY version ASC'
+    const result = await getPool().query<{ version: string; name: string }>(
+        'SELECT version, name FROM schema_migrations ORDER BY version ASC, name ASC'
     )
-    return result.rows.map((r) => r.version)
+    return result.rows.map((r) => `${r.version}_${r.name}`)
 }
 
 async function run() {
@@ -158,12 +167,12 @@ async function run() {
 
         if (status) {
             console.log('Applied migrations:')
-            for (const v of applied) {
-                const m = migrations.find((x) => x.version === v)
-                console.log('  ', v, m ? m.name : '(unknown)')
+            for (const key of applied) {
+                const m = migrations.find((x) => `${x.version}_${x.name}` === key)
+                console.log('  ', m ? `${m.version} ${m.name}` : key)
             }
             console.log('\nPending migrations:')
-            const pending = migrations.filter((m) => !applied.includes(m.version))
+            const pending = migrations.filter((m) => !applied.includes(`${m.version}_${m.name}`))
             for (const m of pending) {
                 console.log('  ', m.version, m.name)
             }
@@ -196,10 +205,10 @@ async function run() {
                 await closePool()
                 process.exit(0)
             }
-            for (const v of toRollback) {
-                const m = migrations.find((x) => x.version === v)
+            for (const key of toRollback) {
+                const m = migrations.find((x) => `${x.version}_${x.name}` === key)
                 if (!m) {
-                    console.error('Migration version not found:', v)
+                    console.error('Migration version not found:', key)
                     process.exit(1)
                 }
                 let downSql: string
@@ -211,7 +220,7 @@ async function run() {
                 }
                 console.log('Rolling back', m.version, m.name, '...')
                 await getPool().query(downSql)
-                await getPool().query('DELETE FROM schema_migrations WHERE version = $1', [m.version])
+                await getPool().query('DELETE FROM schema_migrations WHERE version = $1 AND name = $2', [m.version, m.name])
                 console.log('Rolled back', m.version, m.name)
             }
             console.log('Rollback completed.')
@@ -219,7 +228,7 @@ async function run() {
             process.exit(0)
         }
 
-        const pending = migrations.filter((m) => !applied.includes(m.version))
+        const pending = migrations.filter((m) => !applied.includes(`${m.version}_${m.name}`))
         if (pending.length === 0) {
             console.log('No pending migrations.')
             await closePool()
@@ -249,7 +258,7 @@ async function run() {
             console.log('Applying', m.version, m.name, '...')
             await getPool().query(sql)
             await getPool().query(
-                'INSERT INTO schema_migrations (version, name) VALUES ($1, $2)',
+                'INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version, name) DO NOTHING',
                 [m.version, m.name]
             )
             console.log('Applied', m.version, m.name)

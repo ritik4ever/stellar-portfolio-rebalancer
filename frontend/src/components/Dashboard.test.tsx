@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Dashboard from './Dashboard'
 
@@ -26,6 +26,7 @@ vi.mock('../hooks/queries/usePortfolioQuery', () => ({
     usePortfolioDetails: queryMocks.usePortfolioDetails,
     useRebalanceEstimate: queryMocks.useRebalanceEstimate,
     useRebalancePlan: queryMocks.useRebalancePlan,
+    usePortfolioCostSummary: vi.fn(() => ({ data: undefined, isLoading: false })),
     buildRebalanceConfirmationSummary: vi.fn(() => ({
         slippage: ['Slippage note'],
         prices: ['Price note'],
@@ -50,11 +51,15 @@ vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
 vi.mock('../context/ThemeContext', () => ({
     useTheme: vi.fn(() => ({ isDark: false })),
 }))
-vi.mock('@tanstack/react-query', () => ({
-    useQueryClient: vi.fn(() => ({
-        invalidateQueries: vi.fn(async () => undefined),
-    })),
-}))
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@tanstack/react-query')>()
+    return {
+        ...actual,
+        useQueryClient: vi.fn(() => ({
+            invalidateQueries: vi.fn(async () => undefined),
+        })),
+    }
+})
 
 vi.mock('./ThemeToggle', () => ({ default: () => <div>Theme Toggle</div> }))
 vi.mock('recharts', () => ({
@@ -90,6 +95,13 @@ vi.mock('../utils/stellar', () => ({
 
 vi.mock('../services/authService', () => ({
     logout: vi.fn(async () => undefined),
+    getAccessToken: vi.fn(() => 'mock-token'),
+    getRefreshToken: vi.fn(() => 'mock-refresh-token'),
+    isAuthenticated: vi.fn(() => true),
+    setTokens: vi.fn(),
+    clearTokens: vi.fn(),
+    onAuthSessionExpired: vi.fn(() => () => {}),
+    onAuthSessionRestored: vi.fn(() => () => {}),
 }))
 
 vi.mock('../hooks/usePortfolio', async () => {
@@ -111,7 +123,11 @@ vi.mock('../config/api', async () => {
     return {
         ...actual,
         API_CONFIG: { ...actual.API_CONFIG, USE_BROWSER_PRICES: false },
-        api: { delete: vi.fn(async () => undefined) },
+        api: {
+            ...actual.api,
+            get: vi.fn(async () => ({ success: true, data: [] })),
+            delete: vi.fn(async () => undefined),
+        },
         downloadPortfolioExport: vi.fn(async () => undefined),
     }
 })

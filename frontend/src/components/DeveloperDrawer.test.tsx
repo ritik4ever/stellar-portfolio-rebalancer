@@ -132,7 +132,7 @@ describe('DeveloperDrawer', () => {
 
             const diff = computeCapabilityDiff(current, previous)
 
-            expect(diff).toHaveLength(3)
+            expect(diff).toHaveLength(4)
             expect(diff.find((d) => d.method === 'deposit')?.type).toBe('removed')
             expect(diff.find((d) => d.method === 'withdraw')?.type).toBe('added')
             expect(diff.find((d) => d.method === 'get_portfolio')?.type).toBe('unchanged')

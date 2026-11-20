@@ -194,7 +194,7 @@ backtestRouter.post('/backtest', validateRequest(backtestRequestSchema), async (
 
 // GET /api/v1/backtest/:id and GET /api/backtest/:id
 backtestRouter.get('/backtest/:id', async (req: Request, res: Response) => {
-    const record = await backtestStorage.getRecord(req.params.id)
+    const record = await backtestStorage.getRecord(req.params.id as string)
     if (!record) {
         return fail(res, 404, 'NOT_FOUND', 'Backtest record not found')
     }
@@ -222,7 +222,7 @@ backtestRouter.post(
     (req: Request, _res: Response, next) => {
         req.body = req.body ?? {}
         if (!req.body.portfolioId && req.params.id) {
-            req.body.portfolioId = req.params.id
+            req.body.portfolioId = req.params.id as string
         }
         next()
     },
@@ -230,7 +230,7 @@ backtestRouter.post(
     async (req: Request, res: Response) => {
         return executeBacktestPriceWindow({
             ...req.body,
-            portfolioId: req.params.id,
+            portfolioId: req.params.id as string,
         }, res)
     }
 )
@@ -247,7 +247,7 @@ backtestRouter.get(
             ? req.query.offset
             : (typeof req.query.offset === 'string' ? parseInt(req.query.offset, 10) : 0)
 
-        const records = await backtestStorage.listRecords({ portfolioId: req.params.id, limit, offset })
+        const records = await backtestStorage.listRecords({ portfolioId: req.params.id as string, limit, offset })
         return ok(res, { records, count: records.length, limit, offset })
     }
 )

@@ -57,6 +57,18 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                 >
                     {formatLegalVersionLabel()}
                 </p>
+
+                <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                    <h3 className="font-semibold mb-2">Consent document version history</h3>
+                    <p className="mb-3">
+                        Before re-accepting, review what may have changed in the consent documents.
+                    </p>
+                    <ul className="list-disc space-y-1 pl-5">
+                        <li>Terms of Service may include updated disclaimers, liability terms, and smart contract risk language.</li>
+                        <li>Privacy Policy may include updated data handling, retention, and compliance information.</li>
+                        <li>Cookie Policy may include updated cookie usage and preference details.</li>
+                    </ul>
+                </div>
                 <div className="space-y-4">
                     <label className="flex items-start gap-3 cursor-pointer">
                         <input

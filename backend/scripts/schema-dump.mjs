@@ -5,7 +5,16 @@
  */
 
 import 'dotenv/config';
-import { getPool, closePool, isDbConfigured } from '../src/db/client.js';
+import { existsSync, writeFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const clientPath = existsSync(join(__dirname, '../dist/db/client.js'))
+  ? '../dist/db/client.js'
+  : '../src/db/client.js';
+
+const { getPool, closePool, isDbConfigured } = await import(clientPath);
 
 async function dumpSchema() {
   if (!isDbConfigured()) {
@@ -35,11 +44,18 @@ async function dumpSchema() {
 
     // Get table definitions
     for (const table of tables) {
-      const result = await pool.query(
-        `SELECT pg_get_ddl('${table}'::regclass) as ddl`
-      );
-      if (result.rows[0]?.ddl) {
-        schema += result.rows[0].ddl + ';\n\n';
+      try {
+        const result = await pool.query(
+          `SELECT pg_get_ddl('${table}'::regclass) as ddl`
+        );
+        if (result.rows[0]?.ddl) {
+          schema += result.rows[0].ddl + ';\n\n';
+        }
+      } catch {
+        const cols = await pool.query(
+          `SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table}' ORDER BY ordinal_position`
+        );
+        schema += `CREATE TABLE ${table} (\n` + cols.rows.map((c) => `  ${c.column_name} ${c.data_type} ${c.is_nullable === 'NO' ? 'NOT NULL' : ''}`).join(',\n') + '\n);\n\n';
       }
     }
 
@@ -66,8 +82,7 @@ async function dumpSchema() {
     }
 
     // Write to file
-    const fs = await import('fs').then((m) => m.default);
-    fs.writeFileSync(outputFile, schema);
+    writeFileSync(outputFile, schema);
     console.log(`✅ Schema dumped to ${outputFile}`);
     process.exit(0);
   } catch (error) {

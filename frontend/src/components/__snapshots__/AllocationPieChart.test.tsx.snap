@@ -18,7 +18,8 @@ exports[`AllocationPieChart > renders chart with data 1`] = `
         data-testid="edit-btn"
       >
         <svg
-          class="w-4 h-4"
+          aria-hidden="true"
+          class="lucide lucide-pencil w-4 h-4"
           fill="none"
           height="24"
           stroke="currentColor"
@@ -30,7 +31,7 @@ exports[`AllocationPieChart > renders chart with data 1`] = `
           xmlns="http://www.w3.org/2000/svg"
         >
           <path
-            d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"
+            d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"
           />
           <path
             d="m15 5 4 4"
@@ -132,7 +133,8 @@ exports[`AllocationPieChart > renders empty state 1`] = `
         data-testid="edit-btn"
       >
         <svg
-          class="w-4 h-4"
+          aria-hidden="true"
+          class="lucide lucide-pencil w-4 h-4"
           fill="none"
           height="24"
           stroke="currentColor"
@@ -144,7 +146,7 @@ exports[`AllocationPieChart > renders empty state 1`] = `
           xmlns="http://www.w3.org/2000/svg"
         >
           <path
-            d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"
+            d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"
           />
           <path
             d="m15 5 4 4"
@@ -211,7 +213,8 @@ exports[`AllocationPieChart > renders single asset 1`] = `
         data-testid="edit-btn"
       >
         <svg
-          class="w-4 h-4"
+          aria-hidden="true"
+          class="lucide lucide-pencil w-4 h-4"
           fill="none"
           height="24"
           stroke="currentColor"
@@ -223,7 +226,7 @@ exports[`AllocationPieChart > renders single asset 1`] = `
           xmlns="http://www.w3.org/2000/svg"
         >
           <path
-            d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"
+            d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"
           />
           <path
             d="m15 5 4 4"

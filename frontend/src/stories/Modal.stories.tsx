@@ -1,3 +1,4 @@
+import React from 'react'
 import type { Meta, StoryObj } from '@storybook/react'
 import { Modal } from '../components/ui/Modal'
 import { Button } from '../components/ui/Button'

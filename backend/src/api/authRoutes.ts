@@ -202,7 +202,7 @@ router.post('/verify', authRateLimiter, async (req: Request, res: Response) => {
 router.delete('/sessions/:tokenId', requireJwt, async (req: Request, res: Response) => {
     try {
         const userId = req.user!.address
-        const { tokenId } = req.params
+        const tokenId = req.params.tokenId as string
         const result = await revokeDeviceSession(userId, tokenId)
         if (!result.success) {
             if (result.reason === 'not_found') return fail(res, 404, 'NOT_FOUND', 'Session not found')

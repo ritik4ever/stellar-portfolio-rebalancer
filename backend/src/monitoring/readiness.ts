@@ -19,7 +19,7 @@ type ReadinessState = "ready" | "not_ready" | "disabled";
 
 // ── Readiness cache ─────────────────────────────────────────────────────────
 interface CacheEntry {
-  report: object
+  report: any
   expiresAt: number
 }
 

@@ -105,7 +105,7 @@ jobs:
         env:
           VITE_API_URL: http://localhost:3001
           VITE_E2E_MOCK_WALLET: 'true'
-        run: npm run test:e2e:visual
+        run: npm run test:e2e:visual-update
 
       - name: Upload Playwright visual report
         if: always()

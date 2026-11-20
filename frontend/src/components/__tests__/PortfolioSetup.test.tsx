@@ -7,7 +7,9 @@ vi.mock('../../hooks/queries/useAssetsQuery', () => ({
 }))
 
 vi.mock('../../hooks/mutations/usePortfolioMutations', () => ({
-  useCreatePortfolioMutation: () => ({ mutateAsync: async () => ({}), isPending: false })
+  useCreatePortfolioMutation: () => ({ mutateAsync: async () => ({}), isPending: false }),
+  useImportPortfolioMutation: () => ({ mutateAsync: async () => ({}), isPending: false }),
+  buildRollbackMessage: () => 'Rollback message',
 }))
 
 import PortfolioSetup from '../PortfolioSetup'
