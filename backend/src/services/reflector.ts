@@ -42,6 +42,10 @@ export interface OracleReachabilityResult {
     error?: string
 }
 
+const ORACLE_DEVIATION_TOLERANCE_BPS = 300
+const REFLECTOR_TIMEOUT_MS = 5000
+const MAX_REFLECTOR_INTEGER = '170141183460469231731687303715884105727'
+
 const DEFAULT_SYMBOLS = ['XLM', 'BTC', 'ETH', 'USDC']
 const DEFAULT_COIN_IDS: Record<string, string> = {
     'XLM': 'stellar',
@@ -58,6 +62,7 @@ export class ReflectorService {
     private readonly PRICE_DATA_MAX_AGE = Number.parseInt(process.env.PRICE_DATA_MAX_AGE || '600', 10)
     private readonly CACHE_DURATION = process.env.NODE_ENV === 'production' ? 600000 : 300000 // 10 min vs 5 min
     private lastRequestTime = 0
+    private pendingResolution?: ReturnType<ReflectorService['resolvePricesWithRedisCache']>
     private readonly MIN_REQUEST_INTERVAL = 90000 // Increased to 1.5 minutes for Pro API
     private readonly oracleCacheTtlSeconds: number
 
@@ -111,12 +116,12 @@ export class ReflectorService {
     }
 
     async getCurrentPrices(): Promise<PricesMap> {
-        const { map, hint, cacheStatus } = await this.resolvePricesWithRedisCache()
+        const { map } = await this.resolvePrices()
         return this.applyQuoteAges(map)
     }
 
     async getCurrentPricesWithMeta(): Promise<PricesFeedPayload> {
-        const { map, hint, cacheStatus } = await this.resolvePricesWithRedisCache()
+        const { map, hint, cacheStatus } = await this.resolvePrices()
         const prices = this.applyQuoteAges(map)
         return { prices, feedMeta: this.buildFeedMeta(prices, hint, cacheStatus) }
     }
@@ -129,6 +134,7 @@ export class ReflectorService {
         const staleOrLimited =
             hint === 'error_recovery_cache'
             || hint === 'rate_limited_cache'
+            || (hint === 'partial_merge' && this.getAssetList().some(asset => prices[asset] === undefined))
         const meta: PriceFeedMeta = {
             provider: 'backend',
             resolvedAtMs: Date.now(),
@@ -149,6 +155,8 @@ export class ReflectorService {
             this.redisCache = new IORedis(REDIS_URL, {
                 lazyConnect: true,
                 connectTimeout: 2000,
+                commandTimeout: 2000,
+                enableOfflineQueue: false,
                 maxRetriesPerRequest: 1,
                 enableReadyCheck: false,
                 retryStrategy: () => null
@@ -202,6 +210,20 @@ export class ReflectorService {
         }
     }
 
+    private async resolvePrices() {
+        if (this.pendingResolution) {
+            logger.info('[ORACLE] quote_precision', { source: 'price_feed', outcome: 'delayed', reason: 'in_flight' })
+            return this.pendingResolution
+        }
+
+        this.pendingResolution = this.resolvePricesWithRedisCache()
+        try {
+            return await this.pendingResolution
+        } finally {
+            this.pendingResolution = undefined
+        }
+    }
+
     private async resolvePricesWithRedisCache(): Promise<{ map: PricesMap; hint: PriceResolutionHint; cacheStatus: PriceFeedMeta['cacheStatus'] }> {
         if (this.oracleCacheTtlSeconds === 0) {
             const result = await this.resolvePricesInternal()
@@ -210,7 +232,8 @@ export class ReflectorService {
 
         const redisResult = await this.readFromRedisCache()
         if (redisResult?.cacheStatus === 'redis_hit' && Object.keys(redisResult.map).length > 0) {
-            return { map: redisResult.map, hint: 'cached_only', cacheStatus: 'redis_hit' }
+            const incomplete = this.getAssetList().some(asset => redisResult.map[asset] === undefined)
+            return { map: redisResult.map, hint: incomplete ? 'partial_merge' : 'cached_only', cacheStatus: 'redis_hit' }
         }
 
         const resolved = await this.resolvePricesInternal()
@@ -236,7 +259,7 @@ export class ReflectorService {
 
             const now = Date.now()
             if (now - this.lastRequestTime < this.MIN_REQUEST_INTERVAL) {
-                logger.info('[DEBUG] Rate limiting - using cached prices only')
+                this.logCoinGeckoFallback('delayed', 'local_rate_limit', { assets })
                 if (Object.keys(cachedPrices).length > 0) {
                     recordReflectorFallbackUsage('rate_limited_cache')
                     return { map: cachedPrices, hint: 'rate_limited_cache' }
@@ -249,17 +272,27 @@ export class ReflectorService {
             }
 
             let reflectorPrices: PricesMap = {}
+            const staleReflectorPrices = new Map<string, number>()
+            const reflectorTimeout = AbortSignal.timeout(REFLECTOR_TIMEOUT_MS)
             try {
-                reflectorPrices = await this.getReflectorPrices(assets)
-            } catch (reflectorError) {
-                logger.warn('[WARNING] Reflector fetch failed, falling back to CoinGecko', { reflectorError })
+                reflectorPrices = await this.getReflectorPrices(assets, staleReflectorPrices, reflectorTimeout)
+            } catch {
+                if (reflectorTimeout.aborted) {
+                    logger.warn('[ORACLE] quote_precision', { source: 'reflector', outcome: 'delayed', reason: 'timeout', assets })
+                } else {
+                    logger.warn('[WARNING] Reflector fetch failed, falling back to CoinGecko')
+                }
             }
 
             const missingAssets = assets.filter((asset) => reflectorPrices[asset] === undefined)
-            const coinIds = this.getCoinIdMap()
-            const freshPrices = missingAssets.length > 0
-                ? await this.getFreshPrices(missingAssets, coinIds)
-                : {}
+            let freshPrices: PricesMap = {}
+            if (missingAssets.length > 0) {
+                try {
+                    freshPrices = await this.getFreshPrices(missingAssets, this.getCoinIdMap(), staleReflectorPrices)
+                } catch (error) {
+                    if (Object.keys(reflectorPrices).length === 0) throw error
+                }
+            }
 
             const merged = { ...cachedPrices, ...reflectorPrices, ...freshPrices } as PricesMap
             if (Object.keys(merged).length === 0) {
@@ -269,9 +302,7 @@ export class ReflectorService {
             const hint: PriceResolutionHint =
                 Object.keys(reflectorPrices).length + Object.keys(freshPrices).length === assets.length
                     ? 'fresh_primary'
-                    : Object.keys(cachedPrices).length > 0
-                      ? 'partial_merge'
-                      : 'fresh_primary'
+                    : 'partial_merge'
             return { map: merged, hint }
         } catch (error) {
             logger.error('[ERROR] Price fetch failed', { error })
@@ -358,12 +389,46 @@ export class ReflectorService {
     }
 
     private normalizeReflectorPrice(raw: string | number | bigint, decimals: number): number {
-        const numeric = typeof raw === 'bigint' ? Number(raw) : Number(raw)
-        if (!Number.isFinite(numeric)) {
-            throw new Error('Invalid Reflector price value')
+        if (!Number.isInteger(decimals) || decimals < 0 || decimals > 38) {
+            throw new TypeError('Invalid Reflector price scale')
         }
-        if (decimals <= 0) return numeric
-        return numeric / (10 ** decimals)
+        if (typeof raw === 'number' && Number.isInteger(raw) && !Number.isSafeInteger(raw)) {
+            throw new RangeError('Unsafe Reflector integer')
+        }
+        if (typeof raw !== 'number' && typeof raw !== 'string' && typeof raw !== 'bigint') {
+            throw new TypeError('Invalid Reflector price value')
+        }
+
+        const digits = raw.toString().trim()
+        if (!/^\d+$/.test(digits)) {
+            // Unscaled feeds also provide ordinary decimal prices.
+            const price = Number(digits)
+            if (decimals === 0 && /^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(digits)
+                && Number.isFinite(price) && price > 0) {
+                if (Number.isInteger(price) && !Number.isSafeInteger(price)) {
+                    throw new RangeError('Unsafe Reflector integer')
+                }
+                return price
+            }
+            throw new TypeError('Invalid Reflector price value')
+        }
+
+        const units = digits.replace(/^0+/, '')
+        if (!units) throw new TypeError('Invalid Reflector price value')
+        if (units.length > MAX_REFLECTOR_INTEGER.length
+            || (units.length === MAX_REFLECTOR_INTEGER.length && units > MAX_REFLECTOR_INTEGER)) {
+            throw new RangeError('Reflector integer exceeds i128 range')
+        }
+        const price = Number(`${units}e-${decimals}`)
+
+        // Verify that the number's shortest serialized decimal still encodes the original units.
+        const [coefficient, exponent] = price.toExponential().split('e')
+        const significantDigits = coefficient.replace('.', '')
+        const zeroCount = Number(exponent) + decimals - significantDigits.length + 1
+        if (zeroCount < 0 || significantDigits + '0'.repeat(zeroCount) !== units) {
+            throw new RangeError('Reflector price loses integer units')
+        }
+        return price
     }
 
     private isPriceStale(timestamp: number): boolean {
@@ -372,12 +437,15 @@ export class ReflectorService {
         return (nowSec - tsSec) > this.PRICE_DATA_MAX_AGE
     }
 
-    private async getReflectorPrices(assets: string[]): Promise<PricesMap> {
+    private async getReflectorPrices(
+        assets: string[], stalePrices: Map<string, number>, signal: AbortSignal
+    ): Promise<PricesMap> {
         if (!this.reflectorApiUrl) return {}
 
         const url = `${this.reflectorApiUrl.replace(/\/$/, '')}/prices?assets=${encodeURIComponent(assets.join(','))}`
         const response = await fetch(url, {
             method: 'GET',
+            signal,
             headers: {
                 'Accept': 'application/json',
                 'User-Agent': 'StellarPortfolioRebalancer/1.0'
@@ -388,13 +456,9 @@ export class ReflectorService {
             throw new Error(`Reflector API error: ${response.status}`)
         }
 
-        const payload = await response.json() as {
-            prices?: Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }>
-        } | Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }>
-
-        const rows: Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }> = ('prices' in payload && payload.prices)
-            ? payload.prices
-            : payload
+        type ReflectorRow = { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }
+        const payload = await response.json() as { prices?: Record<string, ReflectorRow> } | Record<string, ReflectorRow>
+        const rows = (('prices' in payload && payload.prices) ? payload.prices : payload) as Record<string, ReflectorRow>
 
         const out: PricesMap = {}
         let staleCount = 0
@@ -403,14 +467,31 @@ export class ReflectorService {
             const row = rows?.[asset]
             if (!row) return
 
-            if (this.isPriceStale(row.timestamp)) {
+            const stale = this.isPriceStale(row.timestamp)
+            if (stale) {
                 staleCount += 1
                 recordReflectorStalePrice(asset)
-                return
             }
 
+            const decimals = row.decimals ?? 0
+            const context = { source: 'reflector', asset, decimals: Number.isInteger(decimals) ? decimals : undefined }
+            let price: number
+            try {
+                price = this.normalizeReflectorPrice(row.price, decimals)
+            } catch (error) {
+                logger.warn('[ORACLE] quote_precision', {
+                    ...context, outcome: 'blocked', reason: error instanceof RangeError ? 'integer_overflow' : 'invalid_quote'
+                })
+                return
+            }
+            if (stale) {
+                stalePrices.set(asset, price)
+                return
+            }
+            logger.info('[ORACLE] quote_precision', { ...context, outcome: 'success', reason: 'normalized' })
+
             out[asset] = {
-                price: this.normalizeReflectorPrice(row.price, row.decimals ?? 0),
+                price,
                 change: row.change ?? 0,
                 timestamp: row.timestamp,
                 source: 'reflector',
@@ -434,154 +515,134 @@ export class ReflectorService {
         return out
     }
 
-    private async getFreshPrices(assets: string[], coinIds: Record<string, string>): Promise<PricesMap> {
+    private logCoinGeckoFallback(
+        outcome: 'success' | 'delayed' | 'blocked',
+        reason: string,
+        context: { assets?: string[]; asset?: string; httpStatus?: number; deviationBps?: number; toleranceBps?: number }
+    ): void {
+        const source = this.coinGeckoApiKey ? 'coingecko_pro' : 'coingecko_free'
+        const fields = { source, outcome, reason, ...context }
+        if (outcome === 'success' && reason !== 'price_disagreement') {
+            logger.info('[ORACLE] coingecko_fallback', fields)
+        } else {
+            logger.warn('[ORACLE] coingecko_fallback', fields)
+        }
+    }
+
+    private async getFreshPrices(
+        assets: string[], coinIds: Record<string, string>, staleReflectorPrices: Map<string, number>
+    ): Promise<PricesMap> {
+        const logQuote = (asset: string, price: number, reason: 'cache_hit' | 'fetched') => {
+            const reference = staleReflectorPrices.get(asset)
+            if (reference !== undefined) {
+                const deviation = (Math.abs(reference - price) / Math.max(reference, price)) * 10_000
+                const deviationBps = Number(deviation.toFixed(9))
+                if (deviationBps > ORACLE_DEVIATION_TOLERANCE_BPS) {
+                    this.logCoinGeckoFallback('success', 'price_disagreement', {
+                        asset, deviationBps, toleranceBps: ORACLE_DEVIATION_TOLERANCE_BPS
+                    })
+                    return
+                }
+            }
+            this.logCoinGeckoFallback('success', reason, { asset })
+        }
+
         const now = Date.now()
         const cachedFallback = this.coinGeckoFallbackCache.getAll(assets, now)
         if (cachedFallback) {
-            logger.info('[DEBUG] CoinGecko fallback cache hit', { assets })
+            assets.forEach(asset => logQuote(asset, cachedFallback[asset].price, 'cache_hit'))
             return cachedFallback
         }
 
-        // Rate limiting - don't make requests too frequently
         if (now - this.lastRequestTime < this.MIN_REQUEST_INTERVAL) {
-            logger.info('[DEBUG] Rate limiting - using cached prices')
+            this.logCoinGeckoFallback('delayed', 'local_rate_limit', { assets })
             return {}
         }
 
         this.lastRequestTime = now
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
+        let httpStatus: number | undefined
+        let failureReason = 'request_failed'
 
         try {
-            const apiKey = this.coinGeckoApiKey
-            const baseUrl = this.getBaseUrl()
-            logger.info('[DEBUG] Using API', { api: apiKey ? 'CoinGecko Pro' : 'CoinGecko Free' })
-            logger.info('[DEBUG] Base URL', { baseUrl })
-
-            const headers: Record<string, string> = {
-                'Accept': 'application/json',
-                'User-Agent': 'StellarPortfolioRebalancer/1.0'
-            }
-
-            // FIXED: Build correct coin IDs from registry map
-            const coinIdsParam = assets
-                .map(asset => coinIds[asset])
-                .filter(Boolean)
-                .join(',')
-
-            logger.info('[DEBUG] Coin IDs', { coinIds: coinIdsParam })
-
-            // FIXED: Correct API endpoint and parameters
-            const endpoint = '/simple/price'
             const params = new URLSearchParams({
-                'ids': coinIdsParam,
-                'vs_currencies': 'usd',
-                'include_24hr_change': 'true',
-                'include_last_updated_at': 'true'
+                ids: assets.map(asset => coinIds[asset]).filter(Boolean).join(','),
+                vs_currencies: 'usd',
+                include_24hr_change: 'true',
+                include_last_updated_at: 'true'
             })
-
-            const url = `${baseUrl}${endpoint}?${params.toString()}`
-            logger.info('[DEBUG] Full URL', { url })
-            logger.info('[DEBUG] Headers', { headers })
-
-            const controller = new AbortController()
-            const timeoutId = setTimeout(() => controller.abort(), 15000)
-
-            const response = await fetch(url, {
-                headers,
+            const response = await fetch(`${this.getBaseUrl()}/simple/price?${params.toString()}`, {
+                headers: {
+                    'Accept': 'application/json',
+                    'User-Agent': 'StellarPortfolioRebalancer/1.0'
+                },
                 method: 'GET',
                 signal: controller.signal
             })
-
-            clearTimeout(timeoutId)
-
-            logger.info('[DEBUG] Response status', { status: response.status })
-            logger.info('[DEBUG] Response headers', { headers: Object.fromEntries(response.headers.entries()) })
-
+            httpStatus = response.status
             if (!response.ok) {
-                // Get the actual error response
-                const errorText = await response.text()
-                logger.error('[ERROR] CoinGecko API error response', { error: errorText })
-
-                if (response.status === 429) {
-                    logger.warn('[ERROR] CoinGecko rate limit exceeded')
-                    throw new Error('Rate limit exceeded')
-                }
-
-                if (response.status === 401) {
-                    logger.error('[ERROR] CoinGecko API key invalid')
-                    throw new Error('Invalid API key')
-                }
-
-                if (response.status === 400) {
-                    logger.error('[ERROR] CoinGecko bad request - check parameters')
-                    throw new Error(`Bad request: ${errorText}`)
-                }
-
-                throw new Error(`CoinGecko API error: ${response.status} - ${errorText}`)
+                failureReason = httpStatus === 429 ? 'provider_rate_limit' : 'http_error'
+                throw new Error('CoinGecko request failed')
             }
 
+            failureReason = 'invalid_response'
             const data = await response.json()
-            logger.info('[DEBUG] CoinGecko response data', { data })
-
             const prices: PricesMap = {}
 
             assets.forEach(asset => {
-                const coinId = coinIds[asset]
-                const coinData = data[coinId]
+                const coinData = data?.[coinIds[asset]]
+                if (typeof coinData?.usd !== 'number' || !Number.isFinite(coinData.usd) || coinData.usd <= 0) {
+                    this.logCoinGeckoFallback('blocked', 'no_valid_quote', { asset })
+                    return
+                }
 
-                if (coinData && coinData.usd !== undefined) {
-                    const priceData: PriceData = {
-                        price: coinData.usd || 0,
-                        change: coinData.usd_24h_change || 0,
-                        timestamp: coinData.last_updated_at || Math.floor(Date.now() / 1000),
-                        source: apiKey ? 'coingecko_pro' : 'coingecko_free',
-                        volume: coinData.usd_24h_vol || 0,
-                        servedFromCache: false,
-                        serverFetchedAtMs: Date.now(),
-                        dataTier: 'primary'
-                    }
+                const priceData: PriceData = {
+                    price: coinData.usd,
+                    change: coinData.usd_24h_change || 0,
+                    timestamp: coinData.last_updated_at || Math.floor(Date.now() / 1000),
+                    source: this.coinGeckoApiKey ? 'coingecko_pro' : 'coingecko_free',
+                    volume: coinData.usd_24h_vol || 0,
+                    servedFromCache: false,
+                    serverFetchedAtMs: Date.now(),
+                    dataTier: 'primary'
+                }
 
-                    prices[asset] = priceData
-
-                    const cachedAtMs = Date.now()
-                    this.priceCache.set(asset, {
-                        data: {
-                            price: priceData.price,
-                            change: priceData.change,
-                            timestamp: priceData.timestamp,
-                            source: priceData.source,
-                            volume: priceData.volume
-                        },
-                        cachedAtMs
-                    })
-                    this.coinGeckoFallbackCache.put(asset, { ...priceData, servedFromCache: true }, cachedAtMs)
-
-                    // Record cache update operation
-                    recordCacheOperation('update', asset)
-
-                    logger.info('[SUCCESS] Fresh price', {
-                        asset,
+                prices[asset] = priceData
+                const cachedAtMs = Date.now()
+                this.priceCache.set(asset, {
+                    data: {
                         price: priceData.price,
-                        change: priceData.change
-                    })
+                        change: priceData.change,
+                        timestamp: priceData.timestamp,
+                        source: priceData.source,
+                        volume: priceData.volume
+                    },
+                    cachedAtMs
+                })
+                this.coinGeckoFallbackCache.put(asset, { ...priceData, servedFromCache: true }, cachedAtMs)
+                recordCacheOperation('update', asset)
 
-                    try {
-                        databaseService.setAssetFreshness(asset, new Date().toISOString(), false)
-                    } catch (err) {
-                        logger.error(`[ASSET-REGISTRY] Failed to update freshness for ${asset} during CoinGecko fetch`, { err })
-                    }
-                } else {
-                    logger.warn('[WARNING] No data received for asset', { asset, coinId })
+                logQuote(asset, priceData.price, 'fetched')
+
+                try {
+                    databaseService.setAssetFreshness(asset, new Date().toISOString(), false)
+                } catch {
+                    logger.error('[ASSET-REGISTRY] Failed to update freshness during CoinGecko fetch', { asset })
                 }
             })
 
             if (Object.keys(prices).length === 0) {
                 throw new Error('No valid price data received from CoinGecko')
             }
-
             return prices
-        } catch (error) {
-            logger.error('[ERROR] Fresh price fetch failed', { error })
-            throw error
+        } catch {
+            const reason = controller.signal.aborted ? 'timeout' : failureReason
+            const outcome = reason === 'timeout' || reason === 'provider_rate_limit' ? 'delayed' : 'blocked'
+            this.logCoinGeckoFallback(outcome, reason, { assets, httpStatus })
+            throw new Error(`CoinGecko fallback failed: ${reason}`)
+        } finally {
+            clearTimeout(timeoutId)
         }
     }
 
@@ -785,7 +846,7 @@ export class ReflectorService {
     async testOracleReachability(
         options: { timeoutMs?: number; asset?: string } = {},
     ): Promise<OracleReachabilityResult> {
-        const timeoutMs = options.timeoutMs ?? 5000
+        const timeoutMs = options.timeoutMs ?? REFLECTOR_TIMEOUT_MS
         const asset = options.asset || this.getAssetList()[0] || DEFAULT_SYMBOLS[0]
         const endpoint = this.reflectorApiUrl.replace(/\/$/, '')
 
