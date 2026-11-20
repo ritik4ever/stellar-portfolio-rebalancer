@@ -90,7 +90,7 @@ Frontend: React + TypeScript + Tailwind CSS
 
 Backend: Node.js + Express + TypeScript
 
-Price Data: Reflector + CoinGecko API
+Price Data: Reflector + CoinGecko API. See [backend oracle quotes](backend/docs/oracle-quotes.md) for precision and fallback diagnostics.
 
 
 Rust + Cargo
