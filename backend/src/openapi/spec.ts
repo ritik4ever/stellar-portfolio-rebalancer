@@ -755,6 +755,31 @@ const spec: Record<string, any> = {
                                                 projectedAllocations: { type: 'object', additionalProperties: { type: 'number' } },
                                                 prices: { type: 'object', additionalProperties: { $ref: '#/components/schemas/PriceData' } },
                                                 priceFeedMeta: { type: 'object' },
+                                                boundary: {
+                                                    type: 'object',
+                                                    description: 'Stable decision for this plan. Trades are in sorted asset order and quoteSnapshot is the single quote captured for the plan.',
+                                                    properties: {
+                                                        result: { type: 'string', enum: ['no_trades_needed', 'trades_required'] },
+                                                        reasonCode: { type: 'string', enum: ['WITHIN_EVERY_THRESHOLD', 'DRIFT_EXCEEDS_THRESHOLD', 'TRADES_REQUIRED'] },
+                                                        reason: { type: 'string' },
+                                                        withinEveryThreshold: { type: 'boolean' },
+                                                        thresholdPercent: { type: 'number' },
+                                                        maxDriftPercent: { type: 'number' },
+                                                        trades: {
+                                                            type: 'array',
+                                                            items: {
+                                                                type: 'object',
+                                                                properties: {
+                                                                    asset: { type: 'string' },
+                                                                    action: { type: 'string', enum: ['buy', 'sell'] },
+                                                                    amount: { type: 'number' },
+                                                                    value: { type: 'number' },
+                                                                },
+                                                            },
+                                                        },
+                                                        quoteSnapshot: { type: 'object' },
+                                                    },
+                                                },
                                             },
                                         },
                                         error: { type: 'object', nullable: true },
@@ -826,6 +851,31 @@ const spec: Record<string, any> = {
                                                 projectedAllocations: { type: 'object', additionalProperties: { type: 'number' } },
                                                 prices: { type: 'object', additionalProperties: { $ref: '#/components/schemas/PriceData' } },
                                                 priceFeedMeta: { type: 'object' },
+                                                boundary: {
+                                                    type: 'object',
+                                                    description: 'Stable decision for this plan. Trades are in sorted asset order and quoteSnapshot is the single quote captured for the plan.',
+                                                    properties: {
+                                                        result: { type: 'string', enum: ['no_trades_needed', 'trades_required'] },
+                                                        reasonCode: { type: 'string', enum: ['WITHIN_EVERY_THRESHOLD', 'DRIFT_EXCEEDS_THRESHOLD', 'TRADES_REQUIRED'] },
+                                                        reason: { type: 'string' },
+                                                        withinEveryThreshold: { type: 'boolean' },
+                                                        thresholdPercent: { type: 'number' },
+                                                        maxDriftPercent: { type: 'number' },
+                                                        trades: {
+                                                            type: 'array',
+                                                            items: {
+                                                                type: 'object',
+                                                                properties: {
+                                                                    asset: { type: 'string' },
+                                                                    action: { type: 'string', enum: ['buy', 'sell'] },
+                                                                    amount: { type: 'number' },
+                                                                    value: { type: 'number' },
+                                                                },
+                                                            },
+                                                        },
+                                                        quoteSnapshot: { type: 'object' },
+                                                    },
+                                                },
                                             },
                                         },
                                         error: { type: 'object', nullable: true },
@@ -1037,10 +1087,10 @@ const spec: Record<string, any> = {
             get: {
                 tags: ['Prices & market'],
                 summary: 'Get current prices',
-                description: 'Current asset prices (XLM, BTC, ETH, USDC, etc.) from Reflector/CoinGecko.',
+                description: 'Current asset prices (XLM, BTC, ETH, USDC, etc.) from Reflector/CoinGecko. The boundary field documents price provenance and an explicit rejection reason when Reflector does not quote one asset.',
                 responses: {
                     '200': {
-                        description: 'Map of asset to price data',
+                        description: 'Price map, feed metadata, and boundary decision',
                         content: {
                             'application/json': {
                                 schema: {
@@ -1049,7 +1099,21 @@ const spec: Record<string, any> = {
                                         success: { type: 'boolean' },
                                         data: {
                                             type: 'object',
-                                            additionalProperties: { $ref: '#/components/schemas/PriceData' },
+                                            properties: {
+                                                prices: { type: 'object', additionalProperties: { $ref: '#/components/schemas/PriceData' } },
+                                                feedMeta: { type: 'object' },
+                                                boundary: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        result: { type: 'string', enum: ['accepted', 'partial', 'rejected'] },
+                                                        reasonCode: { type: 'string', enum: ['FULL_REFLECTOR_COVERAGE', 'MISSING_REFLECTOR_QUOTE_FALLBACK', 'MISSING_REFLECTOR_QUOTE_REJECTED', 'MULTIPLE_NON_REFLECTOR_QUOTES', 'NO_PRICES'] },
+                                                        reason: { type: 'string' },
+                                                        provenance: { type: 'object' },
+                                                        rejection: { type: 'object', nullable: true },
+                                                        quoteSnapshot: { type: 'object' },
+                                                    },
+                                                },
+                                            },
                                         },
                                         error: { type: 'object', nullable: true },
                                         timestamp: { type: 'string', format: 'date-time' },

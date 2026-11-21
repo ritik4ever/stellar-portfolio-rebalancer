@@ -1,5 +1,6 @@
 import type { Portfolio, PriceFeedMeta, PricesMap } from '../types/index.js'
 import { Dec } from '../utils/decimal.js'
+import { evaluateRebalancePlanBoundary, type RebalancePlanBoundaryDecision } from './rebalanceBoundary.js'
 
 export interface RebalanceAssetPlan {
     asset: string
@@ -34,6 +35,7 @@ export interface RebalancePlan {
     projectedAllocations: Record<string, number>
     prices?: PricesMap
     priceFeedMeta: PriceFeedMeta
+    boundary: RebalancePlanBoundaryDecision
 }
 
 const BASE_FEE_STROOPS = 100
@@ -182,7 +184,7 @@ export function buildRebalancePlan(
     const totalFeeXlm = Dec.roundStellar(perTradeFeeXlm * tradeCount)
     const xlmPriceUsd = prices.XLM?.price ?? 0
 
-    return {
+    const plan: Omit<RebalancePlan, 'boundary'> = {
         portfolioId: portfolio.id,
         totalValue,
         maxSlippagePercent: slippageTolerancePercent,
@@ -197,5 +199,10 @@ export function buildRebalancePlan(
         projectedAllocations,
         prices: Object.keys(prices).length > 0 ? prices : undefined,
         priceFeedMeta
+    }
+
+    return {
+        ...plan,
+        boundary: evaluateRebalancePlanBoundary(plan, portfolio.threshold)
     }
 }

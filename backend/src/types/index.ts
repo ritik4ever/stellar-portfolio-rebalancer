@@ -33,6 +33,7 @@ export interface PriceData {
     cacheAgeMs?: number
     quoteAgeSeconds?: number
     dataTier?: PriceDataTier
+    ledger?: number
 }
 
 export interface PricesFeedPayload {

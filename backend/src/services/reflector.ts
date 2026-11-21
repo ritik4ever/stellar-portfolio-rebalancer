@@ -6,6 +6,8 @@ import { assetRegistryService } from './assetRegistryService.js'
 import { CoinGeckoFallbackCache, readCoinGeckoFallbackTtlMs } from './coinGeckoFallbackCache.js'
 import { REDIS_URL } from '../queue/connection.js'
 import { databaseService } from './databaseService.js'
+import { evaluateReflectorPriceUpdate, type AcceptedReflectorQuote } from './priceIngestionBoundary.js'
+import { normalizeScaledQuote } from '../utils/quotePrecision.js'
 
 
 type PriceResolutionHint = PriceFeedMeta['resolutionHint']
@@ -44,7 +46,6 @@ export interface OracleReachabilityResult {
 
 const ORACLE_DEVIATION_TOLERANCE_BPS = 300
 const REFLECTOR_TIMEOUT_MS = 5000
-const MAX_REFLECTOR_INTEGER = '170141183460469231731687303715884105727'
 
 const DEFAULT_SYMBOLS = ['XLM', 'BTC', 'ETH', 'USDC']
 const DEFAULT_COIN_IDS: Record<string, string> = {
@@ -73,6 +74,7 @@ export class ReflectorService {
     private redisAvailable: boolean = false
     private readonly ORACLE_CACHE_KEY = 'oracle:prices'
     private readonly coinGeckoFallbackCache: CoinGeckoFallbackCache<PriceData>
+    private acceptedQuotes = new Map<string, AcceptedReflectorQuote>()
 
     constructor() {
         this.coinGeckoApiKey = process.env.COINGECKO_API_KEY || ''
@@ -388,49 +390,6 @@ export class ReflectorService {
         return cachedPrices
     }
 
-    private normalizeReflectorPrice(raw: string | number | bigint, decimals: number): number {
-        if (!Number.isInteger(decimals) || decimals < 0 || decimals > 38) {
-            throw new TypeError('Invalid Reflector price scale')
-        }
-        if (typeof raw === 'number' && Number.isInteger(raw) && !Number.isSafeInteger(raw)) {
-            throw new RangeError('Unsafe Reflector integer')
-        }
-        if (typeof raw !== 'number' && typeof raw !== 'string' && typeof raw !== 'bigint') {
-            throw new TypeError('Invalid Reflector price value')
-        }
-
-        const digits = raw.toString().trim()
-        if (!/^\d+$/.test(digits)) {
-            // Unscaled feeds also provide ordinary decimal prices.
-            const price = Number(digits)
-            if (decimals === 0 && /^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(digits)
-                && Number.isFinite(price) && price > 0) {
-                if (Number.isInteger(price) && !Number.isSafeInteger(price)) {
-                    throw new RangeError('Unsafe Reflector integer')
-                }
-                return price
-            }
-            throw new TypeError('Invalid Reflector price value')
-        }
-
-        const units = digits.replace(/^0+/, '')
-        if (!units) throw new TypeError('Invalid Reflector price value')
-        if (units.length > MAX_REFLECTOR_INTEGER.length
-            || (units.length === MAX_REFLECTOR_INTEGER.length && units > MAX_REFLECTOR_INTEGER)) {
-            throw new RangeError('Reflector integer exceeds i128 range')
-        }
-        const price = Number(`${units}e-${decimals}`)
-
-        // Verify that the number's shortest serialized decimal still encodes the original units.
-        const [coefficient, exponent] = price.toExponential().split('e')
-        const significantDigits = coefficient.replace('.', '')
-        const zeroCount = Number(exponent) + decimals - significantDigits.length + 1
-        if (zeroCount < 0 || significantDigits + '0'.repeat(zeroCount) !== units) {
-            throw new RangeError('Reflector price loses integer units')
-        }
-        return price
-    }
-
     private isPriceStale(timestamp: number): boolean {
         const tsSec = timestamp >= 1e12 ? Math.floor(timestamp / 1000) : Math.floor(timestamp)
         const nowSec = Math.floor(Date.now() / 1000)
@@ -456,12 +415,13 @@ export class ReflectorService {
             throw new Error(`Reflector API error: ${response.status}`)
         }
 
-        type ReflectorRow = { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }
+        type ReflectorRow = { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number; ledger?: number }
         const payload = await response.json() as { prices?: Record<string, ReflectorRow> } | Record<string, ReflectorRow>
         const rows = (('prices' in payload && payload.prices) ? payload.prices : payload) as Record<string, ReflectorRow>
 
         const out: PricesMap = {}
         let staleCount = 0
+        const nowMs = Date.now()
 
         assets.forEach((asset) => {
             const row = rows?.[asset]
@@ -477,7 +437,7 @@ export class ReflectorService {
             const context = { source: 'reflector', asset, decimals: Number.isInteger(decimals) ? decimals : undefined }
             let price: number
             try {
-                price = this.normalizeReflectorPrice(row.price, decimals)
+                price = normalizeScaledQuote(row.price, decimals).price
             } catch (error) {
                 logger.warn('[ORACLE] quote_precision', {
                     ...context, outcome: 'blocked', reason: error instanceof RangeError ? 'integer_overflow' : 'invalid_quote'
@@ -488,7 +448,47 @@ export class ReflectorService {
                 stalePrices.set(asset, price)
                 return
             }
+
+            const decision = evaluateReflectorPriceUpdate({
+                asset,
+                source: 'reflector',
+                price,
+                timestamp: row.timestamp,
+                ledger: row.ledger,
+                maxAgeSeconds: this.PRICE_DATA_MAX_AGE,
+                nowMs,
+                lastAccepted: this.acceptedQuotes.get(asset)
+            })
+            if (decision.result === 'rejected') {
+                logger.warn('[ORACLE] price_ingestion', {
+                    source: 'reflector',
+                    asset,
+                    outcome: 'blocked',
+                    reasonCode: decision.reasonCode,
+                    observedLedger: decision.observedLedger,
+                    acceptedLedger: decision.acceptedLedger,
+                    acceptedPrice: decision.acceptedPrice
+                })
+                return
+            }
+
             logger.info('[ORACLE] quote_precision', { ...context, outcome: 'success', reason: 'normalized' })
+            if (decision.reasonCode === 'FRESH_AT_LIMIT') {
+                logger.info('[ORACLE] price_ingestion', {
+                    source: 'reflector',
+                    asset,
+                    outcome: 'accepted',
+                    reasonCode: decision.reasonCode,
+                    ledger: decision.acceptedLedger,
+                    price: decision.acceptedPrice
+                })
+            }
+
+            this.acceptedQuotes.set(asset, {
+                source: 'reflector',
+                price: decision.acceptedPrice ?? price,
+                ledger: decision.acceptedLedger
+            })
 
             out[asset] = {
                 price,
@@ -497,12 +497,13 @@ export class ReflectorService {
                 source: 'reflector',
                 volume: row.volume,
                 servedFromCache: false,
-                serverFetchedAtMs: Date.now(),
-                dataTier: 'primary'
+                serverFetchedAtMs: nowMs,
+                dataTier: 'primary',
+                ledger: decision.acceptedLedger
             }
 
             try {
-                databaseService.setAssetFreshness(asset, new Date().toISOString(), false)
+                databaseService.setAssetFreshness(asset, new Date(nowMs).toISOString(), false)
             } catch (err) {
                 logger.error(`[ASSET-REGISTRY] Failed to update freshness for ${asset} during Reflector fetch`, { err })
             }

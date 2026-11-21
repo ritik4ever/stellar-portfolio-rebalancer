@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express'
 import { pricesQuerySchema } from './validation.js'
 import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
+import { evaluatePriceQuoteBoundary } from '../services/priceQuoteBoundary.js'
 import {
     riskManagementService,
     rebalanceHistoryService,
@@ -853,7 +854,7 @@ opsRouter.get('/prices', async (req: Request, res: Response) => {
             res.setHeader('X-Cache', 'BYPASS')
         }
 
-        return ok(res, payload)
+        return ok(res, { ...payload, boundary: evaluatePriceQuoteBoundary(payload) })
     } catch (error) {
         logger.error('[ERROR] Prices endpoint failed', { error: getErrorObject(error) })
 
