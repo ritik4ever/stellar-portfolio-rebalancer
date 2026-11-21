@@ -803,3 +803,31 @@ export function recordPortfolioPersistenceOutcome(input: {
         console.error('[METRICS] Failed to record portfolio persistence outcome:', error)
     }
 }
+
+// ── Partial trade handling outcomes (SPR-2026-129) ──────────────────────────
+
+export type PartialTradeObservabilityOutcome = 'success' | 'delay' | 'blocked'
+
+const partialTradeOutcomesTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}rebalance_partial_trade_outcomes_total`,
+    help: 'Total partial trade handling outcomes by source, outcome, and reason code',
+    labelNames: ['source', 'outcome', 'reason_code'] as const,
+    registers: [register],
+})
+
+export function recordPartialTradeOutcome(input: {
+    source: string
+    outcome: PartialTradeObservabilityOutcome
+    reasonCode: string
+}): void {
+    try {
+        partialTradeOutcomesTotal.inc({
+            source: input.source || 'unknown',
+            outcome: input.outcome,
+            reason_code: input.reasonCode || 'unknown',
+        })
+    } catch (error) {
+        console.error('[METRICS] Failed to record partial trade outcome:', error)
+    }
+}
+

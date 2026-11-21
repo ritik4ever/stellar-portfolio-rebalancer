@@ -41,7 +41,7 @@ export interface RebalanceEvent {
     gasUsed: string
     feePaid?: number
     slippageBps?: number
-    status: 'completed' | 'failed' | 'pending'
+    status: 'completed' | 'failed' | 'pending' | 'partial'
     isAutomatic?: boolean
     riskAlerts?: any[]
     error?: string
@@ -95,7 +95,7 @@ export class RebalanceHistoryService {
         trigger: string
         trades: number
         gasUsed: string
-        status: 'completed' | 'failed' | 'pending'
+        status: 'completed' | 'failed' | 'pending' | 'partial'
         timestamp?: string | Date
         /** Extra persisted detail, merged over the derived analysis fields. */
         details?: Record<string, unknown>
@@ -247,7 +247,7 @@ export class RebalanceHistoryService {
             recordPortfolioPersistenceOutcome({
                 source: persistenceContext.source,
                 outcome,
-                eventStatus: eventData.status,
+                eventStatus: eventData.status === 'partial' ? 'pending' : eventData.status,
                 stateTransition,
             })
             if (outcome === 'delayed') {
@@ -261,7 +261,7 @@ export class RebalanceHistoryService {
         recordPortfolioPersistenceOutcome({
             source: persistenceContext.source,
             outcome: 'success',
-            eventStatus: eventData.status,
+            eventStatus: eventData.status === 'partial' ? 'pending' : eventData.status,
             stateTransition,
         })
         logger.info('[REBALANCE-HISTORY] Recorded rebalance event', {
