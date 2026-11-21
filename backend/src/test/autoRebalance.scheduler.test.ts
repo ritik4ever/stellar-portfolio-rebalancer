@@ -83,6 +83,7 @@ vi.mock('../queue/workers/workerRuntime.js', () => ({
 }))
 
 import { isRiskPaused, processAutoRebalanceJob } from '../jobs/autoRebalance.js'
+import { cooldownGate } from '../services/guardrailOutcomes.js'
 import type { Portfolio } from '../types/index.js'
 
 const PRICES = {
@@ -144,6 +145,7 @@ const thresholdPortfolio = (overrides: Partial<Portfolio> = {}): Portfolio => ({
 describe('processAutoRebalanceJob — strategy dispatch', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        cooldownGate.reset()
         mocks.getCurrentPrices.mockResolvedValue(PRICES)
         mocks.getCurrentPricesWithMeta.mockResolvedValue({ prices: PRICES, feedMeta: FEED_META })
         mocks.shouldAllowRebalance.mockReturnValue({ allowed: true, reason: 'OK', alerts: [] })
@@ -213,6 +215,7 @@ describe('processAutoRebalanceJob — strategy dispatch', () => {
 describe('processAutoRebalanceJob — CVaR/VaR auto-pause integration', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        cooldownGate.reset()
         mocks.getCurrentPrices.mockResolvedValue(PRICES)
         mocks.getCurrentPricesWithMeta.mockResolvedValue({ prices: PRICES, feedMeta: FEED_META })
         mocks.checkCooldownPeriod.mockReturnValue({ safe: true })
@@ -306,6 +309,7 @@ describe('processAutoRebalanceJob — CVaR/VaR auto-pause integration', () => {
 describe('processAutoRebalanceJob — on-chain cross-check', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        cooldownGate.reset()
         mocks.getCurrentPrices.mockResolvedValue(PRICES)
         mocks.getCurrentPricesWithMeta.mockResolvedValue({ prices: PRICES, feedMeta: FEED_META })
         mocks.shouldAllowRebalance.mockReturnValue({ allowed: true, reason: 'OK', alerts: [] })

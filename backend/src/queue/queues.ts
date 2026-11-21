@@ -29,6 +29,14 @@ export interface RebalanceJobData {
   portfolioId: string;
   triggeredBy?: "auto" | "manual" | "force";
   correlationId?: string;
+  /**
+   * Oldest price timestamp (epoch ms) in the snapshot the enqueue decision was
+   * made against. When present, the rebalance worker re-checks freshness at
+   * execution time and defers if the prices went stale while queued.
+   */
+  pricesObservedAt?: number;
+  /** Recorded last-run time (ISO) of the cooldown claim that permitted this job. */
+  cooldownClaimedAt?: string;
 }
 
 export interface AnalyticsSnapshotJobData {
