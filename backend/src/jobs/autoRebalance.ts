@@ -14,6 +14,11 @@ import {
 import { notificationService } from "../services/notificationService.js";
 import { CircuitBreakers } from "../services/circuitBreakers.js";
 import {
+  cooldownGate,
+  emitGuardrailOutcome,
+  oldestPriceTimestampMs,
+} from "../services/guardrailOutcomes.js";
+import {
   computeDcaSchedule,
   crossCheckRebalanceDecision,
   shouldRebalanceByStrategy,
@@ -261,6 +266,21 @@ export async function processAutoRebalanceJob(
         reason: marketCheck.reason,
         correlationId,
       });
+      emitGuardrailOutcome({
+        guardrail: "circuit_breaker",
+        source: "auto_rebalance",
+        outcome: marketCheck.outcome ?? "delayed",
+        reasonCode: marketCheck.reasonCode ?? "HIGH_VOLATILITY",
+        reason: marketCheck.reason ?? "Market conditions unsafe",
+        evaluatedAt: new Date().toISOString(),
+        context: {
+          ...(marketCheck.context ?? {}),
+          jobId: job.id,
+          triggeredBy,
+          portfoliosAffected: eligible.length,
+          feedStale: feedMeta?.isStale === true,
+        },
+      });
       summary.portfoliosSkipped.push({ reason: "market_conditions", count: eligible.length });
       return summary;
     }
@@ -305,6 +325,16 @@ export async function processAutoRebalanceJob(
             portfolioId: portfolio.id,
             reason: cooldownCheck.reason,
           });
+          emitGuardrailOutcome({
+            guardrail: "cooldown",
+            source: "auto_rebalance",
+            outcome: cooldownCheck.outcome ?? "delayed",
+            reasonCode: cooldownCheck.reasonCode ?? "COOLDOWN_ACTIVE",
+            reason: cooldownCheck.reason ?? "Cooldown active",
+            portfolioId: portfolio.id,
+            evaluatedAt: new Date().toISOString(),
+            context: { ...(cooldownCheck.context ?? {}), jobId: job.id, triggeredBy },
+          });
           continue;
         }
 
@@ -332,6 +362,19 @@ export async function processAutoRebalanceJob(
             }
           } else {
             skipCounts["circuit_breaker"] = (skipCounts["circuit_breaker"] ?? 0) + 1;
+            const isConcentration = riskCheck.reasonCode === "CONCENTRATION_BREACH";
+            emitGuardrailOutcome({
+              guardrail: isConcentration ? "concentration_limit" : "circuit_breaker",
+              source: "auto_rebalance",
+              // A tripped breaker clears after its cooldown; a concentration
+              // breach needs the allocation itself to change.
+              outcome: isConcentration ? "blocked" : "delayed",
+              reasonCode: isConcentration ? "CONCENTRATION_OVER_CAP" : "CIRCUIT_BREAKER_ACTIVE",
+              reason: riskCheck.reason ?? "Risk check refused rebalance",
+              portfolioId: portfolio.id,
+              evaluatedAt: new Date().toISOString(),
+              context: { jobId: job.id, triggeredBy, riskReasonCode: riskCheck.reasonCode },
+            });
           }
           logger.debug("[WORKER:auto-rebalance] Portfolio skipped — risk check", {
             portfolioId: portfolio.id,
@@ -471,15 +514,41 @@ export async function processAutoRebalanceJob(
           continue;
         }
 
-        await rebalanceQueue.add(
-          `rebalance-${portfolio.id}`,
-          {
-            portfolioId: portfolio.id,
-            triggeredBy: "auto",
-            correlationId: correlationId,
-          },
-          { removeOnComplete: true },
-        );
+        // Claim the cooldown window atomically right before enqueueing so that
+        // concurrent requests crossing the expiry instant produce exactly one
+        // permitted execution with one recorded last-run time.
+        const claim = cooldownGate.tryClaim({
+          portfolioId: portfolio.id,
+          source: "auto_rebalance",
+          lastRebalance: portfolio.lastRebalance,
+          minCooldownHours: MIN_COOLDOWN_HOURS,
+        });
+        emitGuardrailOutcome({
+          ...claim,
+          context: { ...claim.context, jobId: job.id, triggeredBy },
+        });
+        if (!claim.claimed) {
+          skipCounts["cooldown"] = (skipCounts["cooldown"] ?? 0) + 1;
+          continue;
+        }
+
+        try {
+          await rebalanceQueue.add(
+            `rebalance-${portfolio.id}`,
+            {
+              portfolioId: portfolio.id,
+              triggeredBy: "auto",
+              correlationId: correlationId,
+              pricesObservedAt: oldestPriceTimestampMs(prices) ?? Date.now(),
+              cooldownClaimedAt: claim.recordedLastRunAt,
+            },
+            { removeOnComplete: true },
+          );
+        } catch (enqueueErr) {
+          // Nothing was scheduled, so give the window back.
+          cooldownGate.release(portfolio.id, claim.claimToken);
+          throw enqueueErr;
+        }
 
         recordAutoRebalanceSuccess(portfolio.id);
         summary.portfoliosTriggered++;

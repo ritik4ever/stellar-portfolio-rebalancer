@@ -444,6 +444,10 @@ Significant system actions (e.g., portfolio creations, configuration changes) ar
 - `action`: A string describing the specific action taken (e.g., `portfolio_created`, `rebalance_triggered`).
 - Additional fields specific to the action can be merged into the payload.
 
+### Guardrail outcomes
+
+Circuit breaker, cooldown, and concentration-limit decisions are logged as `[GUARDRAIL] <guardrail> <outcome>`. Each line has a `source`, a `reasonCode`, and diagnostic context. The `outcome` field (`allowed`, `delayed`, or `blocked`) tells operators whether work went ahead, was held back for now, or needs action. See [GUARDRAIL_OUTCOMES.md](GUARDRAIL_OUTCOMES.md) for the reason codes, the cooldown boundary contract, and example queries.
+
 ### Redaction
 
 For security and compliance, sensitive fields in log payloads (like passwords, tokens, or PII) are automatically redacted before the log is printed.

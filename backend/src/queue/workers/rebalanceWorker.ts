@@ -24,6 +24,7 @@ import {
 } from "./workerRuntime.js";
 import { broadcastPortfolioEvent } from "../../services/websocket.service.js";
 import { markRebalanceActive, markRebalanceInactive } from "../../services/portfolioPersistenceBoundary.js";
+import { emitGuardrailOutcome, evaluateQueuedPriceFreshness } from "../../services/guardrailOutcomes.js";
 
 let worker: Worker | null = null;
 const runtimeStatus = createWorkerRuntimeStatus("rebalance", 3);
@@ -60,7 +61,7 @@ function broadcastJobFailure(jobId: string, portfolioId: string, triggeredBy: st
 export async function processRebalanceJob(
   job: Job<RebalanceJobData>,
 ): Promise<void> {
-  const { portfolioId, triggeredBy, correlationId } = job.data;
+  const { portfolioId, triggeredBy, correlationId, pricesObservedAt } = job.data;
   const requestId = correlationId ?? randomUUID();
 
   return runWithRequestContext({ requestId }, async () => {
@@ -86,6 +87,37 @@ export async function processRebalanceJob(
         },
       );
       return;
+    }
+
+    // Circuit breaker: the enqueue decision was made against a price snapshot.
+    // If that snapshot aged past the freshness window while the job waited in
+    // the queue, defer instead of trading on stale prices. The next scheduled
+    // cycle re-evaluates with fresh prices.
+    if (typeof pricesObservedAt === "number" && Number.isFinite(pricesObservedAt)) {
+      const evaluated = evaluateQueuedPriceFreshness({
+        portfolioId,
+        source: "rebalance_worker",
+        pricesObservedAtMs: pricesObservedAt,
+        enqueuedAtMs: typeof job.timestamp === "number" ? job.timestamp : undefined,
+      });
+      const freshness = emitGuardrailOutcome({
+        ...evaluated,
+        context: { ...evaluated.context, jobId: job.id, triggeredBy },
+      });
+      if (freshness.outcome !== "allowed") {
+        logAudit("rebalance_deferred_stale_prices", {
+          portfolioId,
+          jobId: job.id,
+          triggeredBy,
+          outcome: freshness.outcome,
+          reasonCode: freshness.reasonCode,
+          priceAgeMs: freshness.context.priceAgeMs,
+          queuedForMs: freshness.context.queuedForMs,
+          maxAgeMs: freshness.context.maxAgeMs,
+        });
+        await releaseWorkerLock(portfolioId);
+        return;
+      }
     }
 
     markRebalanceActive(portfolioId, { trigger: triggeredBy });
