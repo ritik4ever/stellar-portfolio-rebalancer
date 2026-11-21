@@ -34,7 +34,7 @@ export interface InsertRebalanceEventInput {
     gasUsed: string
     feePaid?: number
     slippageBps?: number
-    status: 'completed' | 'failed' | 'pending'
+    status: 'completed' | 'failed' | 'pending' | 'partial'
     isAutomatic: boolean
     riskAlerts?: unknown[]
     error?: string
@@ -73,7 +73,7 @@ export function rowToEvent(r: RebalanceEventRow): RebalanceEvent {
         gasUsed: r.gas_used,
         feePaid: Number(r.fee_paid ?? 0),
         slippageBps: Number(r.slippage_bps ?? 0),
-        status: r.status as RebalanceEvent['status'],
+        status: (details?.executionStatus as RebalanceEvent['status']) ?? (r.status as RebalanceEvent['status']),
         isAutomatic: Boolean(r.is_automatic),
         riskAlerts: ((r.risk_alerts as any[]) ?? []) as RebalanceEvent['riskAlerts'],
         error: r.error ?? undefined,
@@ -117,6 +117,7 @@ export async function dbInsertRebalanceEvent(
     const timestamp = event.timestamp ?? new Date()
     const feePaid = event.feePaid ?? 0
     const slippageBps = event.slippageBps ?? 0
+    const dbStatus = event.status === 'partial' ? 'pending' : event.status
     const details = {
         ...(event.details ?? {}),
         ...(event.actor !== undefined && { actor: event.actor }),
@@ -124,6 +125,7 @@ export async function dbInsertRebalanceEvent(
         ...(event.triggerMetadata !== undefined && { triggerMetadata: event.triggerMetadata }),
         feePaid,
         slippageBps,
+        ...(event.status === 'partial' ? { executionStatus: 'partial' } : {}),
     }
 
     const result = await query<RebalanceEventRow>(
@@ -145,7 +147,7 @@ export async function dbInsertRebalanceEvent(
             event.gasUsed,
             feePaid,
             slippageBps,
-            event.status,
+            dbStatus,
             event.isAutomatic,
             event.eventSource ?? 'offchain',
             event.onChainConfirmed ?? false,

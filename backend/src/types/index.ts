@@ -439,3 +439,17 @@ export interface ExecutionExplanation {
     partialFill?: boolean
     filledAmount?: number
 }
+
+// ── Partial trade handling types (SPR-2026-126, 127, 128, 129) ───────────────
+export type {
+    PartialTradeStatus,
+    PartialRebalanceResult,
+    PartialTradeFailureAction,
+    PartialTradeLeg,
+    ResidualWorkDetails,
+    PartialTradeRetryOutcome,
+    PartialTradeObservabilityContext,
+    PartialTradeExecutionDecision,
+    EvaluatePartialTradeParams,
+} from '../services/partialTradeBoundary.js'
+

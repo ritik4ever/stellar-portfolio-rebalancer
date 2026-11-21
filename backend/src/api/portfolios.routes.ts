@@ -1306,10 +1306,14 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
             logger.info('Rebalance executed', { portfolioId, status: result.status, explanation: result.explanation });
 
             const isFailed = result.status === 'failed';
+            const isPartial = result.status === 'partial';
+            const eventStatus = isFailed ? 'failed' : isPartial ? 'partial' : 'completed';
             markRebalanceInactive(portfolioId, { status: isFailed ? 'failed' : 'completed' });
             const errorReason = isFailed
                 ? (result.failureReason || result.explanation?.failureReason || result.error || 'Rebalance execution failed')
-                : undefined;
+                : isPartial
+                    ? (result.failureReason || result.explanation?.failureReason || 'Partial fill executed')
+                    : undefined;
 
             await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
@@ -1318,9 +1322,9 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                 gasUsed: result.gasUsed ?? '0 XLM',
                 feePaid: result.feePaid ?? result.feeEstimate?.totalFeeXlm ?? result.gasFeeXlm,
                 slippageBps: result.slippageBps ?? result.actualSlippageBps ?? result.estimatedTotalSlippageBps,
-                status: isFailed ? 'failed' : 'completed',
+                status: eventStatus,
                 isAutomatic: false,
-                error: errorReason,
+                error: isFailed ? errorReason : undefined,
                 persistenceContext: {
                     source: 'api',
                     stateTransition: isFailed ? 'unknown' : 'committed',
@@ -1329,7 +1333,11 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                     actor: 'user',
                     source: 'api',
                     explanation: result.explanation,
-                    ...(isFailed && errorReason ? { failureReason: errorReason } : {}),
+                    ...(result.postTradeWeights ? { postTradeWeights: result.postTradeWeights } : {}),
+                    ...(result.residualWork ? { residualWork: result.residualWork } : {}),
+                    ...(result.retryOutcome ? { retryOutcome: result.retryOutcome } : {}),
+                    ...(result.observability ? { observability: result.observability } : {}),
+                    ...(errorReason ? { failureReason: errorReason } : {}),
                 },
             });
 
