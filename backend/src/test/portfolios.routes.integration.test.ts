@@ -621,6 +621,10 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
             expect(res.body.data).toHaveProperty('estimatedFees')
             expect(res.body.data).toHaveProperty('assets')
             expect(res.body.data).toHaveProperty('projectedAllocations')
+            expect(res.body.data.boundary).toMatchObject({
+                trades: expect.any(Array),
+                quoteSnapshot: { feedMeta: expect.any(Object) },
+            })
             expect(Array.isArray(res.body.data.assets)).toBe(true)
             expect(res.body.data.assets[0]).toHaveProperty('buyAmount')
             expect(res.body.data.assets[0]).toHaveProperty('sellAmount')
