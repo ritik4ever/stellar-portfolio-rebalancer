@@ -80,3 +80,9 @@ scripts/check-generated-artifacts.sh origin/main
 ```
 
 If the guard fails with "`backend/openapi.json` is out of date", run `cd backend && npm run openapi:export` and commit the regenerated file. To skip only the freshness regeneration (e.g. for an offline blocklist-only run), set `SKIP_OPENAPI_FRESHNESS=1`.
+
+## Rebalance plan previews
+
+The single-portfolio plan, batch plan, and quote-based dry-run endpoints compute trades and fees from the quotes returned in `boundary.quoteSnapshot`. A portfolio at or below its configured drift threshold for every asset has an empty trade list and zero total estimated fees. If any asset exceeds the threshold, the plan computes trades toward the target allocations in asset-symbol order, subject to the minimum trade value.
+
+Each preview uses one price feed result. A batch uses the same feed result for every portfolio. Concurrent requests and retries compute independent previews from the quotes they receive. Preview requests do not submit transactions or store rebalance history.

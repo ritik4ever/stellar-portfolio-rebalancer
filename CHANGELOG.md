@@ -122,6 +122,9 @@ Release changelog entries are generated into these sections:
 
 ## [Unreleased]
 
+- Commit Reflector quotes and asset freshness together and preserve accepted quote ledgers on cached reads (#2027).
+- Capture a stable quote snapshot per rebalance plan and return zero trades when every asset is within the configured threshold (#2042, #2044).
+
 - Preserve state consistency and audit trail in Backtest price window ([#2077](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/2077))
   - Persist backtest records (`running`, `completed`, `failed`) guaranteeing strict agreement between stored audit state and externally visible results (`includedDays`, `absentDayReasons`, `decision`, and `result`).
   - Added per-portfolio concurrency mutex to block conflicting overlapping backtests with HTTP 409 while maintaining strict isolation for independent runs.

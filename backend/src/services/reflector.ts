@@ -6,7 +6,7 @@ import { assetRegistryService } from './assetRegistryService.js'
 import { CoinGeckoFallbackCache, readCoinGeckoFallbackTtlMs } from './coinGeckoFallbackCache.js'
 import { REDIS_URL } from '../queue/connection.js'
 import { databaseService } from './databaseService.js'
-import { evaluateReflectorPriceUpdate, type AcceptedReflectorQuote } from './priceIngestionBoundary.js'
+import type { PriceIngestionDecision } from './priceIngestionBoundary.js'
 import { normalizeScaledQuote } from '../utils/quotePrecision.js'
 
 
@@ -74,7 +74,6 @@ export class ReflectorService {
     private redisAvailable: boolean = false
     private readonly ORACLE_CACHE_KEY = 'oracle:prices'
     private readonly coinGeckoFallbackCache: CoinGeckoFallbackCache<PriceData>
-    private acceptedQuotes = new Map<string, AcceptedReflectorQuote>()
 
     constructor() {
         this.coinGeckoApiKey = process.env.COINGECKO_API_KEY || ''
@@ -183,7 +182,13 @@ export class ReflectorService {
             if (!raw) return { map: {}, cacheStatus: 'redis_miss' }
             const map = JSON.parse(raw) as PricesMap
             if (typeof map === 'object' && map !== null && Object.keys(map).length > 0) {
-                return { map, cacheStatus: 'redis_hit' }
+                const matchesAccepted = Object.entries(map).every(([asset, quote]) => {
+                    if (quote.source !== 'reflector') return true
+                    const accepted = databaseService.getAcceptedReflectorQuote(asset)
+                    return accepted?.source === quote.source && accepted.price === quote.price
+                        && accepted.ledger === quote.ledger && accepted.timestamp === quote.timestamp
+                })
+                if (matchesAccepted) return { map, cacheStatus: 'redis_hit' }
             }
             return { map: {}, cacheStatus: 'redis_miss' }
         } catch {
@@ -203,7 +208,8 @@ export class ReflectorService {
                     change: data.change,
                     timestamp: data.timestamp,
                     source: data.source,
-                    volume: data.volume
+                    volume: data.volume,
+                    ledger: data.ledger
                 }
             }
             await redis.set(this.ORACLE_CACHE_KEY, JSON.stringify(stripped), 'EX', this.oracleCacheTtlSeconds)
@@ -417,6 +423,7 @@ export class ReflectorService {
 
         type ReflectorRow = { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number; ledger?: number }
         const payload = await response.json() as { prices?: Record<string, ReflectorRow> } | Record<string, ReflectorRow>
+        signal.throwIfAborted()
         const rows = (('prices' in payload && payload.prices) ? payload.prices : payload) as Record<string, ReflectorRow>
 
         const out: PricesMap = {}
@@ -449,16 +456,23 @@ export class ReflectorService {
                 return
             }
 
-            const decision = evaluateReflectorPriceUpdate({
-                asset,
-                source: 'reflector',
-                price,
-                timestamp: row.timestamp,
-                ledger: row.ledger,
-                maxAgeSeconds: this.PRICE_DATA_MAX_AGE,
-                nowMs,
-                lastAccepted: this.acceptedQuotes.get(asset)
-            })
+            let decision: PriceIngestionDecision
+            try {
+                decision = databaseService.acceptReflectorQuote({
+                    asset,
+                    source: 'reflector',
+                    price,
+                    timestamp: row.timestamp,
+                    ledger: row.ledger,
+                    maxAgeSeconds: this.PRICE_DATA_MAX_AGE,
+                    nowMs
+                })
+            } catch {
+                logger.error('[ORACLE] price_ingestion', {
+                    source: 'reflector', asset, outcome: 'blocked', reasonCode: 'PERSISTENCE_FAILED'
+                })
+                return
+            }
             if (decision.result === 'rejected') {
                 logger.warn('[ORACLE] price_ingestion', {
                     source: 'reflector',
@@ -484,12 +498,6 @@ export class ReflectorService {
                 })
             }
 
-            this.acceptedQuotes.set(asset, {
-                source: 'reflector',
-                price: decision.acceptedPrice ?? price,
-                ledger: decision.acceptedLedger
-            })
-
             out[asset] = {
                 price,
                 change: row.change ?? 0,
@@ -500,12 +508,6 @@ export class ReflectorService {
                 serverFetchedAtMs: nowMs,
                 dataTier: 'primary',
                 ledger: decision.acceptedLedger
-            }
-
-            try {
-                databaseService.setAssetFreshness(asset, new Date(nowMs).toISOString(), false)
-            } catch (err) {
-                logger.error(`[ASSET-REGISTRY] Failed to update freshness for ${asset} during Reflector fetch`, { err })
             }
         })
 

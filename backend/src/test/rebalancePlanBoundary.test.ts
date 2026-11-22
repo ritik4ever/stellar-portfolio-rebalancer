@@ -49,8 +49,8 @@ describe('rebalance plan boundary (SPR-2026-116)', () => {
             quoteSnapshot: { prices, feedMeta },
         })
         expect(first.boundary).toEqual(second.boundary)
-        expect(first.boundary.quoteSnapshot.prices).toBe(prices)
-        expect(first.boundary.quoteSnapshot.feedMeta).toBe(feedMeta)
+        expect(first.boundary.quoteSnapshot.prices).not.toBe(prices)
+        expect(first.boundary.quoteSnapshot.feedMeta).not.toBe(feedMeta)
         expect(first.estimatedFees.tradeCount).toBe(0)
     })
 
@@ -66,6 +66,29 @@ describe('rebalance plan boundary (SPR-2026-116)', () => {
         expect(plan.boundary.trades.every((trade) => trade.amount > 0 && trade.value > 0)).toBe(true)
         expect(plan.boundary.quoteSnapshot).toEqual({ prices, feedMeta })
         expect(buildRebalancePlan(input, prices, feedMeta).boundary).toEqual(plan.boundary)
+    })
+
+    it('keeps the original trade list and quote snapshot when the provider changes its objects', () => {
+        const input = portfolio({ XLM: 50, USDC: 50 }, { XLM: 55, USDC: 45 })
+        const providerPrices: PricesMap = {
+            XLM: { ...prices.XLM, price: 1, source: 'reflector', ledger: 200 },
+            USDC: { ...prices.USDC },
+        }
+        const providerMeta = { ...feedMeta }
+        const first = buildRebalancePlan(input, providerPrices, providerMeta)
+        providerPrices.XLM.price = 2
+        providerPrices.XLM.ledger = 201
+        providerMeta.resolvedAtMs += 1000
+        const second = buildRebalancePlan(input, providerPrices, providerMeta)
+
+        expect(first.boundary.trades).toEqual([])
+        expect(first.boundary.quoteSnapshot.prices?.XLM).toMatchObject({ price: 1, ledger: 200 })
+        expect(first.boundary.quoteSnapshot.feedMeta.resolvedAtMs).toBe(feedMeta.resolvedAtMs)
+        expect(second.boundary.trades).toEqual([
+            { asset: 'USDC', action: 'buy', amount: 32.5, value: 32.5 },
+            { asset: 'XLM', action: 'sell', amount: 16.25, value: 32.5 },
+        ])
+        expect(second.boundary.quoteSnapshot).toEqual({ prices: providerPrices, feedMeta: providerMeta })
     })
 
     it('reports drift above a zero threshold when the minimum trade value suppresses trades', () => {

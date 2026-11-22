@@ -31,11 +31,15 @@ export interface RebalancePlanBoundaryDecision {
     quoteSnapshot: PlanQuoteSnapshot
 }
 
+export function normalizeRebalanceThreshold(threshold: number): number {
+    return Number.isFinite(threshold) && threshold >= 0 ? threshold : 0
+}
+
 export function evaluateRebalancePlanBoundary(
     plan: Omit<RebalancePlan, 'boundary'>,
     thresholdPercent: number
 ): RebalancePlanBoundaryDecision {
-    const threshold = Number.isFinite(thresholdPercent) && thresholdPercent >= 0 ? thresholdPercent : 0
+    const threshold = normalizeRebalanceThreshold(thresholdPercent)
     const maxDriftPercent = plan.assets.reduce(
         (max, asset) => Math.max(max, Math.abs(asset.driftPercent)),
         0
