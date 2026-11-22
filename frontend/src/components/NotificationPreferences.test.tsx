@@ -36,6 +36,64 @@ describe('NotificationPreferences', () => {
         expect((screen.getByRole('button', { name: /Save Preferences/i }) as HTMLButtonElement).disabled).toBe(true)
     })
 
+    it('allows saving with all notification channels disabled and disables test delivery', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({
+            preferences: {
+                emailEnabled: true,
+                emailAddress: 'user@example.com',
+                webhookEnabled: false,
+                webhookUrl: '',
+                telegramEnabled: false,
+                telegramChatId: '',
+                events: {
+                    rebalance: true,
+                    circuitBreaker: true,
+                    priceMovement: true,
+                    riskChange: true,
+                },
+                digestEnabled: false,
+                digestFrequency: 'realtime',
+            },
+        } as any)
+        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        expect(await screen.findByText('Notifications')).toBeTruthy()
+        expect(screen.getByText(/1 of 3 notification channels enabled: Email only/i)).toBeTruthy()
+
+        fireEvent.click(getEmailSwitch())
+        expect(screen.getByText(/0 of 3 notification channels enabled/i)).toBeTruthy()
+        expect(screen.getByText(/Changes take effect after saving; test delivery uses saved settings until then/i)).toBeTruthy()
+        fireEvent.click(screen.getByRole('button', { name: /save preferences/i }))
+
+        await waitFor(() => {
+            expect(postSpy).toHaveBeenCalledWith(
+                ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
+                expect.objectContaining({
+                    emailEnabled: false,
+                    webhookEnabled: false,
+                    telegramEnabled: false,
+                })
+            )
+        })
+        expect(await screen.findByText(/Save at least one notification provider/i)).toBeTruthy()
+    })
+
+    it('shows required-field validation when the only enabled channel is missing its address', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
+        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        expect(await screen.findByText('Notifications')).toBeTruthy()
+
+        fireEvent.click(getEmailSwitch())
+        expect(screen.getByText(/1 of 3 notification channels enabled: Email only/i)).toBeTruthy()
+        fireEvent.click(screen.getByRole('button', { name: /save preferences/i }))
+
+        expect(await screen.findByText(/Email address is required when email notifications are enabled/i)).toBeTruthy()
+        expect(postSpy).not.toHaveBeenCalled()
+    })
+
     it('saves preferences successfully', async () => {
         vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
         const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
