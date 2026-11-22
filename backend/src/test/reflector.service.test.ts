@@ -254,7 +254,7 @@ describe('ReflectorService quote precision and fallback outcomes', () => {
             const fetchMock = vi.fn()
                 .mockResolvedValueOnce(response({ prices: {
                     XLM: { price: unsafePrice, decimals: 7, timestamp: nowSec },
-                    BTC: { price: btcUnits, decimals: 8, timestamp: nowSec },
+                    BTC: { price: btcUnits, decimals: 8, timestamp: nowSec, ledger: 200 },
                 } }))
                 .mockResolvedValueOnce(response({}))
             vi.stubGlobal('fetch', fetchMock)
@@ -278,16 +278,16 @@ describe('ReflectorService quote precision and fallback outcomes', () => {
             expect(fetchMock.mock.calls[1]?.[0]).toContain('api.coingecko.com')
             expect(feed.prices).toEqual(map)
             expect(map.XLM).toBeUndefined()
-            expect(map.BTC).toMatchObject({ price: 100000000, source: 'reflector' })
+            expect(map.BTC).toMatchObject({ price: 100000000, source: 'reflector', ledger: 200 })
             expect(BigInt(map.BTC.price) * 10n ** 8n).toBe(BigInt(btcUnits))
             expect(feed.feedMeta).toMatchObject({ resolutionHint: 'partial_merge', staleOrLimited: true })
             expect(freshness).toHaveBeenCalledExactlyOnceWith('BTC', new Date().toISOString(), false)
             expect(redis.set).toHaveBeenCalledTimes(1)
             expect(JSON.parse(persisted!)).toEqual({
-                BTC: expect.objectContaining({ price: map.BTC.price, source: map.BTC.source }),
+                BTC: expect.objectContaining({ price: map.BTC.price, source: map.BTC.source, ledger: 200 }),
             })
             const cached = await service.getCurrentPricesWithMeta()
-            expect(cached.prices.BTC.price).toBe(map.BTC.price)
+            expect(cached.prices.BTC).toMatchObject({ price: map.BTC.price, source: 'reflector', ledger: 200 })
             expect(cached.feedMeta).toMatchObject({ resolutionHint: 'partial_merge', staleOrLimited: true })
             expect(fetchMock).toHaveBeenCalledTimes(2)
             expect(info).toHaveBeenCalledWith('[ORACLE] quote_precision', expect.objectContaining({

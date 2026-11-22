@@ -8,6 +8,10 @@ For a scaled Reflector quote, `price` is a positive signed-128-bit integer and `
 
 Rejected Reflector quotes never update the asset’s freshness or enter the price cache. Overlapping price reads share one resolution per backend instance, including the Redis cache write. Each caller receives its own response object. If resolution fails, a later request can resolve again under the existing provider cooldown.
 
+## Accepted Reflector quotes
+
+SQLite commits each accepted quote's source, price, ledger, and timestamp together with the asset registry freshness update. A write failure leaves the previous quote and freshness intact. The normal fallback policy applies to the failed asset, while successful writes for other assets remain available. Older ledgers are checked against the last committed Reflector quote, including after a restart. A Redis entry with a Reflector quote is usable only when that quote matches the committed record.
+
 ## Operator logs
 
 | Log message | Outcome | Reasons and action |
@@ -15,6 +19,7 @@ Rejected Reflector quotes never update the asset’s freshness or enter the pric
 | `[ORACLE] quote_precision` | `success` | `normalized` identifies the Reflector asset and scale accepted by the feed. |
 | `[ORACLE] quote_precision` | `delayed` | `in_flight` means the caller joined an existing price resolution. `timeout` indicates the Reflector request exceeded its deadline. |
 | `[ORACLE] quote_precision` | `blocked` | `integer_overflow` means the quote could not preserve its units. Check the upstream integer encoding, scale, and range. `invalid_quote` indicates a malformed amount or unsupported scale. |
+| `[ORACLE] price_ingestion` | `blocked` | `PERSISTENCE_FAILED` means the database did not commit the quote and the normal fallback path was used. |
 | `[ORACLE] coingecko_fallback` | `success` | `fetched` or `cache_hit` identifies the returned CoinGecko quote. `price_disagreement` is a warning on a served quote and includes the asset, deviation, and tolerance in basis points. |
 | `[ORACLE] coingecko_fallback` | `delayed` | `local_rate_limit`, `provider_rate_limit`, or `timeout` indicates a cooldown or slow provider. |
 | `[ORACLE] coingecko_fallback` | `blocked` | `no_valid_quote`, `invalid_response`, `http_error`, or `request_failed` identifies an asset or upstream request that could not supply a fallback. HTTP status is included when available. |

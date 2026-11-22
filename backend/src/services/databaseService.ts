@@ -10,6 +10,11 @@ import { logger } from "../utils/logger.js";
 import { ConflictError, BackupVerificationError } from "../types/index.js";
 
 import type { Portfolio } from "../types/index.js";
+import {
+  evaluateReflectorPriceUpdate,
+  type AcceptedReflectorQuote,
+  type ReflectorQuoteUpdateInput,
+} from "./priceIngestionBoundary.js";
 import { isRebalanceActiveSync } from "./portfolioPersistenceBoundary.js";
 import { AssetRegistryConflictError } from "./assetRegistryValidation.js";
 import { dbQueryDuration } from "../observability/metrics.js";
@@ -295,6 +300,14 @@ CREATE TABLE IF NOT EXISTS assets (
 );
 CREATE INDEX IF NOT EXISTS idx_assets_enabled ON assets(enabled) WHERE enabled = 1;
 CREATE INDEX IF NOT EXISTS idx_assets_verification ON assets(verification_status);
+
+CREATE TABLE IF NOT EXISTS reflector_quotes (
+    asset     TEXT PRIMARY KEY,
+    source    TEXT NOT NULL,
+    price     REAL NOT NULL,
+    ledger    INTEGER,
+    timestamp REAL NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS legal_consent (
     user_id             TEXT PRIMARY KEY,
@@ -1763,6 +1776,36 @@ export class DatabaseService {
       }
       throw new Error(`Failed to add asset '${symbol}': ${err}`);
     }
+  }
+
+  getAcceptedReflectorQuote(symbol: string): (AcceptedReflectorQuote & { timestamp: number }) | undefined {
+    const row = this.db.prepare(
+      "SELECT source, price, ledger, timestamp FROM reflector_quotes WHERE asset = ?",
+    ).get(symbol.toUpperCase()) as
+      | (Omit<AcceptedReflectorQuote, "ledger"> & { ledger: number | null; timestamp: number })
+      | undefined;
+    return row && { ...row, ledger: row.ledger ?? undefined };
+  }
+
+  acceptReflectorQuote(input: Omit<ReflectorQuoteUpdateInput, "lastAccepted">) {
+    // Acquire the write lock before reading the acceptance state.
+    return this.db.transaction(() => {
+      const symbol = input.asset.toUpperCase();
+      const decision = evaluateReflectorPriceUpdate({
+        ...input,
+        lastAccepted: this.getAcceptedReflectorQuote(symbol),
+      });
+      if (decision.result === "rejected") return decision;
+
+      this.db.prepare(
+        `INSERT INTO reflector_quotes (asset, source, price, ledger, timestamp)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(asset) DO UPDATE SET
+           source = excluded.source, price = excluded.price, ledger = excluded.ledger, timestamp = excluded.timestamp`,
+      ).run(symbol, decision.acceptedSource, decision.acceptedPrice, decision.acceptedLedger ?? null, input.timestamp);
+      this.setAssetFreshness(symbol, new Date(input.nowMs).toISOString(), false);
+      return decision;
+    }).immediate();
   }
 
   setAssetFreshness(
