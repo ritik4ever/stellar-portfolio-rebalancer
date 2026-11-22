@@ -16,6 +16,12 @@ The Stellar Portfolio Rebalancer includes a comprehensive notification system th
 - **Delivery logs**: Each attempt records status (`sent`, `retried`, `failed`, `uncertain`, `skipped`) with optional `attempt_number` and `backoff_delay_ms`
 - **Non-blocking**: Notification failures don't affect core operations
 
+## Notification channel preferences
+
+Email, webhook, and Telegram channels are enabled independently. You may save preferences with zero channels enabled; no notifications will be delivered in that state. Enabling exactly one channel sends notifications only through that channel. An enabled channel must have its required destination configured (email address, HTTP(S) webhook URL, or Telegram chat ID) before preferences can be saved.
+
+Test delivery requires at least one saved channel. Unsaved channel changes do not affect test delivery until they are saved.
+
 ## Delivery backoff configuration
 
 Retry behavior is loaded at startup from environment variables (validated in `startupConfig`) and applied in `notificationService` via `deliverWithBackoff`.
