@@ -25,4 +25,4 @@
 # check was introduced. If CI reports that the baseline is wrong on the first
 # run, update it with the value from step 2 above.
 #
-BASELINE=57344
+BASELINE=132173

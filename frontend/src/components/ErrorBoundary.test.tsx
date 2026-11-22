@@ -1,9 +1,18 @@
 import { render, screen, cleanup } from '@testing-library/react'
 
-const captureException = vi.fn()
-const getAppVersion = vi.fn(() => 'test-release')
-const sanitizeError = vi.fn((error: Error) => error)
-const sanitizeObservabilityText = vi.fn((value: string) => value)
+const {
+    captureException,
+    getAppVersion,
+    sanitizeError,
+    sanitizeObservabilityText,
+    getPublicKey,
+} = vi.hoisted(() => ({
+    captureException: vi.fn(),
+    getAppVersion: vi.fn(() => 'test-release'),
+    sanitizeError: vi.fn((error: Error) => error),
+    sanitizeObservabilityText: vi.fn((value: string) => value),
+    getPublicKey: vi.fn(() => null),
+}))
 
 vi.mock('../observability', () => ({
     Sentry: { captureException },
@@ -12,7 +21,6 @@ vi.mock('../observability', () => ({
     sanitizeObservabilityText,
 }))
 
-const getPublicKey = vi.fn(() => null)
 vi.mock('../utils/walletManager', () => ({
     walletManager: { getPublicKey },
 }))

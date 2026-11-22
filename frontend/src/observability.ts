@@ -20,7 +20,7 @@ const pickFirstDefined = (...values: Array<string | undefined>): string | undefi
 export function sanitizeObservabilityText(value: string): string {
     return value
         .replace(/bearer\s+[a-z0-9._~+/=-]+/gi, `Bearer ${REDACTED}`)
-        .replace(/\b(?:access[_-]?token|auth[_-]?token|refresh[_-]?token|api[_-]?key|private[_-]?key|secret)\s*[:=]\s*[^\s,;]+/gi, (match) => {
+        .replace(/\b(?:token|access[_-]?token|auth[_-]?token|refresh[_-]?token|api[_-]?key|private[_-]?key|secret)\s*[:=]\s*[^\s,;]+/gi, (match) => {
             const separator = match.includes('=') ? '=' : ':'
             const key = match.slice(0, match.indexOf(separator)).trim()
             return `${key}${separator}${REDACTED}`

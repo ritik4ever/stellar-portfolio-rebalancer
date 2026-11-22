@@ -18,7 +18,7 @@ import { getPortfolioCheckWorkerStatus } from '../queue/workers/portfolioCheckWo
 import { getRebalanceWorkerStatus } from '../queue/workers/rebalanceWorker.js'
 import { getAnalyticsSnapshotWorkerStatus } from '../queue/workers/analyticsSnapshotWorker.js'
 import { getPortfolioExportWorkerStatus } from '../queue/workers/portfolioExportWorker.js'
-import { getQueueByName } from '../queue/queues.js'
+import { getQueueByName, QUEUE_NAMES, getPortfolioCheckQueue, getRebalanceQueue, getAnalyticsSnapshotQueue, getPortfolioExportQueue, getDLQQueue } from '../queue/queues.js'
 import { getWorkerHealthSummary, getAllPersistedWorkerStatuses } from '../queue/workers/workerHeartbeat.js'
 import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import { logger } from '../utils/logger.js'
@@ -220,7 +220,7 @@ opsRouter.get('/indexer/cursor', (_req: Request, res: Response) => {
 
 opsRouter.get('/jobs/:id', async (req: Request, res: Response) => {
     try {
-        const jobId = req.params.id
+        const jobId = req.params.id as string
         if (!jobId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Job ID is required')
         }
@@ -340,7 +340,7 @@ opsRouter.get('/queue/failed', async (req: Request, res: Response) => {
 
 opsRouter.post('/queue/failed/:jobId/retry', async (req: Request, res: Response) => {
     try {
-        const { jobId } = req.params
+        const jobId = req.params.jobId as string
         const { queue: queueName } = req.body
 
         const queueMap: Record<string, any> = {
@@ -379,7 +379,7 @@ opsRouter.get('/queue/dlq', async (req: Request, res: Response) => {
         }
 
         const jobs = await dlq.getJobs(['waiting', 'active', 'completed', 'failed'])
-        const payload = jobs.map(job => ({
+        const payload = jobs.map((job: any) => ({
             jobId: job?.id,
             ...job?.data
         }))
@@ -399,7 +399,7 @@ opsRouter.get('/queue/dlq', async (req: Request, res: Response) => {
  */
 opsRouter.post('/queue/dlq/:jobId/replay', async (req: Request, res: Response) => {
     try {
-        const { jobId } = req.params
+        const jobId = req.params.jobId as string
         const dlq = getDLQQueue()
         if (!dlq) {
             return fail(res, 503, 'SERVICE_UNAVAILABLE', 'DLQ unavailable')
@@ -441,7 +441,7 @@ opsRouter.post('/queue/dlq/:jobId/replay', async (req: Request, res: Response) =
 
 opsRouter.post('/queue/:queueName/pause', async (req: Request, res: Response) => {
     try {
-        const { queueName } = req.params
+        const queueName = req.params.queueName as string
         const queue = getQueueByName(queueName)
 
         if (!queue) {
@@ -468,7 +468,7 @@ opsRouter.get('/queue/dlq', async (req: Request, res: Response) => {
         }
 
         const jobs = await dlq.getJobs(['waiting', 'active', 'completed', 'failed'])
-        const payload = jobs.map(job => ({
+        const payload = jobs.map((job: any) => ({
             jobId: job?.id,
             ...job?.data
         }))
@@ -488,7 +488,7 @@ opsRouter.get('/queue/dlq', async (req: Request, res: Response) => {
  */
 opsRouter.post('/queue/dlq/:jobId/replay', async (req: Request, res: Response) => {
     try {
-        const { jobId } = req.params
+        const jobId = req.params.jobId as string
         const dlq = getDLQQueue()
         if (!dlq) {
             return fail(res, 503, 'SERVICE_UNAVAILABLE', 'DLQ unavailable')
@@ -609,7 +609,7 @@ opsRouter.post('/credentials/refresh', requireAdmin, async (_req: Request, res: 
 
 opsRouter.get('/risk/metrics/:portfolioId', async (req: Request, res: Response) => {
     try {
-        const { portfolioId } = req.params
+        const portfolioId = req.params.portfolioId as string
 
         logger.info('Calculating risk metrics for portfolio', { portfolioId })
 
@@ -642,7 +642,7 @@ opsRouter.get('/risk/metrics/:portfolioId', async (req: Request, res: Response) 
 
 opsRouter.get('/risk/check/:portfolioId', async (req: Request, res: Response) => {
     try {
-        const { portfolioId } = req.params
+        const portfolioId = req.params.portfolioId as string
 
         logger.info('Checking risk conditions for portfolio', { portfolioId })
 
@@ -663,7 +663,7 @@ opsRouter.get('/risk/check/:portfolioId', async (req: Request, res: Response) =>
 
 opsRouter.post('/circuit-breaker/:portfolioId/reset', requireAdmin, async (req: Request, res: Response) => {
     try {
-        const { portfolioId } = req.params
+        const portfolioId = req.params.portfolioId as string
         if (!portfolioId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required')
         }
@@ -745,7 +745,7 @@ opsRouter.post('/circuit-breaker/reset', requireAdmin, async (req: Request, res:
 
 opsRouter.post('/rebalance-lock/:portfolioId/force-release', requireAdmin, async (req: Request, res: Response) => {
     try {
-        const { portfolioId } = req.params
+        const portfolioId = req.params.portfolioId as string
         if (!portfolioId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required')
         }
@@ -944,7 +944,7 @@ opsRouter.get('/prices/enhanced', async (req: Request, res: Response) => {
 
 opsRouter.get('/market/:asset/details', async (req: Request, res: Response) => {
     try {
-        const asset = req.params.asset.toUpperCase()
+        const asset = (req.params.asset as string).toUpperCase()
         const marketData = await reflectorService.getDetailedMarketData(asset)
 
         return ok(res, marketData)
@@ -956,7 +956,7 @@ opsRouter.get('/market/:asset/details', async (req: Request, res: Response) => {
 
 opsRouter.get('/market/:asset/chart', async (req: Request, res: Response) => {
     try {
-        const asset = req.params.asset.toUpperCase()
+        const asset = (req.params.asset as string).toUpperCase()
         const days = parseInt(req.query.days as string) || 7
 
         const history = await reflectorService.getPriceHistory(asset, days)

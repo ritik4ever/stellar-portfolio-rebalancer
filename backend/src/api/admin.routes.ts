@@ -251,7 +251,7 @@ adminRouter.get('/audit-log', requireAdmin, async (req: Request, res: Response) 
 
 adminRouter.get('/issuer-metadata/:issuer', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const issuer = req.params.issuer
+    const issuer = req.params.issuer as string
     if (!issuer) {
       return fail(res, 400, 'VALIDATION_ERROR', 'issuer account is required')
     }
@@ -275,7 +275,7 @@ adminRouter.get('/issuer-metadata/:issuer', requireAdmin, async (req: Request, r
 
 adminRouter.post('/issuer-metadata/:issuer/refresh', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const issuer = req.params.issuer
+    const issuer = req.params.issuer as string
     if (!issuer) {
       return fail(res, 400, 'VALIDATION_ERROR', 'issuer account is required')
     }

@@ -63,7 +63,7 @@ const reflectorService = new ReflectorService()
 
 analyticsRouter.get('/portfolio/:id/analytics', validateQuery(analyticsQuerySchema), async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         const from = req.query.from as string | undefined
         const to = req.query.to as string | undefined
         const days = req.query.days as number | undefined
@@ -79,7 +79,7 @@ analyticsRouter.get('/portfolio/:id/analytics', validateQuery(analyticsQuerySche
 
         let snapshots
         if (from && to) {
-            snapshots = analyticsService.getAnalyticsInRange(portfolioId, from, to)
+            snapshots = analyticsService.getAnalyticsInRange(portfolioId, from as string, to as string)
         } else {
             snapshots = analyticsService.getAnalytics(portfolioId, days || 30)
         }
@@ -129,7 +129,7 @@ analyticsRouter.get('/portfolio/:id/analytics', validateQuery(analyticsQuerySche
 
 analyticsRouter.get('/portfolio/:id/performance-summary', async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
 
         if (!portfolioId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
@@ -309,7 +309,7 @@ function calculateRiskScore(
 
 analyticsRouter.get('/portfolio/:id/risk-diagnostics', async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         }
@@ -341,7 +341,7 @@ analyticsRouter.get('/portfolio/:id/risk-diagnostics', async (req: Request, res:
 
 analyticsRouter.get('/portfolio/:id/risk-score', async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         }
@@ -375,7 +375,7 @@ analyticsRouter.get('/portfolio/:id/risk-score', async (req: Request, res: Respo
 
 analyticsRouter.get('/portfolio/:id/benchmark', validateQuery(analyticsBenchmarkQuerySchema), async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         const from = req.query.from as string
         const to = req.query.to as string
 

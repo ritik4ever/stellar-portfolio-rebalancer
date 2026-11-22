@@ -26,6 +26,14 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
     const [autoReconnect, setAutoReconnect] = useState<boolean>(walletManager.getAutoReconnect())
     const [networkMismatch, setNetworkMismatch] = useState<NetworkMismatchState | null>(null)
     const containerRef = useRef<HTMLDivElement>(null)
+    const isMountedRef = useRef(true)
+
+    useEffect(() => {
+        isMountedRef.current = true
+        return () => {
+            isMountedRef.current = false
+        }
+    }, [])
 
     useEffect(() => {
         const wallets = walletManager.getAvailableWallets()
@@ -98,7 +106,9 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
             }
             onError(errorMessage)
         } finally {
-            setConnecting(null)
+            if (isMountedRef.current && typeof window !== 'undefined') {
+                setConnecting(null)
+            }
         }
     }
 

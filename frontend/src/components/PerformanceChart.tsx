@@ -57,10 +57,11 @@ function formatPercentage(value: number): string {
 }
 
 const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
-  const [days, setDays] = useState(1)
+  const [days, setDays] = useState(30)
+  const [compareMode, setCompareMode] = useState(false)
   const { isDark } = useTheme()
 
-  const requestedDays = days
+  const requestedDays = compareMode ? days * 2 : days
 
   const { from, to } = useMemo(() => {
     const toDate = new Date()
@@ -98,7 +99,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
       portfolioValue: dataPoint.value,
     }))
     const csv = toCSV(rows, ['timestamp', 'date', 'portfolioValue'])
-    const filename = `portfolio_performance_${portfolioId}_${days}d_${new Date().toISOString()}.csv`
+    const filename = `portfolio_performance_${portfolioId}_${days}days_${new Date().toISOString()}.csv`
     downloadCSV(filename, csv)
   }
 
@@ -199,13 +200,37 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                 {range.label}
               </button>
             ))}
+            <select
+              aria-label="Select time range"
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+              className="px-2 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <option value={7}>7 days</option>
+              <option value={30}>30 days</option>
+              <option value={90}>90 days</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => setCompareMode(!compareMode)}
+              className={`px-3 py-1.5 text-sm rounded-lg border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                compareMode
+                  ? 'bg-purple-100 text-purple-700 border-purple-300 dark:bg-purple-900/40 dark:text-purple-300 dark:border-purple-700'
+                  : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+              aria-label="Compare previous period"
+              aria-pressed={compareMode}
+            >
+              Compare previous period
+            </button>
             <button
               type="button"
               onClick={exportChartDataCSV}
-              className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ml-2"
+              disabled={chartData.length === 0}
+              className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ml-2 disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Export chart data as CSV"
             >
-              Export
+              Export CSV
             </button>
           </div>
         </div>

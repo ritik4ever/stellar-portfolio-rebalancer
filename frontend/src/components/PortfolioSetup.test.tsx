@@ -536,19 +536,20 @@ describe('PortfolioSetup allocation validation', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /create portfolio/i }))
       expect(mockMutateAsync).not.toHaveBeenCalled()
-        it('updates the threshold value when changed', () => {
-            renderSetup()
-            const threshold = screen.getAllByRole('spinbutton')[4] as HTMLInputElement
-            fireEvent.change(threshold, { target: { value: '10' } })
-            expect(threshold.value).toBe('10')
-        })
+    })
 
-        it('updates the slippage value when changed', () => {
-            renderSetup()
-            const slippage = screen.getAllByRole('spinbutton')[5] as HTMLInputElement
-            fireEvent.change(slippage, { target: { value: '2.5' } })
-            expect(slippage.value).toBe('2.5')
-        })
+    it('updates the threshold value when changed', () => {
+        renderSetup()
+        const threshold = screen.getAllByRole('spinbutton')[4] as HTMLInputElement
+        fireEvent.change(threshold, { target: { value: '10' } })
+        expect(threshold.value).toBe('10')
+    })
+
+    it('updates the slippage value when changed', () => {
+        renderSetup()
+        const slippage = screen.getAllByRole('spinbutton')[5] as HTMLInputElement
+        fireEvent.change(slippage, { target: { value: '2.5' } })
+        expect(slippage.value).toBe('2.5')
     })
 
     // ── Submit button state ───────────────────────────────────────────────────
@@ -579,7 +580,7 @@ describe('PortfolioSetup allocation validation', () => {
                     threshold: 8,
                     slippageTolerance: 2,
                     strategy: 'volatility',
-                    allocations: { BTC: 70, ETH: 30 },
+                    allocations: { BTC: 7000, ETH: 3000 },
                 }),
             )
         })

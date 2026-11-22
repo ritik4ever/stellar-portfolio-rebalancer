@@ -45,7 +45,7 @@ const STATUS_COLORS: Record<DriftStatus, { stroke: string; text: string; bg: str
     stroke: '#ef4444',
     text: 'text-red-600 dark:text-red-400',
     bg: '#fee2e2',
-    label: 'Above threshold',
+    label: 'Exceeds threshold',
   },
 }
 

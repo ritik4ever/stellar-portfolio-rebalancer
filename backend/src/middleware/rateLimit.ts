@@ -1,4 +1,4 @@
-import { rateLimit } from "express-rate-limit";
+import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import ioredisMod from "ioredis";
 const IORedis = (ioredisMod as any).default || ioredisMod;
@@ -153,7 +153,8 @@ function createHandler(windowMs: number, limitType: string) {
 // Key generator that combines IP and wallet address for authenticated requests
 function createKeyGenerator(prefix: string) {
   return (req: import("express").Request): string => {
-    const ip = req.ip || "unknown";
+    const rawIp = req.ip || (req.socket as any)?.remoteAddress || "unknown";
+    const ip = typeof ipKeyGenerator === "function" ? ipKeyGenerator(rawIp) : rawIp;
     const userAddress = req.user?.address;
 
     // For authenticated requests, use both IP and wallet address
@@ -207,6 +208,7 @@ function skipSuccessfulRequests(
 
 // Core rate limiters (exported for backward compatibility)
 export const globalRateLimiter = rateLimit({
+  validate: false,
   windowMs: GLOBAL_WINDOW_MS,
   limit: GLOBAL_MAX,
   keyGenerator: createKeyGenerator("global"),
@@ -220,6 +222,7 @@ export const globalRateLimiter = rateLimit({
 });
 
 export const burstProtectionLimiter = rateLimit({
+  validate: false,
   windowMs: BURST_WINDOW_MS,
   limit: BURST_MAX,
   keyGenerator: createKeyGenerator("burst"),
@@ -232,6 +235,7 @@ export const burstProtectionLimiter = rateLimit({
 });
 
 export const writeRateLimiter = rateLimit({
+  validate: false,
   windowMs: GLOBAL_WINDOW_MS,
   limit: WRITE_MAX,
   keyGenerator: createKeyGenerator("write"),
@@ -244,6 +248,7 @@ export const writeRateLimiter = rateLimit({
 });
 
 export const writeBurstLimiter = rateLimit({
+  validate: false,
   windowMs: BURST_WINDOW_MS,
   limit: WRITE_BURST_MAX,
   keyGenerator: createKeyGenerator("write-burst"),
@@ -256,6 +261,7 @@ export const writeBurstLimiter = rateLimit({
 });
 
 export const authRateLimiter = rateLimit({
+  validate: false,
   windowMs: GLOBAL_WINDOW_MS,
   limit: AUTH_MAX,
   keyGenerator: createKeyGenerator("auth"),
@@ -268,6 +274,7 @@ export const authRateLimiter = rateLimit({
 });
 
 export const criticalRateLimiter = rateLimit({
+  validate: false,
   windowMs: GLOBAL_WINDOW_MS,
   limit: CRITICAL_MAX,
   keyGenerator: createKeyGenerator("critical"),
@@ -280,6 +287,7 @@ export const criticalRateLimiter = rateLimit({
 });
 
 export const pricesRateLimiter = rateLimit({
+  validate: false,
   windowMs: PRICES_WINDOW_MS,
   limit: PRICES_MAX,
   keyGenerator: createKeyGenerator("prices"),
@@ -292,6 +300,7 @@ export const pricesRateLimiter = rateLimit({
 });
 
 export const adminRateLimiter = rateLimit({
+  validate: false,
   windowMs: GLOBAL_WINDOW_MS,
   limit: AUTH_MAX,
   keyGenerator: createKeyGenerator("admin"),

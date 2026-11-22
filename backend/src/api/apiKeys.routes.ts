@@ -92,7 +92,7 @@ router.get('/', requireJwt, async (req: Request, res: Response) => {
 router.delete('/:id', requireJwt, async (req: Request, res: Response) => {
     try {
         const userAddress = req.user!.address
-        const { id } = req.params
+        const id = req.params.id as string
 
         if (!id || typeof id !== 'string') {
             return fail(res, 400, 'VALIDATION_ERROR', 'Key id is required')
@@ -118,7 +118,7 @@ router.delete('/:id', requireJwt, async (req: Request, res: Response) => {
 router.post('/:id/rotate', requireJwt, validateRequest(rotateApiKeySchema), async (req: Request, res: Response) => {
     try {
         const userAddress    = req.user!.address
-        const { id }         = req.params
+        const id = req.params.id as string
         const gracePeriodMs: number = req.body?.gracePeriodMs ?? 5 * 60 * 1000
 
         if (!id || typeof id !== 'string') {

@@ -67,11 +67,11 @@ export default function BackendCapabilitiesBanner({ belowRealtimeBar = false }: 
     if (loadError && stableNotices.length === 0) {
         return (
             <div
-                className={`fixed left-0 right-0 z-[38] border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 ${positionClass}`}
+                className={`fixed left-0 right-0 z-[38] border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 shadow-sm pointer-events-none dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 ${positionClass}`}
                 role="status"
                 aria-live="polite"
             >
-                <div className="mx-auto flex max-w-4xl items-start gap-2">
+                <div className="mx-auto flex max-w-4xl items-start gap-2 pointer-events-auto">
                     <Info className="mt-0.5 h-4 w-4 shrink-0 opacity-80" aria-hidden />
                     <p className="leading-snug">
                         Could not load backend service status. The app will keep working; start the API or check the
@@ -90,7 +90,7 @@ export default function BackendCapabilitiesBanner({ belowRealtimeBar = false }: 
 
     return (
         <div
-            className={`fixed left-0 right-0 z-[38] border-b shadow-sm ${positionClass} ${
+            className={`fixed left-0 right-0 z-[38] border-b shadow-sm pointer-events-none ${positionClass} ${
                 hasLimited
                     ? 'border-amber-200/80 bg-amber-50/95 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100'
                     : 'border-slate-200 bg-slate-50 text-slate-800 dark:border-slate-600 dark:bg-slate-900/85 dark:text-slate-100'
@@ -98,7 +98,7 @@ export default function BackendCapabilitiesBanner({ belowRealtimeBar = false }: 
             role="status"
             aria-live="polite"
         >
-            <div className="mx-auto max-w-4xl px-4 py-2 text-sm">
+            <div className="mx-auto max-w-4xl px-4 py-2 text-sm pointer-events-auto">
                 <p className="mb-1.5 font-medium leading-tight opacity-90">
                     {hasLimited
                         ? 'Some backend services are still starting or unavailable. Core actions usually still work; automation or live data may lag until things recover.'

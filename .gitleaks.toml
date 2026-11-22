@@ -22,6 +22,7 @@ useDefault = true
     '''ghp_ABC1234567890''',
     '''ghp_secretToken123456''',
     '''SB3VABCDEFGHIJ123456789012345678901234567890123456789012''',
+    '''test-signing-secret-abc123''',
   ]
 
   # Generated dependency/build trees are not source inputs and can be very large.

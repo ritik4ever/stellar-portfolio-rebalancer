@@ -56,7 +56,7 @@ preferencesRouter.get(
     async (req: Request, res: Response) => {
         try {
             const userAddress = req.user!.address
-            const { portfolioId } = req.params
+            const portfolioId = req.params.portfolioId as string
 
             const portfolio = await portfolioStorage.getPortfolio(portfolioId)
             if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
@@ -98,7 +98,7 @@ preferencesRouter.put(
     async (req: Request, res: Response) => {
         try {
             const userAddress = req.user!.address
-            const { portfolioId } = req.params
+            const portfolioId = req.params.portfolioId as string
 
             const portfolio = await portfolioStorage.getPortfolio(portfolioId)
             if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
@@ -142,7 +142,7 @@ preferencesRouter.delete(
     async (req: Request, res: Response) => {
         try {
             const userAddress = req.user!.address
-            const { portfolioId } = req.params
+            const portfolioId = req.params.portfolioId as string
 
             const deleted = notificationService.deletePortfolioOverride(userAddress, portfolioId)
             if (!deleted) return fail(res, 404, 'NOT_FOUND', 'No override configured for this portfolio')
