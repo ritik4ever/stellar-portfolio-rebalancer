@@ -41,18 +41,18 @@ const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ onNavigate, publicKey }) 
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-3 sm:p-6">
       <div className="max-w-7xl mx-auto min-w-0">
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-4">
             <button
               type="button"
               onClick={() => onNavigate('dashboard')}
-              className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              className="shrink-0 p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"
               aria-label="Back to dashboard"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Portfolio Analytics</h1>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
+            <div className="min-w-0">
+              <h1 className="break-words text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Portfolio Analytics</h1>
+              <p className="break-words text-sm text-gray-600 dark:text-gray-400">
                 Performance, risk metrics, and benchmark comparison
               </p>
             </div>

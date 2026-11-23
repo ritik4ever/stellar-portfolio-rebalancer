@@ -54,7 +54,7 @@ describe('HistoricalSimulator', () => {
 
         expect(post).not.toHaveBeenCalled()
         expect(start.getAttribute('aria-invalid')).toBe('true')
-        const error = screen.getByText('Choose at least 7 days. This range has 6.')
+        const error = screen.getByText('Choose at least 7 days. This range has 6.', { selector: 'p' })
         expect(start.getAttribute('aria-describedby')).toContain(error.id)
         expect(document.activeElement).toBe(start)
     })
@@ -122,7 +122,7 @@ describe('HistoricalSimulator', () => {
 
         const cancel = await screen.findByRole('button', { name: 'Cancel' })
         await waitFor(() => expect(document.activeElement).toBe(cancel))
-        expect((screen.getByLabelText('Start date') as HTMLInputElement).disabled).toBe(true)
+        expect(screen.getByLabelText('Start date')).toBeDisabled()
 
         fireEvent.keyDown(cancel, { key: 'Escape' })
         const run = await screen.findByRole('button', { name: 'Run simulation' })

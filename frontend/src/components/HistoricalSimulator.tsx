@@ -211,7 +211,7 @@ const HistoricalSimulator: React.FC<HistoricalSimulatorProps> = ({ portfolioId }
         >
             <div className="flex items-start gap-2 mb-1">
                 <History className="w-5 h-5 mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" aria-hidden />
-                <h2 id={`${baseId}-title`} className="min-w-0 break-words text-lg font-semibold text-gray-900 dark:text-white">
+                <h2 id={`${baseId}-title`} className="min-w-0 break-words text-base sm:text-lg font-semibold text-gray-900 dark:text-white">
                     {copy.title}
                 </h2>
             </div>
