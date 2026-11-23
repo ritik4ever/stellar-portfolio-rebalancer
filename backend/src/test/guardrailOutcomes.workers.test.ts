@@ -61,6 +61,8 @@ vi.mock("../queue/queues.js", () => ({
 import { processAutoRebalanceJob, resetAllBackoffStates } from "../jobs/autoRebalance.js";
 import { processRebalanceJob } from "../queue/workers/rebalanceWorker.js";
 import { portfolioStorage } from "../services/portfolioStorage.js";
+import { rebalanceHistoryService } from "../services/serviceContainer.js";
+import { broadcastPortfolioEvent } from "../services/websocket.service.js";
 import { cooldownGate, MAX_PRICE_AGE_MS } from "../services/guardrailOutcomes.js";
 import { releaseWorkerLock } from "../queue/workers/workerRuntime.js";
 import { logger } from "../utils/logger.js";
@@ -173,6 +175,8 @@ describe("rebalance worker – prices stale while queued", () => {
       expect.objectContaining({
         source: "rebalance_worker",
         reasonCode: "STALE_PRICES_WHILE_QUEUED",
+        action: "stop_current_job",
+        retryPolicy: "next_scheduled_cycle",
         portfolioId: "p1",
         jobId: "rb-1",
         priceAgeMs: MAX_PRICE_AGE_MS + 60_000,
@@ -194,5 +198,49 @@ describe("rebalance worker – prices stale while queued", () => {
   it("keeps legacy jobs without a snapshot timestamp unchanged", async () => {
     await processRebalanceJob(job({}, NOW - 60 * 60 * 1000) as any);
     expect(executeRebalance).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("rebalance worker – execution outcome consistency", () => {
+  beforeEach(() => {
+    executeRebalance.mockReset();
+    vi.mocked(rebalanceHistoryService.recordRebalanceEvent).mockClear();
+    vi.mocked(broadcastPortfolioEvent).mockClear();
+  });
+
+  it("persists and broadcasts a partial executor result with its residual state", async () => {
+    const residualWork = { hasResidualWork: true, remainingTrades: [{ tradeId: "leg-2" }] };
+    const postTradeBalances = { XLM: 60, USDC: 40 };
+    executeRebalance.mockResolvedValue({
+      status: "partial",
+      trades: 1,
+      postTradeBalances,
+      postTradeWeights: { XLM: 60, USDC: 40 },
+      residualWork,
+    });
+
+    await processRebalanceJob({
+      id: "partial-job",
+      data: { portfolioId: "p1", triggeredBy: "auto" },
+      attemptsMade: 0,
+      opts: { attempts: 1 },
+    } as unknown as Job);
+
+    expect(rebalanceHistoryService.recordRebalanceEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "partial",
+        persistenceContext: expect.objectContaining({
+          executionStatus: "partial",
+          postTradeBalances,
+          residualWork,
+        }),
+      }),
+    );
+    expect(broadcastPortfolioEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "rebalance_completed",
+        data: expect.objectContaining({ status: "partial", postTradeBalances, residualWork }),
+      }),
+    );
   });
 });

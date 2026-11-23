@@ -25,7 +25,7 @@ export class CircuitBreakers {
         // Check for extreme volatility
         const volatilityCheck = this.checkVolatility(prices)
         if (!volatilityCheck.safe) {
-            return { ...volatilityCheck, outcome: 'delayed', reasonCode: 'HIGH_VOLATILITY' }
+            return { ...volatilityCheck, outcome: 'delayed', reasonCode: 'HIGH_VOLATILITY', context: volatilityCheck.context }
         }
 
         // Check for stale price data
@@ -36,7 +36,7 @@ export class CircuitBreakers {
         const correlationCheck = this.checkCorrelation(prices)
         if (!correlationCheck.safe) return correlationCheck
 
-        return { safe: true, outcome: 'allowed', reasonCode: 'MARKET_OK' }
+        return { safe: true, outcome: 'allowed', reasonCode: 'MARKET_OK', context: volatilityCheck.context }
     }
 
     private static checkVolatility(prices: Record<string, any>): { safe: boolean, reason?: string } {
