@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ArrowLeft, BarChart3, Wallet } from 'lucide-react'
 import PerformanceChart from '../components/PerformanceChart'
+import HistoricalSimulator from '../components/HistoricalSimulator'
 import { useUserPortfolios } from '../hooks/queries/usePortfolioQuery'
 
 interface AnalyticsPageProps {
@@ -37,8 +38,8 @@ const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ onNavigate, publicKey }) 
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-3 sm:p-6">
+      <div className="max-w-7xl mx-auto min-w-0">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
             <button
@@ -58,7 +59,7 @@ const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ onNavigate, publicKey }) 
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm mb-6">
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 sm:p-6 shadow-sm mb-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Select a portfolio</h2>
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
@@ -97,7 +98,10 @@ const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ onNavigate, publicKey }) 
         </div>
 
         {selectedId ? (
-          <PerformanceChart portfolioId={selectedId} />
+          <>
+            <PerformanceChart portfolioId={selectedId} />
+            <HistoricalSimulator key={selectedId} portfolioId={selectedId} />
+          </>
         ) : (
           <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm text-center">
             <p className="text-gray-600 dark:text-gray-400">Select a portfolio to view its performance analytics.</p>

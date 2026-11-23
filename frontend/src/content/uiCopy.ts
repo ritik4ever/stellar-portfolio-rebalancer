@@ -87,6 +87,69 @@ export const performanceChartCopy = {
     days7: '7 days',
     days30: '30 days',
     days90: '90 days',
+    rangeSelector: 'Time range selector',
+    rangeDescription: (label: string, days: number) =>
+        label === 'ALL'
+            ? 'ALL (up to 3,650 days)'
+            : `${label} (last ${days} ${days === 1 ? 'day' : 'days'})`,
+    pointCount: (count: number) => `${count} price ${count === 1 ? 'point' : 'points'}`,
+    boundaryReady: 'A trend line needs at least 2 price points.',
+    boundarySingle: 'A trend line needs at least 2 price points, so this value is shown as one dot.',
+    boundaryEmpty: 'A trend line needs at least 2 price points. Choose a longer range or check back later.',
+    incompletePoints: (count: number) =>
+        `${count} incomplete ${count === 1 ? 'snapshot is' : 'snapshots are'} not counted.`,
+    singleChartLabel: (range: string) => `Portfolio performance chart showing one price point for ${range}`,
+} as const
+
+export const historicalSimulatorCopy = {
+    title: 'Historical simulator',
+    sourceBefore: 'Replays real CoinGecko daily closing prices. Synthetic prices are never used.',
+    rangeLegend: 'Simulation range (UTC, both dates included)',
+    presetsLabel: 'Quick ranges',
+    presetLabel: (days: number) => `${days}D`,
+    presetName: (days: number) => `Use the last ${days} closed days`,
+    startLabel: 'Start date',
+    endLabel: 'End date',
+    allowedRange: (earliest: string, latest: string) =>
+        `Allowed: 7 to 364 days, from ${earliest} through ${latest}. The current UTC day is excluded until it closes.`,
+    selectedDays: (days: number) => `Selected: ${days} ${days === 1 ? 'day' : 'days'}.`,
+    leapDayNotice: (dates: string) =>
+        `Includes leap day ${dates}. It is simulated only if every asset has a closing price. Otherwise it is skipped and listed in the result.`,
+    run: 'Run simulation',
+    retry: 'Retry simulation',
+    cancel: 'Cancel',
+    dismiss: 'Dismiss',
+    clearResult: 'Clear result',
+    runningHint: 'Running simulation. Press Escape or Cancel to stop waiting.',
+    running: (start: string, end: string) => `Running simulation from ${start} to ${end}.`,
+    completed: (included: number, requested: number) =>
+        `Simulation complete. Evaluated ${included} of ${requested} requested days.`,
+    cancelled: 'Simulation cancelled. No result is shown.',
+    dismissed: 'Simulation result cleared.',
+    resultCleared: 'Range changed. The previous simulation result was cleared.',
+    insufficientTitle: 'Not enough real price history',
+    insufficientDetail: 'No result was produced because synthetic prices are never substituted. Try a different range or retry later.',
+    failedTitle: 'Simulation failed',
+    conflictDetail: 'A simulation is already running for this portfolio. Wait for it to finish, then retry.',
+    timeoutDetail: 'The simulation timed out. Retry or choose a shorter range.',
+    genericDetail: 'The simulation could not be completed. Retry in a moment.',
+    resultTitle: 'Simulation result',
+    requestedRange: 'Requested range',
+    evaluatedRange: 'Evaluated range',
+    dataSource: 'Data source',
+    finalValue: 'Final value',
+    totalReturn: 'Total return',
+    buyAndHold: 'Buy and hold return',
+    rebalances: 'Rebalances',
+    maxDrawdown: 'Max drawdown',
+    dayCount: (days: number) => `${days} ${days === 1 ? 'day' : 'days'}`,
+    sourceName: (source: string) =>
+        source === 'coingecko_market_chart' ? 'CoinGecko daily closes' : source,
+    partial: (included: number, requested: number) =>
+        `Only ${included} of ${requested} requested days had real prices for every asset.`,
+    leapIncluded: 'Leap day (Feb 29) was included in this simulation.',
+    leapOmitted: 'Leap day (Feb 29) was skipped because a closing price was missing.',
+    absentSummary: (count: number) => `${count} skipped ${count === 1 ? 'day' : 'days'}`,
 } as const
 
 export const assetCardCopy = {
