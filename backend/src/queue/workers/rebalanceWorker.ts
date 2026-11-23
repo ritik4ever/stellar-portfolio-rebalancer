@@ -32,7 +32,7 @@ const runtimeStatus = createWorkerRuntimeStatus("rebalance", 3);
 function broadcastJobCompletion(jobId: string, portfolioId: string, triggeredBy: string | undefined, data: Record<string, unknown>) {
   broadcastPortfolioEvent({
     portfolioId,
-    event: "rebalance_completed",
+    event: data.status === "failed" ? "rebalance_failed" : "rebalance_completed",
     data: {
       jobId,
       triggeredBy: triggeredBy || "unknown",
@@ -114,6 +114,8 @@ export async function processRebalanceJob(
           priceAgeMs: freshness.context.priceAgeMs,
           queuedForMs: freshness.context.queuedForMs,
           maxAgeMs: freshness.context.maxAgeMs,
+          action: "stop_current_job",
+          retryPolicy: "next_scheduled_cycle",
         });
         await releaseWorkerLock(portfolioId);
         return;
@@ -128,6 +130,11 @@ export async function processRebalanceJob(
       const portfolio = await stellarService.getPortfolio(portfolioId);
       const rebalanceResult =
         await stellarService.executeRebalance(portfolioId);
+      const executionStatus = rebalanceResult.status === "partial"
+        ? "partial"
+        : rebalanceResult.status === "failed"
+          ? "failed"
+          : "completed";
 
       await rebalanceHistoryService.recordRebalanceEvent({
         portfolioId,
@@ -139,12 +146,17 @@ export async function processRebalanceJob(
         gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
         feePaid: rebalanceResult.feePaid ?? rebalanceResult.feeEstimate?.totalFeeXlm ?? rebalanceResult.gasFeeXlm,
         slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
-        status: "completed",
+        status: executionStatus,
         isAutomatic: triggeredBy === "auto",
         persistenceContext: {
           source: "worker",
           retryAvailable,
           stateTransition: "committed",
+          executionStatus,
+          postTradeBalances: rebalanceResult.postTradeBalances ?? rebalanceResult.newBalances,
+          postTradeWeights: rebalanceResult.postTradeWeights,
+          residualWork: rebalanceResult.residualWork,
+          executionDecision: rebalanceResult.decision,
         },
       });
 
@@ -153,15 +165,19 @@ export async function processRebalanceJob(
           userId: portfolio.userAddress,
           portfolioId,
           eventType: "rebalance",
-          title: "Portfolio Rebalanced",
-          message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades ?? 0} trades executed with ${rebalanceResult.gasUsed ?? "0 XLM"} gas used.`,
+          title: executionStatus === "failed"
+            ? "Portfolio Rebalance Failed"
+            : executionStatus === "partial"
+              ? "Portfolio Partially Rebalanced"
+              : "Portfolio Rebalanced",
+          message: `Your portfolio rebalance finished with status ${executionStatus}. ${rebalanceResult.trades ?? 0} trades executed with ${rebalanceResult.gasUsed ?? "0 XLM"} gas used.`,
           deliveryId: `rebalance-job-${job.id}`,
           data: {
             portfolioId,
             trades: rebalanceResult.trades,
             gasUsed: rebalanceResult.gasUsed,
             trigger: triggeredBy,
-            status: "completed",
+            status: executionStatus,
             jobId: job.id,
           },
           timestamp: new Date().toISOString(),
@@ -174,22 +190,26 @@ export async function processRebalanceJob(
         });
       }
 
-      markRebalanceInactive(portfolioId, { status: "completed" });
-      logger.info("[WORKER:rebalance] Rebalance completed", {
+      markRebalanceInactive(portfolioId, { status: executionStatus === "completed" ? "completed" : "failed" });
+      logger.info(`[WORKER:rebalance] Rebalance ${executionStatus}`, {
         portfolioId,
         trades: rebalanceResult.trades,
       });
       broadcastJobCompletion(job.id || "unknown", portfolioId, triggeredBy, {
         trades: rebalanceResult.trades ?? 0,
         gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+        status: executionStatus,
+        postTradeBalances: rebalanceResult.postTradeBalances ?? rebalanceResult.newBalances,
+        postTradeWeights: rebalanceResult.postTradeWeights,
+        residualWork: rebalanceResult.residualWork,
         timestamp: new Date().toISOString(),
       });
       if (triggeredBy === "auto") {
-        logAudit("auto_rebalance_completed", {
+        logAudit(executionStatus === "completed" ? "auto_rebalance_completed" : "auto_rebalance_finished", {
           portfolioId,
           jobId: job.id,
           trades: rebalanceResult.trades ?? 0,
-          status: "completed",
+          status: executionStatus,
         });
       }
     } catch (err) {

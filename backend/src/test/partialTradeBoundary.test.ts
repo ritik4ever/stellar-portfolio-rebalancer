@@ -722,6 +722,11 @@ describe('Partial Trade Handling Service Boundary', () => {
             expect(decision.executedTradesCount).toBe(2)
             expect(decision.failedTradesCount).toBe(1)
             expect(decision.residualWork.hasResidualWork).toBe(true)
+            expect(decision.postTradeBalances).toEqual({ XLM: 1500, USDC: 100, BTC: 0.0025, ETH: 0 })
+            expect(decision.postTradeWeights).toEqual({ XLM: 50, USDC: 33.33, BTC: 16.67, ETH: 0 })
+            expect(decision.residualWork.remainingTrades).toEqual([
+                expect.objectContaining({ tradeId: 'leg-3', remainingAmount: 500 })
+            ])
 
             // Safe retry plan must ONLY contain leg-3, strictly excluding leg-1 and leg-2
             const retryPlan = buildSafeRetryPlan(decision)

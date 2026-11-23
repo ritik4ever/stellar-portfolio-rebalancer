@@ -8,6 +8,7 @@ export const MAX_VOLATILITY_THRESHOLD_PCT = 50
 export interface VolatilityThresholdCheckResult {
     safe: boolean
     reason?: string
+    context?: { asset: string; observedChangePct: number; thresholdPct: number; comparison: '>' }
 }
 
 export const isVolatilityThresholdPctValid = (pct: number): boolean =>
@@ -65,7 +66,14 @@ export function checkVolatilityThreshold(
         if (Math.abs(data.change) > thresholdPct) {
             return {
                 safe: false,
-                reason: `High volatility detected: ${asset} moved ${data.change.toFixed(2)}% in 24h`
+                reason: `High volatility detected: ${asset} moved ${data.change.toFixed(2)}% in 24h`,
+                context: { asset, observedChangePct: data.change, thresholdPct, comparison: '>' },
+            }
+        }
+        if (Math.abs(data.change) === thresholdPct) {
+            return {
+                safe: true,
+                context: { asset, observedChangePct: data.change, thresholdPct, comparison: '>' },
             }
         }
     }
