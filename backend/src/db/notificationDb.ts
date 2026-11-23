@@ -131,6 +131,9 @@ function migrateNotificationLogColumns(db: Database.Database): void {
     if (!names.has('backoff_delay_ms')) {
         db.exec(`ALTER TABLE notification_logs ADD COLUMN backoff_delay_ms INTEGER`)
     }
+    if (!names.has('delivery_id')) {
+        db.exec(`ALTER TABLE notification_logs ADD COLUMN delivery_id TEXT`)
+    }
 }
 
 function parsePriceAlertThresholds(raw: string | null): Record<string, number> | undefined {
@@ -303,16 +306,20 @@ export function dbInitDefaultNotificationPreferences(userId: string): Notificati
         userId,
         emailEnabled: false,
         webhookEnabled: false,
+        slackEnabled: false,
+        smsEnabled: false,
+        phoneVerified: false,
         digestMode: 'immediate',
         events: {
             rebalance: true,
             circuitBreaker: true,
             priceMovement: true,
             riskChange: true,
+            correlation_breakdown: true,
         },
     }
     dbSaveNotificationPreferences(defaults)
-    return defaults
+    return dbGetNotificationPreferences(userId) ?? defaults
 }
 
 export function dbGetNotificationPreferences(userId: string): NotificationPreferences | undefined {
@@ -390,6 +397,20 @@ export interface NotificationLogMetadata {
     maxAttempts?: number
     backoffDelayMs?: number
     nextAttempt?: number
+    deliveryId?: string
+    /** Retry safety classification of the last failure. */
+    failureKind?: 'retryable' | 'ambiguous' | 'permanent'
+    /** False when the delivery was stopped instead of retried. */
+    retryable?: boolean
+    /** True when a non-retryable failure stopped the attempt sequence early. */
+    stoppedEarly?: boolean
+    /** Stable Message-ID for the logical notification, reused across attempts. */
+    idempotencyKey?: string
+    /**
+     * Operator-facing outcome of the attempt: `success`, `delayed` (work is
+     * still pending and replay is safe) or `blocked` (needs an operator).
+     */
+    deliveryState?: 'success' | 'delayed' | 'blocked'
 }
 
 export interface NotificationLog {
@@ -397,10 +418,11 @@ export interface NotificationLog {
     userId: string
     provider: 'email' | 'webhook' | 'slack' | 'sms' | 'telegram'
     eventType: string
-    status: 'sent' | 'failed' | 'retried' | 'skipped'
+    status: 'sent' | 'failed' | 'retried' | 'skipped' | 'uncertain'
     errorMessage?: string
     attemptNumber?: number
     backoffDelayMs?: number
+    deliveryId?: string
     createdAt: string
 }
 
@@ -417,7 +439,7 @@ export function dbLogNotificationOutcome(
     userId: string,
     provider: 'email' | 'webhook' | 'slack' | 'sms' | 'telegram',
     eventType: string,
-    status: 'sent' | 'failed' | 'retried' | 'skipped',
+    status: 'sent' | 'failed' | 'retried' | 'skipped' | 'uncertain',
     errorMessage?: string,
     metadata?: NotificationLogMetadata
 ): void {
@@ -427,8 +449,8 @@ export function dbLogNotificationOutcome(
     
     db.prepare(`
         INSERT INTO notification_logs 
-            (user_id, provider, event_type, status, error_message, created_at, attempt_number, backoff_delay_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, provider, event_type, status, error_message, created_at, attempt_number, backoff_delay_ms, delivery_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         userId,
         provider,
@@ -438,6 +460,7 @@ export function dbLogNotificationOutcome(
         now,
         metadata?.attempt ?? null,
         metadata?.backoffDelayMs ?? null,
+        metadata?.deliveryId ?? null,
     )
 
     // Run 30-day retention cleanup. Note: SQLite uses 'now', '-30 days' for datetime math.
@@ -453,17 +476,23 @@ export function dbLogNotificationOutcome(
  * Useful for exposing operational visibility and debugging delivery issues.
  * @param userId - ID of the user to fetch logs for
  * @param limit - Max number of logs to return (default: 50)
+ * @param deliveryId - Optional deliveryId filter for tracing a specific delivery
  */
-export function dbGetNotificationLogs(userId: string, limit: number = 50): NotificationLog[] {
+export function dbGetNotificationLogs(
+    userId: string,
+    limit: number = 50,
+    deliveryId?: string,
+): NotificationLog[] {
     ensureNotificationTable()
     const db = getDb()
 
-    const rows = db.prepare<[string, number], any>(`
-        SELECT * FROM notification_logs 
-        WHERE user_id = ? 
-        ORDER BY created_at DESC 
-        LIMIT ?
-    `).all(userId, limit)
+    const query = deliveryId
+        ? `SELECT * FROM notification_logs WHERE user_id = ? AND delivery_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`
+        : `SELECT * FROM notification_logs WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`
+
+    const rows = deliveryId
+        ? db.prepare<[string, string, number], any>(query).all(userId, deliveryId, limit)
+        : db.prepare<[string, number], any>(query).all(userId, limit)
 
     return rows.map((r: any) => ({
         id: r.id,
@@ -474,8 +503,43 @@ export function dbGetNotificationLogs(userId: string, limit: number = 50): Notif
         errorMessage: r.error_message || undefined,
         attemptNumber: r.attempt_number ?? undefined,
         backoffDelayMs: r.backoff_delay_ms ?? undefined,
+        deliveryId: r.delivery_id ?? undefined,
         createdAt: r.created_at
     }))
+}
+
+/**
+ * Retrieves the most recent delivery log for a given user and optional provider.
+ * Allows callers to verify that persistent records agree with externally visible results.
+ */
+export function dbGetLatestNotificationLog(
+    userId: string,
+    provider?: 'email' | 'webhook' | 'slack' | 'sms' | 'telegram',
+): NotificationLog | undefined {
+    ensureNotificationTable()
+    const db = getDb()
+
+    const query = provider
+        ? `SELECT * FROM notification_logs WHERE user_id = ? AND provider = ? ORDER BY id DESC LIMIT 1`
+        : `SELECT * FROM notification_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1`
+
+    const row = provider
+        ? db.prepare<[string, string], any>(query).get(userId, provider)
+        : db.prepare<[string], any>(query).get(userId)
+
+    if (!row) return undefined
+    return {
+        id: row.id,
+        userId: row.user_id,
+        provider: row.provider,
+        eventType: row.event_type,
+        status: row.status,
+        errorMessage: row.error_message || undefined,
+        attemptNumber: row.attempt_number ?? undefined,
+        backoffDelayMs: row.backoff_delay_ms ?? undefined,
+        deliveryId: row.delivery_id ?? undefined,
+        createdAt: row.created_at,
+    }
 }
 
 // ── per-portfolio notification preference overrides (#1395) ──────────────────

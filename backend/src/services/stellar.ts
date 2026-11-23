@@ -235,6 +235,10 @@ export interface ExecuteRebalanceOptions {
     simulateOnly?: boolean
     ignoreSafetyChecks?: boolean
     tradeSlippageOverrides?: Record<string, number>
+    allowPartialFill?: boolean
+    stopOnFailure?: boolean
+    attempt?: number
+    maxAttempts?: number
 }
 
 export interface RebalanceDryRunResult {
@@ -308,12 +312,24 @@ export class StellarService {
             span.setAttribute('rebalance.ignore_safety_checks', options.ignoreSafetyChecks || false)
         }
         try {
+            const portfolio = await this.getPortfolio(portfolioId)
+            const balances = portfolio?.balances || {}
+            const allocations = portfolio?.allocations || {}
             return {
                 trades: 0,
                 gasUsed: '0 XLM',
                 timestamp: new Date().toISOString(),
                 status: 'success',
-                newBalances: {},
+                newBalances: balances,
+                postTradeBalances: balances,
+                postTradeWeights: allocations,
+                residualWork: {
+                    hasResidualWork: false,
+                    remainingTrades: [],
+                    assetDrift: {},
+                    totalResidualValueUsd: 0,
+                    pendingTradesCount: 0
+                }
             }
         } finally {
             span.end()
@@ -324,6 +340,10 @@ export class StellarService {
         const span = getTracer().startSpan('stellar.dryRunRebalance')
         span.setAttribute('portfolio.id', portfolioId)
         try {
+            const portfolio = await this.getPortfolio(portfolioId)
+            if (!portfolio) {
+                throw new Error(`Portfolio ${portfolioId} not found`)
+            }
             return {
                 portfolioId,
                 canExecute: true,

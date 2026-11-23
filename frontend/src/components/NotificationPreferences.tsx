@@ -260,6 +260,22 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         return JSON.stringify(preferences) !== JSON.stringify(originalPreferences)
     }
 
+    const enabledChannels = [
+        { name: 'Email', enabled: preferences.emailEnabled },
+        { name: 'Webhook', enabled: preferences.webhookEnabled },
+        { name: 'Telegram', enabled: preferences.telegramEnabled },
+    ].filter(channel => channel.enabled)
+    const enabledChannelCount = enabledChannels.length
+    const channelSelectionMessage =
+        enabledChannelCount === 0
+            ? '0 of 3 notification channels enabled. No notifications will be delivered with this selection. You can save with all channels off; test delivery requires at least one saved channel.'
+            : enabledChannelCount === 1
+              ? `1 of 3 notification channels enabled: ${enabledChannels[0].name} only. Notifications will be delivered only through ${enabledChannels[0].name}.`
+              : `${enabledChannelCount} of 3 notification channels enabled: ${enabledChannels.map(channel => channel.name).join(', ')}.`
+    const channelSelectionStatus = hasUnsavedChanges()
+        ? `${channelSelectionMessage} Changes take effect after saving; test delivery uses saved settings until then.`
+        : channelSelectionMessage
+
     const emailHasUnsavedChanges = !!originalPreferences && (
         preferences.emailEnabled !== originalPreferences.emailEnabled ||
         preferences.emailAddress !== originalPreferences.emailAddress
@@ -388,6 +404,9 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
             {/* Provider Configuration */}
             <div className="space-y-6 mb-6">
+                <p className="text-sm text-gray-600" role="status" aria-live="polite">
+                    {channelSelectionStatus}
+                </p>
                 {/* Email Provider */}
                 <div className="border border-gray-200 rounded-lg p-4">
                     <div className="flex items-center justify-between mb-2">

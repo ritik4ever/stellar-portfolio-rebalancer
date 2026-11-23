@@ -43,7 +43,7 @@ After deployment, the workflow exports the deployed contract ID into these value
 - [ ] WASM target added: `rustup target add wasm32-unknown-unknown`
 - [ ] Soroban CLI installed: `cargo install --locked soroban-cli`
 - [ ] Contract source code reviewed and tested
-- [ ] All tests passing: `cd contracts && cargo test`
+- [ ] All tests passing: `cd contracts && cargo test --features testutils`
 - [ ] Contract builds without warnings: `cargo build --target wasm32-unknown-unknown --release`
 
 ---
@@ -147,7 +147,7 @@ Use this for development and testing on a local Soroban instance.
 
 - [ ] Run contract tests:
   ```bash
-  cd contracts && cargo test
+  cd contracts && cargo test --features testutils
   ```
 - [ ] Test portfolio creation via API:
   ```bash
@@ -360,11 +360,11 @@ Use this for pre-production testing on testnet.
   ```
 - [ ] Run full test suite:
   ```bash
-  cargo test
+  cargo test --features testutils
   ```
 - [ ] Run gas benchmarks:
   ```bash
-  cargo test benchmark_
+  cargo test --features testutils benchmark_
   ```
 
 ### Deploy
@@ -605,7 +605,7 @@ The automated deployment entry point is [`deployment/contract-deploy.sh`](../dep
 | Field                        | Expected value                                                       |
 | ----------------------------- | ---------------------------------------------------------------------- |
 | `version`                     | `2` (`CONTRACT_VERSION`, `contracts/src/types.rs`)                     |
-| `schema_version`              | `1` (`CONTRACT_EVENT_SCHEMA_VERSION`, `contracts/src/types.rs`)        |
+| `schema_version`              | `2` (`CONTRACT_EVENT_SCHEMA_VERSION`, `contracts/src/types.rs`)        |
 | `capability_flags`            | `7` (`PerPortfolioSteward \| DifferentiatedPricing \| EmergencyStop`)  |
 | `min_rebalance_threshold`     | `1`                                                                    |
 | `max_rebalance_threshold`     | `50`                                                                   |

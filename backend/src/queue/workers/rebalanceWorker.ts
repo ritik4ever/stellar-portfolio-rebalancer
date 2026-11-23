@@ -23,6 +23,8 @@ import {
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
 import { broadcastPortfolioEvent } from "../../services/websocket.service.js";
+import { markRebalanceActive, markRebalanceInactive } from "../../services/portfolioPersistenceBoundary.js";
+import { emitGuardrailOutcome, evaluateQueuedPriceFreshness } from "../../services/guardrailOutcomes.js";
 
 let worker: Worker | null = null;
 const runtimeStatus = createWorkerRuntimeStatus("rebalance", 3);
@@ -59,7 +61,7 @@ function broadcastJobFailure(jobId: string, portfolioId: string, triggeredBy: st
 export async function processRebalanceJob(
   job: Job<RebalanceJobData>,
 ): Promise<void> {
-  const { portfolioId, triggeredBy, correlationId } = job.data;
+  const { portfolioId, triggeredBy, correlationId, pricesObservedAt } = job.data;
   const requestId = correlationId ?? randomUUID();
 
   return runWithRequestContext({ requestId }, async () => {
@@ -87,7 +89,41 @@ export async function processRebalanceJob(
       return;
     }
 
+    // Circuit breaker: the enqueue decision was made against a price snapshot.
+    // If that snapshot aged past the freshness window while the job waited in
+    // the queue, defer instead of trading on stale prices. The next scheduled
+    // cycle re-evaluates with fresh prices.
+    if (typeof pricesObservedAt === "number" && Number.isFinite(pricesObservedAt)) {
+      const evaluated = evaluateQueuedPriceFreshness({
+        portfolioId,
+        source: "rebalance_worker",
+        pricesObservedAtMs: pricesObservedAt,
+        enqueuedAtMs: typeof job.timestamp === "number" ? job.timestamp : undefined,
+      });
+      const freshness = emitGuardrailOutcome({
+        ...evaluated,
+        context: { ...evaluated.context, jobId: job.id, triggeredBy },
+      });
+      if (freshness.outcome !== "allowed") {
+        logAudit("rebalance_deferred_stale_prices", {
+          portfolioId,
+          jobId: job.id,
+          triggeredBy,
+          outcome: freshness.outcome,
+          reasonCode: freshness.reasonCode,
+          priceAgeMs: freshness.context.priceAgeMs,
+          queuedForMs: freshness.context.queuedForMs,
+          maxAgeMs: freshness.context.maxAgeMs,
+        });
+        await releaseWorkerLock(portfolioId);
+        return;
+      }
+    }
+
+    markRebalanceActive(portfolioId, { trigger: triggeredBy });
+
     const stellarService = new StellarService();
+    const retryAvailable = (job.attemptsMade ?? 0) + 1 < (job.opts?.attempts ?? 1);
     try {
       const portfolio = await stellarService.getPortfolio(portfolioId);
       const rebalanceResult =
@@ -105,19 +141,28 @@ export async function processRebalanceJob(
         slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
         status: "completed",
         isAutomatic: triggeredBy === "auto",
+        persistenceContext: {
+          source: "worker",
+          retryAvailable,
+          stateTransition: "committed",
+        },
       });
 
       try {
         await notificationService.notify({
           userId: portfolio.userAddress,
+          portfolioId,
           eventType: "rebalance",
           title: "Portfolio Rebalanced",
           message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades ?? 0} trades executed with ${rebalanceResult.gasUsed ?? "0 XLM"} gas used.`,
+          deliveryId: `rebalance-job-${job.id}`,
           data: {
             portfolioId,
             trades: rebalanceResult.trades,
             gasUsed: rebalanceResult.gasUsed,
             trigger: triggeredBy,
+            status: "completed",
+            jobId: job.id,
           },
           timestamp: new Date().toISOString(),
         });
@@ -129,6 +174,7 @@ export async function processRebalanceJob(
         });
       }
 
+      markRebalanceInactive(portfolioId, { status: "completed" });
       logger.info("[WORKER:rebalance] Rebalance completed", {
         portfolioId,
         trades: rebalanceResult.trades,
@@ -147,6 +193,7 @@ export async function processRebalanceJob(
         });
       }
     } catch (err) {
+      markRebalanceInactive(portfolioId, { status: "failed" });
       const errorMessage = err instanceof Error ? err.message : String(err);
 
       try {
@@ -158,10 +205,42 @@ export async function processRebalanceJob(
           status: "failed",
           isAutomatic: triggeredBy === "auto",
           error: errorMessage,
+          persistenceContext: {
+            source: "worker",
+            retryAvailable,
+            stateTransition: "unknown",
+          },
         });
       } catch (histErr) {
         logger.error("[WORKER:rebalance] Failed to record failure event", {
           histErr,
+        });
+      }
+
+      try {
+        const portfolio = await stellarService.getPortfolio(portfolioId).catch(() => null);
+        if (portfolio?.userAddress) {
+          await notificationService.notify({
+            userId: portfolio.userAddress,
+            portfolioId,
+            eventType: "rebalance",
+            title: "Portfolio Rebalance Failed",
+            message: `Portfolio rebalance failed: ${errorMessage}`,
+            deliveryId: `rebalance-job-${job.id}-attempt-${job.attemptsMade + 1}`,
+            data: {
+              portfolioId,
+              status: "failed",
+              failureReason: errorMessage,
+              jobId: job.id,
+              attempt: job.attemptsMade + 1,
+            },
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch (notifyErr) {
+        logger.error("[WORKER:rebalance] Failure notification failed (non-fatal)", {
+          portfolioId,
+          error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
         });
       }
 
@@ -182,6 +261,7 @@ export async function processRebalanceJob(
 
       throw err;
     } finally {
+      markRebalanceInactive(portfolioId);
       await releaseWorkerLock(portfolioId);
     }
   });

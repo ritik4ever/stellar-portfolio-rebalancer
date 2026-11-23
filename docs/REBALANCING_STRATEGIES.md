@@ -97,3 +97,12 @@ Response includes `strategies`: array of `{ value, label, description }` for eac
 - **SQLite:** The same columns are added via runtime migration in `DatabaseService`.
 
 Existing portfolios without these columns are treated as `strategy: 'threshold'` with no extra config.
+
+---
+
+## Historical Backtesting & Simulation
+
+To evaluate how a chosen threshold or target allocation would have performed historically against a buy-and-hold strategy, see **[BACKTEST.md](BACKTEST.md)** (`POST /api/v1/backtest`).
+
+The simulation replays real daily closing prices and includes explicit boundary handling for calendar lookback windows, including leap day (February 29) inclusion and absent-day documentation.
+
