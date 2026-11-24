@@ -24,6 +24,7 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
     const [isSubmitting, setIsSubmitting] = useState(false)
     const submittingRef = useRef(false)
     const errorAlertRef = useRef<HTMLDivElement>(null)
+    const boundaryStatusRef = useRef<HTMLDivElement>(null)
     const [now, setNow] = useState(Date.now)
 
     useEffect(() => {
@@ -31,6 +32,13 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
             errorAlertRef.current?.focus()
         }
     }, [executionError])
+
+    useEffect(() => {
+        if (plan && !isError && (plan.boundary?.trades ?? []).length === 0) {
+            boundaryStatusRef.current?.focus()
+        }
+    }, [plan, isError])
+=======
 
     useEffect(() => {
         const timer = setInterval(() => setNow(Date.now()), 15000)
@@ -65,6 +73,10 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
         ? `${boundary.maxDriftPercent.toFixed(2)} percentage points`
         : null
     const noTradeStatusId = plan && !hasTrades && !isError ? 'dry-run-boundary-status' : undefined
+    const isTimeout = isError && /timeout|timed out/i.test(String((plan as any)?.error ?? ''))
+    const timeoutCopy = isTimeout
+        ? 'The simulation request timed out. Retry loading the plan, or cancel to abandon.'
+        : 'The rebalance plan is unavailable.'
 
     const handleConfirm = async () => {
         if (submittingRef.current || inFlight) {
@@ -97,7 +109,7 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
             title="Review rebalance"
             onClose={() => { if (!inFlight) onClose() }}
             footer={(
-                <>
+                <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
                     <Button variant="secondary" onClick={onClose} disabled={inFlight} aria-describedby={noTradeStatusId}>
                         {plan && !hasTrades ? 'Close' : 'Cancel'}
                     </Button>
@@ -113,7 +125,7 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                             {inFlight ? 'Submitting rebalance…' : 'Confirm rebalance'}
                         </Button>
                     )}
-                </>
+                </div>
             )}
         >
             {statusAnnouncement && (
@@ -124,14 +136,27 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
             {isLoading ? (
                 <p role="status">Loading rebalance plan…</p>
             ) : isError || !plan || !fees ? (
-                <>
-                    <p role="alert">The rebalance plan is unavailable.</p>
-                    <Button variant="secondary" onClick={() => void refetch()} disabled={isFetching}>
-                        Retry loading plan
-                    </Button>
-                </>
+                <div className="min-w-0 space-y-2 break-words">
+                    <p role="alert">{timeoutCopy}</p>
+                    <div className="flex min-w-0 flex-wrap gap-2">
+                        <Button variant="secondary" onClick={() => void refetch()} disabled={isFetching}>
+                            Retry loading plan
+                        </Button>
+                        <Button variant="secondary" onClick={onClose}>
+                            Cancel
+                        </Button>
+                    </div>
+                </div>
             ) : !hasTrades ? (
-                <div id="dry-run-boundary-status" role="status" aria-live="polite" aria-atomic="true">
+                <div
+                    id="dry-run-boundary-status"
+                    ref={boundaryStatusRef}
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    tabIndex={-1}
+                    className="min-w-0 space-y-2 break-words outline-none focus-visible:ring-2"
+                >
                     <p className="font-semibold">0 planned trades — read-only preview</p>
                     {withinThreshold && thresholdCopy ? (
                         <p>
@@ -145,36 +170,36 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                     )}
                 </div>
             ) : (
-                <div className="max-h-[65vh] space-y-3 overflow-y-auto text-sm break-words min-w-0">
+                <div className="max-h-[65vh] min-w-0 space-y-3 overflow-y-auto break-words text-sm">
                     <h3 id="quoted-trades" className="font-semibold">
                         {trades.length} planned {trades.length === 1 ? 'trade' : 'trades'}
                     </h3>
                     {trades.length > 4 && <p>Scroll the trade list to review all planned trades.</p>}
                     <div role="region" tabIndex={0} aria-labelledby="quoted-trades"
-                        className="max-h-36 overflow-y-auto rounded bg-gray-50 p-2 focus-visible:ring-2 dark:bg-gray-900">
-                        <ol className="list-decimal space-y-1 pl-6">
+                        className="max-h-36 min-w-0 overflow-y-auto rounded bg-gray-50 p-2 focus-visible:ring-2 dark:bg-gray-900">
+                        <ol className="list-decimal space-y-1 pl-6 break-words">
                             {trades.map(trade => (
-                                <li key={trade.asset}>
+                                <li key={trade.asset} className="min-w-0 break-words">
                                     {trade.action === 'buy' ? 'Buy' : 'Sell'} {trade.amount.toLocaleString(undefined, { maximumFractionDigits: 7 })} {trade.asset}
                                 </li>
                             ))}
                         </ol>
                     </div>
-                    <p>Estimated network fee for all trades: {fees.xlm.toFixed(7)} XLM (~${fees.usd.toFixed(3)})</p>
-                    <p>
+                    <p className="min-w-0 break-words">Estimated network fee for all trades: {fees.xlm.toFixed(7)} XLM (~${fees.usd.toFixed(3)})</p>
+                    <p className="min-w-0 break-words">
                         {oldestQuoteMs === null
                             ? 'Price age unavailable for one or more quotes.'
                             : <>Oldest quoted price as of <time dateTime={new Date(oldestQuoteMs).toISOString()}>{new Date(oldestQuoteMs).toLocaleString()}</time> ({quoteAgeMinutes === 0 ? 'less than 1 minute old' : `${quoteAgeMinutes} min old`}).</>}
                     </p>
-                    {quote?.feedMeta.degraded && <p>Some prices use a fallback feed.</p>}
-                    {quote?.feedMeta.staleOrLimited && <p>Some quoted prices may be stale.</p>}
-                    <p>Maximum slippage: {plan.maxSlippagePercent}%</p>
-                    <p>The execution price and fees may change. Executed trades cannot be reversed from this app.</p>
-                    <label className="flex items-start gap-2">
+                    {quote?.feedMeta.degraded && <p className="min-w-0 break-words">Some prices use a fallback feed.</p>}
+                    {quote?.feedMeta.staleOrLimited && <p className="min-w-0 break-words">Some quoted prices may be stale.</p>}
+                    <p className="min-w-0 break-words">Maximum slippage: {plan.maxSlippagePercent}%</p>
+                    <p className="min-w-0 break-words">The execution price and fees may change. Executed trades cannot be reversed from this app.</p>
+                    <label className="flex min-w-0 items-start gap-2 break-words">
                         <input type="checkbox" checked={confirmed} disabled={isFetching || inFlight}
                             aria-label="I reviewed the planned trades, fees, and prices."
                             onChange={event => setReviewedPlan(event.target.checked ? plan : undefined)} />
-                        I reviewed the planned trades, fees, and prices.
+                        <span className="min-w-0 break-words">I reviewed the planned trades, fees, and prices.</span>
                     </label>
                 </div>
             )}
@@ -183,11 +208,11 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                     ref={errorAlertRef}
                     role="alert"
                     tabIndex={-1}
-                    className="mt-3 rounded border border-red-200 bg-red-50 p-2.5 text-sm text-red-700 outline-none focus:ring-2 focus:ring-red-500 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 break-words min-w-0"
+                    className="mt-3 min-w-0 break-words rounded border border-red-200 bg-red-50 p-2.5 text-sm text-red-700 outline-none focus:ring-2 focus:ring-red-500 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
                 >
                     <p className="font-semibold">Rebalance submission failed</p>
-                    <p>{executionError}</p>
-                    <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                    <p className="min-w-0 break-words">{executionError}</p>
+                    <p className="mt-1 min-w-0 break-words text-xs text-red-600 dark:text-red-400">
                         Review and re-acknowledge the planned trades to retry, or cancel to abandon.
                     </p>
                 </div>
