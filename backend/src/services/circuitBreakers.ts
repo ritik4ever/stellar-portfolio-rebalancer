@@ -25,7 +25,13 @@ export class CircuitBreakers {
         // Check for extreme volatility
         const volatilityCheck = this.checkVolatility(prices)
         if (!volatilityCheck.safe) {
-            return { ...volatilityCheck, outcome: 'delayed', reasonCode: 'HIGH_VOLATILITY', context: volatilityCheck.context }
+            const incomplete = volatilityCheck.context?.missingInterval === true
+            return {
+                ...volatilityCheck,
+                outcome: 'delayed',
+                reasonCode: incomplete ? 'VOLATILITY_DATA_INCOMPLETE' : 'HIGH_VOLATILITY',
+                context: volatilityCheck.context,
+            }
         }
 
         // Check for stale price data
@@ -39,7 +45,7 @@ export class CircuitBreakers {
         return { safe: true, outcome: 'allowed', reasonCode: 'MARKET_OK', context: volatilityCheck.context }
     }
 
-    private static checkVolatility(prices: Record<string, any>): { safe: boolean, reason?: string } {
+    private static checkVolatility(prices: Record<string, any>): { safe: boolean, reason?: string, context?: Record<string, any> } {
         // Threshold is configurable (env / admin config store), defaults to 15%
         const volatilityThreshold = getVolatilityThresholdPct()
         return checkVolatilityThreshold(prices, volatilityThreshold)
@@ -134,19 +140,34 @@ export class CircuitBreakers {
         }
     }
 
+    /**
+     * Boundary contract: a target weight exactly at the 80% cap is allowed
+     * (the breach comparison is strict `>`); only weights above the cap are
+     * blocked. The decision context documents the post-trade allocation and
+     * remaining headroom so the boundary is explicit in operator signals.
+     */
     static checkConcentrationRisk(allocations: Record<string, number>): GuardrailCheckResult {
         const maxSingleAsset = 80 // 80% maximum for any single asset
         const minDiversification = 1 // Minimum number of assets
 
         // Check maximum concentration (values are target percentages, 0-100)
+        let atCapAsset: string | undefined
         for (const [asset, percentage] of Object.entries(allocations)) {
+            if (percentage === maxSingleAsset) atCapAsset = asset
             if (percentage > maxSingleAsset) {
                 return {
                     safe: false,
                     reason: `Concentration risk: ${asset} represents ${percentage.toFixed(1)}% of portfolio`,
                     outcome: 'blocked',
                     reasonCode: 'CONCENTRATION_OVER_CAP',
-                    context: { asset, weightPct: percentage, capPct: maxSingleAsset },
+                    context: {
+                        asset,
+                        weightPct: percentage,
+                        capPct: maxSingleAsset,
+                        postTradeWeightPct: percentage,
+                        headroomPct: 0,
+                        atCap: false,
+                    },
                 }
             }
         }
@@ -160,6 +181,23 @@ export class CircuitBreakers {
                 outcome: 'blocked',
                 reasonCode: 'INSUFFICIENT_DIVERSIFICATION',
                 context: { activeAssets, minDiversification },
+            }
+        }
+
+        if (atCapAsset !== undefined) {
+            return {
+                safe: true,
+                outcome: 'allowed',
+                reasonCode: 'CONCENTRATION_WITHIN_CAP',
+                reason: `${atCapAsset} target weight is exactly at the ${maxSingleAsset}% concentration cap boundary`,
+                context: {
+                    asset: atCapAsset,
+                    weightPct: maxSingleAsset,
+                    capPct: maxSingleAsset,
+                    postTradeWeightPct: maxSingleAsset,
+                    headroomPct: 0,
+                    atCap: true,
+                },
             }
         }
 
