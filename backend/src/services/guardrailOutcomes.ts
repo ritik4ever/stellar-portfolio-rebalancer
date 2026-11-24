@@ -33,6 +33,7 @@ export type GuardrailReasonCode =
     | 'STALE_PRICES_WHILE_QUEUED'
     | 'QUEUED_PRICES_FRESH'
     | 'CIRCUIT_BREAKER_ACTIVE'
+    | 'VOLATILITY_DATA_INCOMPLETE'
     // cooldown
     | 'COOLDOWN_EXPIRED'
     | 'COOLDOWN_NO_PRIOR_RUN'
@@ -42,6 +43,7 @@ export type GuardrailReasonCode =
     | 'CONCENTRATION_WITHIN_CAP'
     | 'CONCENTRATION_OVER_CAP'
     | 'CONCENTRATION_PARTIAL_FILL_OVER_CAP'
+    | 'CONCENTRATION_PARTIAL_FILL_STUCK'
     | 'INSUFFICIENT_DIVERSIFICATION'
 
 export type GuardrailContextValue = string | number | boolean | null | undefined
@@ -355,6 +357,14 @@ export const cooldownGate = new CooldownGate()
 /** Matches CircuitBreakers.checkConcentrationRisk (80% of portfolio value). */
 export const DEFAULT_CONCENTRATION_CAP_PCT = 80
 
+/**
+ * Bound on how many consecutive evaluations may observe the same
+ * partial-fill over-cap state before the guardrail stops retrying and
+ * reports an explicit block. The evaluation itself is read-only, so
+ * retries never duplicate side effects.
+ */
+export const DEFAULT_MAX_PARTIAL_FILL_OBSERVATIONS = 3
+
 export interface PartialFillConcentrationInput {
     portfolioId?: string
     source: string
@@ -365,6 +375,13 @@ export interface PartialFillConcentrationInput {
     /** Number of trade legs that actually filled. */
     filledLegs: number
     capPct?: number
+    /**
+     * Consecutive evaluations that have observed this partial-fill over-cap
+     * state (caller-maintained). Once it reaches `maxPartialFillObservations`
+     * the outcome becomes `blocked` instead of `delayed`.
+     */
+    partialFillObservations?: number
+    maxPartialFillObservations?: number
     nowMs?: number
 }
 
@@ -423,6 +440,21 @@ export function evaluatePartialFillConcentration(input: PartialFillConcentration
     }
 
     if (isPartialFill) {
+        const observations = Math.max(0, Math.floor(input.partialFillObservations ?? 0))
+        const maxObservations = Math.max(1, Math.floor(input.maxPartialFillObservations ?? DEFAULT_MAX_PARTIAL_FILL_OBSERVATIONS))
+        if (observations >= maxObservations) {
+            return {
+                ...base,
+                outcome: 'blocked',
+                reasonCode: 'CONCENTRATION_PARTIAL_FILL_STUCK',
+                reason: `Partial fill (${filledLegs}/${plannedLegs} legs) left ${topAsset} at ${topWeightPct.toFixed(1)}%, over the ${capPct}% cap, for ${observations} consecutive evaluations; explicit stop`,
+                context: {
+                    ...context,
+                    partialFillObservations: observations,
+                    maxPartialFillObservations: maxObservations,
+                },
+            }
+        }
         return {
             ...base,
             outcome: 'delayed',
