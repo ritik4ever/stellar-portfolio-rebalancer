@@ -109,21 +109,21 @@ export const Modal: React.FC<ModalProps> = ({ open, title, description, onClose,
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-2 sm:p-4">
       <div className="absolute inset-0 bg-black/60 dark:bg-black/70" aria-hidden onClick={onClose} />
       <div
         ref={modalRef}
-        className="relative w-full max-w-md rounded-xl bg-white dark:bg-gray-800 p-4 sm:p-6 shadow-xl overflow-x-hidden"
+        className="relative flex max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)] w-full max-w-md min-w-0 flex-col rounded-xl bg-white dark:bg-gray-800 p-3 sm:p-6 shadow-xl overflow-x-hidden overflow-y-auto"
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
       >
-        {title && <h2 id={titleId} className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h2>}
-        {description && <p id={descriptionId} className="mt-1 text-sm text-gray-600 dark:text-gray-400">{description}</p>}
-        <div className="mt-4">{children}</div>
-        {footer && <div className="mt-6 flex flex-wrap justify-end gap-2">{footer}</div>}
+        {title && <h2 id={titleId} className="min-w-0 break-words text-lg font-semibold text-gray-900 dark:text-white">{title}</h2>}
+        {description && <p id={descriptionId} className="mt-1 min-w-0 break-words text-sm text-gray-600 dark:text-gray-400">{description}</p>}
+        <div className="mt-4 min-w-0">{children}</div>
+        {footer && <div className="mt-6 flex w-full min-w-0 flex-wrap justify-end gap-2">{footer}</div>}
       </div>
     </div>
   )
