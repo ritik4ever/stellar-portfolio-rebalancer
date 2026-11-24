@@ -56,6 +56,30 @@ export const dashboardCopy = {
     noTradesPlanned: 'No trades are required at current allocations.',
     preconditionMet: 'Ready',
     preconditionBlocked: 'Blocked',
+    withinThresholdTitle: 'Allocation is within its drift threshold',
+    withinThresholdDetail: (asset: string, drift: string, threshold: string) =>
+        `${asset} has drifted ${drift} from target, inside the ${threshold} threshold. No trade is planned for it.`,
+    withinThresholdBadge: 'Within threshold',
+    withinThresholdBadgeLabel: (asset: string) =>
+        `Within threshold: ${asset} is inside its drift threshold, so no trade is planned.`,
+    withinThresholdAnnounce: (count: number) =>
+        count === 1
+            ? '1 allocation is within its drift threshold. No trade is planned for it.'
+            : `${count} allocations are within their drift thresholds. No trades are planned for them.`,
+    simulationTimeoutTitle: 'Simulation request timed out',
+    simulationTimeoutDetail:
+        'The dry-run simulation did not respond in time, so no preview result is shown. Retry, or cancel to abandon the preview.',
+    simulationTimeoutAnnounce:
+        'Dry-run simulation timed out. No preview result is shown. Retry is available, or cancel to abandon the preview.',
+    retrySimulation: 'Retry simulation',
+    cancelSimulation: 'Cancel simulation',
+    simulationRunningAnnounce: 'Dry-run simulation started. Press Escape or Cancel to abandon the preview.',
+    simulationCompleteAnnounce: 'Dry-run preview ready. Review the estimated trades, then confirm or cancel.',
+    simulationCancelledAnnounce: 'Dry-run preview cancelled. No trades were submitted.',
+    previewDismissedAnnounce: 'Dry-run preview closed. No trades were submitted.',
+    previewFocusLabel: 'Dry-run preview',
+    previewDescription:
+        'Dry-run preview of the rebalance. Review estimated trades and preconditions. Confirm to submit, or cancel to abandon without submitting any trades.',
 } as const
 
 export const rebalanceHistoryCopy = {

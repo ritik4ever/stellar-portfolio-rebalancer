@@ -157,13 +157,14 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
   const ariaLabel = `${name}: current ${current.toFixed(1)}%, target ${target.toFixed(1)}%, drift ${driftLabel} (${driftDirection(drift)}). Status: ${statusLabel}.${isDriftThresholdValid(threshold) ? ` Threshold: ±${threshold}%.` : ' Threshold must be greater than 0%.'}${asOfLabel ? ` As of ${asOfLabel}.` : ''}`
 
   const [showTooltip, setShowTooltip] = React.useState(false)
+  const tooltipId = React.useId()
 
   const fontSize = Math.max(8, size * 0.13)
   const assetFontSize = Math.max(9, size * 0.15)
 
   return (
     <div
-      className="relative inline-flex flex-col items-center"
+      className="relative inline-flex max-w-full flex-col items-center"
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
       onFocus={() => setShowTooltip(true)}
@@ -175,9 +176,10 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
         viewBox={`0 0 ${size} ${size}`}
         role="img"
         aria-label={ariaLabel}
+        aria-describedby={showTooltip ? tooltipId : undefined}
         focusable="true"
         tabIndex={0}
-        className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full"
+        className="max-w-full h-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full"
       >
         <path
           d={trackPath}
@@ -238,8 +240,9 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
 
       {showTooltip && (
         <div
+          id={tooltipId}
           role="tooltip"
-          className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 w-48 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg p-3 text-xs pointer-events-none"
+          className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 w-48 max-w-[calc(100vw-2rem)] rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg p-3 text-xs pointer-events-none break-words"
         >
           <p className="font-semibold text-gray-900 dark:text-white mb-1">{name}</p>
           <div className="space-y-1 text-gray-600 dark:text-gray-400">
@@ -283,6 +286,9 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
           as of {asOfLabel}
         </span>
       )}
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        {statusLabel}
+      </span>
     </div>
   )
 }
@@ -309,11 +315,11 @@ export const DriftGaugeGrid: React.FC<DriftGaugeGridProps> = ({
 
   return (
     <section
-      className="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm"
+      className="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm max-w-full overflow-x-hidden"
       aria-labelledby="drift-gauge-heading"
     >
       <div
-        className="relative inline-block"
+        className="relative inline-block max-w-full"
         onMouseEnter={() => setShowBreakdown(true)}
         onMouseLeave={() => setShowBreakdown(false)}
         onFocus={() => setShowBreakdown(true)}
@@ -321,7 +327,7 @@ export const DriftGaugeGrid: React.FC<DriftGaugeGridProps> = ({
       >
         <h3
           id="drift-gauge-heading"
-          className="text-sm font-semibold text-gray-900 dark:text-white mb-4 cursor-default"
+          className="text-sm font-semibold text-gray-900 dark:text-white mb-4 cursor-default break-words"
           tabIndex={0}
         >
           {title}
@@ -330,7 +336,7 @@ export const DriftGaugeGrid: React.FC<DriftGaugeGridProps> = ({
         {showBreakdown && (
           <div
             role="tooltip"
-            className="absolute bottom-full mb-1 left-0 z-50 w-64 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg p-3 text-xs pointer-events-none"
+            className="absolute bottom-full mb-1 left-0 z-50 w-64 max-w-[calc(100vw-2rem)] rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg p-3 text-xs pointer-events-none break-words"
           >
             <p className="font-semibold text-gray-900 dark:text-white mb-2">
               Drift Breakdown
@@ -362,29 +368,29 @@ export const DriftGaugeGrid: React.FC<DriftGaugeGridProps> = ({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 mb-4" aria-label="Color legend">
+      <div className="flex flex-wrap items-center gap-3 mb-4 max-w-full" role="list" aria-label="Color legend">
         {(Object.entries(STATUS_COLORS) as [DriftStatus, typeof STATUS_COLORS['ok']][])
           .filter(([status]) => usedStatuses.has(status))
           .map(([, c]) => (
-            <div key={c.label} className="flex items-center gap-1">
+            <div key={c.label} role="listitem" className="flex items-center gap-1 min-w-0">
               <span
                 className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
                 style={{ backgroundColor: c.stroke }}
                 aria-hidden="true"
               />
-              <span className="text-xs text-gray-500 dark:text-gray-400">{c.label}</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400 break-words">{c.label}</span>
             </div>
           )
         )}
       </div>
 
       <div
-        className="flex flex-wrap gap-4 justify-start"
+        className="flex flex-wrap gap-4 justify-start max-w-full"
         role="list"
         aria-label="Drift gauges for all portfolio assets"
       >
         {assets.map((asset) => (
-          <div key={asset.name} role="listitem">
+          <div key={asset.name} role="listitem" className="min-w-0 max-w-full">
             <DriftGauge asset={asset} size={96} />
           </div>
         ))}
@@ -393,9 +399,13 @@ export const DriftGaugeGrid: React.FC<DriftGaugeGridProps> = ({
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {assets.map((a) => {
           const drift = a.current - a.target
+          const status = getDriftStatus(drift, a.threshold)
+          const withinThreshold =
+            status === 'ok' || status === 'warning' || status === 'at_threshold'
           return (
             <span key={a.name}>
-              {a.name}: {drift === 0 ? '0.0' : `${drift >= 0 ? '+' : ''}${drift.toFixed(1)}`}% drift ({driftDirection(drift)}), {describeDriftStatus(drift, a.threshold)}.{' '}
+              {a.name}: {drift === 0 ? '0.0' : `${drift >= 0 ? '+' : ''}${drift.toFixed(1)}`}% drift ({driftDirection(drift)}), {describeDriftStatus(drift, a.threshold)}
+              {withinThreshold ? ', within drift threshold' : ''}.{' '}
             </span>
           )
         })}
