@@ -151,6 +151,30 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
 
     // Determine finalized data
     let filtered = data?.history || (portfolioId === 'demo' || !portfolioId ? getDemoHistory() : []); if(search) filtered = filtered.filter((e:any) => e.trigger.toLowerCase().includes(search.toLowerCase()) || e.details?.reason?.toLowerCase().includes(search.toLowerCase())); if(statusFilter) filtered = filtered.filter((e:any) => e.status === statusFilter); if(triggerFilter) filtered = filtered.filter((e:any) => e.trigger.includes(triggerFilter)); if(dateFilter) filtered = filtered.filter((e:any) => e.timestamp.startsWith(dateFilter)); const history: RebalanceEvent[] = filtered
+    const timestampCounts = React.useMemo(() => {
+        const counts = new Map<string, number>()
+        for (const event of history) {
+            counts.set(event.timestamp, (counts.get(event.timestamp) ?? 0) + 1)
+        }
+        return counts
+    }, [history])
+    const sharedTimestampEventCount = React.useMemo(
+        () =>
+            history.reduce(
+                (acc, event) => acc + ((timestampCounts.get(event.timestamp) ?? 0) > 1 ? 1 : 0),
+                0,
+            ),
+        [history, timestampCounts],
+    )
+    const timestampPositions = React.useMemo(() => {
+        const seen = new Map<string, number>()
+        return history.map((event) => {
+            const total = timestampCounts.get(event.timestamp) ?? 1
+            const position = (seen.get(event.timestamp) ?? 0) + 1
+            seen.set(event.timestamp, position)
+            return { position, total }
+        })
+    }, [history, timestampCounts])
     const totalCount = data?.total || (portfolioId === 'demo' || !portfolioId ? 2 : 0)
     const totalPages = Math.ceil(totalCount / limit)
     const error = queryError ? rebalanceHistoryCopy.loadError : null
@@ -376,11 +400,24 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                         <p className="text-sm mt-1">{rebalanceHistoryCopy.emptyDetail}</p>
                     </div>
                 ) : (
+                    <>
+                    {sharedTimestampEventCount > 0 && (
+                        <div
+                            data-testid="same-timestamp-boundary-note"
+                            role="note"
+                            aria-label={rebalanceHistoryCopy.sameTimestampBoundaryTitle}
+                            className="mt-4 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-900/20 px-4 py-3 text-xs text-blue-900 dark:text-blue-200"
+                        >
+                            <span className="font-semibold">{rebalanceHistoryCopy.sameTimestampBoundaryTitle}:</span>{' '}
+                            <span>{rebalanceHistoryCopy.sameTimestampBoundaryDetail(sharedTimestampEventCount)}</span>
+                        </div>
+                    )}
                     <div role="list" aria-label={rebalanceHistoryCopy.listLabel}>
                     {history.map((event, index) => {
                         const { dateFormatted, timeFormatted } = event.dateFormatted && event.timeFormatted
                             ? { dateFormatted: event.dateFormatted, timeFormatted: event.timeFormatted }
                             : formatDateTime(event.timestamp)
+                        const { position: sameTimestampPosition, total: sameTimestampTotal } = timestampPositions[index] ?? { position: 1, total: 1 }
                         const eventLabel = rebalanceHistoryCopy.eventItemLabel(
                             index + 1,
                             history.length,
@@ -389,6 +426,8 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                             event.trades,
                             dateFormatted,
                             timeFormatted,
+                            sameTimestampPosition,
+                            sameTimestampTotal,
                         )
 
                         return (
@@ -441,6 +480,14 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                                                     <span className="mx-1">at</span>
                                                     <span>{timeFormatted}</span>
                                                 </div>
+                                                {sameTimestampTotal > 1 && (
+                                                    <span
+                                                        data-testid={`same-timestamp-badge-${event.id}`}
+                                                        className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-2 py-0.5 rounded font-medium"
+                                                    >
+                                                        {rebalanceHistoryCopy.sameTimestampBadge(sameTimestampPosition, sameTimestampTotal)}
+                                                    </span>
+                                                )}
                                                 <span className="text-gray-300 dark:text-gray-600">•</span>
                                                 <div className="flex items-center">
                                                     <Clock className="w-4 h-4 mr-1" />
@@ -552,6 +599,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                         )
                     })}
                     </div>
+                    </>
                 )}
             </header>
 

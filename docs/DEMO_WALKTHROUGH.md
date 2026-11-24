@@ -292,6 +292,7 @@ Buy 50 USDC worth of BTC (increase from 23% to 25%)
 - **Gas Fees:** Total transaction costs
 - **Before/After Allocation:** Visual comparison
 - **Performance Impact:** How the rebalance affected portfolio value
+- **Same-Timestamp Boundary:** Multiple events (2+) are allowed at the exact same timestamp. When events share an identical timestamp, Rebalance History displays a boundary note above the list and labels each event with its recorded tie-break position (`Same timestamp · #1 of 2`, `#2 of 2`, etc.) while keeping stable event order and separate trade amounts aligned.
 
 ### Filters and Search
 - Filter by date range
