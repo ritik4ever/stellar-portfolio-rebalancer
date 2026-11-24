@@ -202,11 +202,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         await refreshData()
     }, [refetchPortfolioDetails, refetchPortfolios, refetchPrices, refreshData])
 
-    const handleRebalanceSuccess = (result: { result?: { gasUsed?: string } }) => {
+    const handleRebalanceSuccess = (result: { txId?: string; result?: { gasUsed?: string } }) => {
         trackEvent('rebalance_executed', { portfolioId: latestPortfolioId ?? 'unknown' })
+        const txIdPart = result.txId ? ` · TX: ${result.txId}` : ''
         setRebalanceNotice({
             type: 'success',
-            message: `Rebalance executed successfully. Gas used: ${result.result?.gasUsed || 'N/A'}`,
+            message: `Rebalance executed successfully. Gas used: ${result.result?.gasUsed || 'N/A'}${txIdPart}`,
         })
     }
 
@@ -460,7 +461,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 />
             )}
             {rebalanceNotice && (
-                <div className="fixed right-4 top-4 z-50 max-w-md rounded-lg border bg-white dark:bg-gray-800 shadow-lg p-3">
+                <div className="fixed inset-x-3 top-3 sm:inset-x-auto sm:right-4 sm:top-4 z-50 sm:max-w-md rounded-lg border bg-white dark:bg-gray-800 shadow-lg p-3 break-words min-w-0">
                     <div role="status" className={`text-sm ${rebalanceNotice.type === 'success' ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>
                         {rebalanceNotice.message}
                     </div>

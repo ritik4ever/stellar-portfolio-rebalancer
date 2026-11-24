@@ -124,7 +124,7 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                         : 'This plan contains no executable trades. Close the review and try again when quotes or balances change.'}
                 </p>
             ) : (
-                <div className="max-h-[65vh] space-y-3 overflow-y-auto text-sm">
+                <div className="max-h-[65vh] space-y-3 overflow-y-auto text-sm break-words min-w-0">
                     <h3 id="quoted-trades" className="font-semibold">
                         {trades.length} planned {trades.length === 1 ? 'trade' : 'trades'}
                     </h3>
@@ -161,7 +161,7 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                     ref={errorAlertRef}
                     role="alert"
                     tabIndex={-1}
-                    className="mt-3 rounded border border-red-200 bg-red-50 p-2.5 text-sm text-red-700 outline-none focus:ring-2 focus:ring-red-500 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
+                    className="mt-3 rounded border border-red-200 bg-red-50 p-2.5 text-sm text-red-700 outline-none focus:ring-2 focus:ring-red-500 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 break-words min-w-0"
                 >
                     <p className="font-semibold">Rebalance submission failed</p>
                     <p>{executionError}</p>

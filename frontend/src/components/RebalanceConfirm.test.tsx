@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import RebalanceConfirm from './RebalanceConfirm'
 
@@ -176,5 +176,115 @@ describe('RebalanceConfirm', () => {
         await screen.findByRole('alert')
         fireEvent.keyDown(document, { key: 'Escape' })
         expect(close).toHaveBeenCalledOnce()
+    })
+})
+
+
+// ─── SPR-2026-049: Narrow viewport and large text sizing ─────────────────────
+// These tests confirm that controls, the error alert, fee text, and trade list
+// remain in the DOM and have no inline overflow clipping at 320 px effective
+// width, and that the layout does not force horizontal scroll when the browser
+// text size is 200 % (simulated by doubling the root font size to 32 px).
+//
+// jsdom has no layout engine so we cannot measure pixel overflow.  Instead we
+// assert the structural properties that make overflow impossible:
+//   • the scrollable region has an overflow-y class and no overflow-x-hidden
+//     that would clip the trade list horizontally
+//   • every container that grows with content carries break-words / min-w-0
+//   • buttons, the error alert, and the fee paragraph are always reachable by
+//     role queries regardless of simulated font size
+
+describe('RebalanceConfirm – narrow viewport / large text (SPR-2026-049)', () => {
+    const originalFontSize = document.documentElement.style.fontSize
+
+    afterEach(() => {
+        document.documentElement.style.fontSize = originalFontSize
+        cleanup()
+    })
+
+    it('renders controls and trade list without overflow-x classes at 320 px', () => {
+        showPlan(3)
+        const { container } = render(<RebalanceConfirm portfolioId="p1" open onClose={vi.fn()} />)
+
+        // The scrollable trade-list region must exist and must not carry a
+        // class that would clip content horizontally.
+        const region = screen.getByRole('region', { name: '3 planned trades' })
+        expect(region).toBeInTheDocument()
+        expect(region.className).not.toMatch(/overflow-x-hidden/)
+
+        // The outer content wrapper must carry break-words so long asset
+        // names or fee strings cannot create a wider-than-container box.
+        // We walk up from the trade list to the first div that carries
+        // the scrollable body class.
+        const scrollBody = container.querySelector('.max-h-\\[65vh\\]')
+        expect(scrollBody).not.toBeNull()
+        expect(scrollBody!.className).toMatch(/break-words/)
+        expect(scrollBody!.className).toMatch(/min-w-0/)
+
+        // All actionable controls are reachable.
+        expect(screen.getByRole('checkbox')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Confirm rebalance' })).toBeInTheDocument()
+    })
+
+    it('renders controls and trade list at 200 % text size (32 px root font)', () => {
+        // Simulate user browser text-size preference of 200 % by setting
+        // the root element font-size.  jsdom does not reflow but the DOM
+        // structure must remain unchanged.
+        document.documentElement.style.fontSize = '32px'
+
+        showPlan(5)
+        render(<RebalanceConfirm portfolioId="p1" open onClose={vi.fn()} />)
+
+        const region = screen.getByRole('region', { name: '5 planned trades' })
+        expect(region).toBeInTheDocument()
+        expect(within(region).getAllByRole('listitem')).toHaveLength(5)
+
+        expect(screen.getByRole('checkbox')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Confirm rebalance' })).toBeInTheDocument()
+    })
+
+    it('error alert carries break-words and min-w-0 so long transaction error strings do not clip', async () => {
+        showPlan(2)
+        const longError = 'Transaction rejected: ' + 'x'.repeat(80)
+        mocks.mutateAsync.mockRejectedValueOnce(new Error(longError))
+
+        render(<RebalanceConfirm portfolioId="p1" open onClose={vi.fn()} />)
+        fireEvent.click(screen.getByRole('checkbox'))
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm rebalance' }))
+
+        const alert = await screen.findByRole('alert')
+        expect(alert).toBeInTheDocument()
+        expect(alert.className).toMatch(/break-words/)
+        expect(alert.className).toMatch(/min-w-0/)
+        // The full error text is present — not truncated or hidden.
+        expect(alert).toHaveTextContent(longError)
+        // Cancel is still reachable after the error.
+        expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    })
+
+    it('submitting-state button text is visible and not clipped at 320 px', async () => {
+        showPlan(2)
+        let resolveMutation!: () => void
+        mocks.mutateAsync.mockImplementation(
+            () => new Promise<void>(resolve => { resolveMutation = resolve }),
+        )
+
+        render(<RebalanceConfirm portfolioId="p1" open onClose={vi.fn()} />)
+        fireEvent.click(screen.getByRole('checkbox'))
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm rebalance' }))
+
+        // The in-flight button must remain findable by its accessible name.
+        const submitting = screen.getByRole('button', { name: 'Submitting rebalance…' })
+        expect(submitting).toBeInTheDocument()
+        expect(submitting).toBeDisabled()
+        // Cancel is also reachable so the user can abort via keyboard.
+        expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+
+        resolveMutation()
+        await waitFor(() =>
+            expect(screen.queryByRole('button', { name: 'Submitting rebalance…' })).toBeNull(),
+        )
     })
 })
