@@ -11,9 +11,20 @@ function readSlippageTolerance(details: any): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-function isSlippageFailure(message: string | null): boolean {
-    if (!message) return false
-    return /slippage|tolerance|price (?:moved|changed|deviated)|quote (?:expired|stale)/i.test(message)
+type ExecutionFailureKind = 'slippage' | 'wallet_rejected' | 'network_ack_lost' | 'generic'
+
+function classifyExecutionFailure(message: string | null): ExecutionFailureKind {
+    if (!message) return 'generic'
+    if (/slippage|tolerance|price (?:moved|changed|deviated)|quote (?:expired|stale)/i.test(message)) {
+        return 'slippage'
+    }
+    if (/wallet|user (?:rejected|declined|denied|cancelled|canceled)|rejected (?:by|in) (?:user|wallet)|declined (?:by|in) (?:user|wallet)|signing (?:rejected|declined|cancelled|canceled|failed)|signature (?:rejected|declined|cancelled|canceled)/i.test(message)) {
+        return 'wallet_rejected'
+    }
+    if (/network|timeout|timed out|acknowledg(?:e)?ment|connection (?:lost|dropped|reset|refused|closed)|failed to fetch|load failed|aborted|socket hang up|econnreset|etimedout|502|503|504|gateway/i.test(message)) {
+        return 'network_ack_lost'
+    }
+    return 'generic'
 }
 
 function formatPercent(value: number): string {
@@ -86,7 +97,9 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
         && planTolerance != null
         && Number.isFinite(planTolerance)
         && Math.abs(activeTolerance - planTolerance) > 1e-9
-    const canConfirm = hasTrades && confirmed && !isFetching && !isError && !inFlight && !toleranceChanged
+    const failureKind = executionError ? classifyExecutionFailure(executionError) : null
+    const needsStatusCheckBeforeRetry = failureKind === 'network_ack_lost'
+    const canConfirm = hasTrades && confirmed && !isFetching && !isError && !inFlight && !toleranceChanged && !needsStatusCheckBeforeRetry
     const withinThreshold = boundary?.reasonCode === 'WITHIN_EVERY_THRESHOLD'
     const thresholdAmountCopy = boundary?.thresholdPercent != null && Number.isFinite(boundary.thresholdPercent)
         ? `${boundary.thresholdPercent.toFixed(2)} percentage points`
@@ -113,12 +126,11 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
         }
     }
 
-    const handleConfirm = async () => {
+    const submitRebalance = async () => {
         if (submittingRef.current || inFlight) {
             setStatusAnnouncement('Rebalance submission is already in progress.')
             return
         }
-        if (!canConfirm) return
         submittingRef.current = true
         setIsSubmitting(true)
         setExecutionError(null)
@@ -136,6 +148,24 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
             setStatusAnnouncement(null)
             setExecutionError(error instanceof Error ? error.message : 'Rebalance failed. Please try again.')
         }
+    }
+
+    const handleConfirm = async () => {
+        if (submittingRef.current || inFlight) {
+            setStatusAnnouncement('Rebalance submission is already in progress.')
+            return
+        }
+        if (!canConfirm) return
+        await submitRebalance()
+    }
+
+    const handleRetrySigning = async () => {
+        if (submittingRef.current || inFlight) {
+            setStatusAnnouncement('Rebalance submission is already in progress.')
+            return
+        }
+        if (!hasTrades || isFetching || isError || toleranceChanged) return
+        await submitRebalance()
     }
 
     return (
@@ -260,9 +290,15 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                     tabIndex={-1}
                     className="mt-3 min-w-0 break-words rounded border border-red-200 bg-red-50 p-2.5 text-sm text-red-700 outline-none focus:ring-2 focus:ring-red-500 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
                 >
-                    <p className="font-semibold">Rebalance submission failed</p>
+                    <p className="font-semibold">
+                        {failureKind === 'wallet_rejected'
+                            ? 'Wallet signature rejected'
+                            : failureKind === 'network_ack_lost'
+                                ? 'Network acknowledgement lost'
+                                : 'Rebalance submission failed'}
+                    </p>
                     <p className="min-w-0 break-words">{executionError}</p>
-                    {isSlippageFailure(executionError) ? (
+                    {failureKind === 'slippage' ? (
                         <>
                             <p className="mt-1 min-w-0 break-words text-xs text-red-600 dark:text-red-400">
                                 Prices moved beyond your slippage limit before the rebalance was accepted, so nothing was executed.
@@ -277,6 +313,40 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                             >
                                 {isFetching ? 'Refreshing…' : 'Refresh quote and retry'}
                             </Button>
+                        </>
+                    ) : failureKind === 'wallet_rejected' ? (
+                        <>
+                            <p className="mt-1 min-w-0 break-words text-xs text-red-600 dark:text-red-400">
+                                No transaction was submitted to the network because signing was declined or cancelled in your wallet.
+                                Check that your wallet is unlocked and on the right network, then retry signing or cancel.
+                            </p>
+                            <div className="mt-2 flex min-w-0 flex-wrap gap-2">
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => void handleRetrySigning()}
+                                    disabled={isFetching || inFlight || toleranceChanged}
+                                >
+                                    {inFlight ? 'Submitting rebalance…' : 'Retry signing'}
+                                </Button>
+                            </div>
+                        </>
+                    ) : failureKind === 'network_ack_lost' ? (
+                        <>
+                            <p className="mt-1 min-w-0 break-words text-xs text-red-600 dark:text-red-400">
+                                The connection dropped before confirmation was received, so this rebalance may have already been submitted.
+                                Check status and refresh the plan before retrying to avoid duplicate trades.
+                            </p>
+                            <div className="mt-2 flex min-w-0 flex-wrap gap-2">
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => void refreshPlan()}
+                                    disabled={isFetching || inFlight}
+                                >
+                                    {isFetching ? 'Checking status…' : 'Check status & refresh plan'}
+                                </Button>
+                            </div>
                         </>
                     ) : (
                         <p className="mt-1 min-w-0 break-words text-xs text-red-600 dark:text-red-400">
