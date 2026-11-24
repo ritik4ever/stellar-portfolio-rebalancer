@@ -6,7 +6,7 @@ import { assetRegistryService } from './assetRegistryService.js'
 import { CoinGeckoFallbackCache, readCoinGeckoFallbackTtlMs } from './coinGeckoFallbackCache.js'
 import { REDIS_URL } from '../queue/connection.js'
 import { databaseService } from './databaseService.js'
-import type { PriceIngestionDecision } from './priceIngestionBoundary.js'
+import type { PriceIngestionDecision, PriceIngestionReasonCode } from './priceIngestionBoundary.js'
 import { normalizeScaledQuote } from '../utils/quotePrecision.js'
 
 
@@ -43,6 +43,14 @@ export interface OracleReachabilityResult {
     quoteTimestamp?: number
     error?: string
 }
+
+type PriceIngestionLogOutcome = 'success' | 'delayed' | 'blocked'
+
+type PriceIngestionLogReasonCode =
+    | PriceIngestionReasonCode
+    | 'MISSING_QUOTE'
+    | 'INVALID_QUOTE'
+    | 'PERSISTENCE_FAILED'
 
 const ORACLE_DEVIATION_TOLERANCE_BPS = 300
 const REFLECTOR_TIMEOUT_MS = 5000
@@ -402,6 +410,40 @@ export class ReflectorService {
         return (nowSec - tsSec) > this.PRICE_DATA_MAX_AGE
     }
 
+    private quoteAgeSeconds(timestamp: number): number {
+        const tsSec = timestamp >= 1e12 ? Math.floor(timestamp / 1000) : Math.floor(timestamp)
+        return Math.max(0, Math.floor(Date.now() / 1000) - tsSec)
+    }
+
+    /**
+     * Single structured signal for every per-asset Reflector ingestion outcome.
+     * `success`/`delayed`/`blocked` let operators tell accepted work apart from
+     * quotes the oracle has not published yet (stale) and quotes refused by the
+     * ingestion boundary (older ledger, invalid quote, persistence failure).
+     * Context is limited to identifiers, ledger numbers and measurements —
+     * never URLs, credentials or raw provider payloads.
+     */
+    private logPriceIngestion(fields: {
+        asset: string
+        outcome: PriceIngestionLogOutcome
+        reasonCode?: PriceIngestionLogReasonCode
+        observedLedger?: number
+        observedPrice?: number
+        acceptedLedger?: number
+        acceptedPrice?: number
+        acceptedSource?: string
+        ageMs?: number
+        quoteAgeSeconds?: number
+        decimals?: number
+    }): void {
+        const payload = { source: 'reflector' as const, ...fields }
+        if (fields.outcome === 'success') {
+            logger.info('[ORACLE] price_ingestion', payload)
+        } else {
+            logger.warn('[ORACLE] price_ingestion', payload)
+        }
+    }
+
     private async getReflectorPrices(
         assets: string[], stalePrices: Map<string, number>, signal: AbortSignal
     ): Promise<PricesMap> {
@@ -432,12 +474,13 @@ export class ReflectorService {
 
         assets.forEach((asset) => {
             const row = rows?.[asset]
-            if (!row) return
-
-            const stale = this.isPriceStale(row.timestamp)
-            if (stale) {
-                staleCount += 1
-                recordReflectorStalePrice(asset)
+            if (!row) {
+                this.logPriceIngestion({
+                    asset,
+                    outcome: 'blocked',
+                    reasonCode: 'MISSING_QUOTE'
+                })
+                return
             }
 
             const decimals = row.decimals ?? 0
@@ -449,10 +492,27 @@ export class ReflectorService {
                 logger.warn('[ORACLE] quote_precision', {
                     ...context, outcome: 'blocked', reason: error instanceof RangeError ? 'integer_overflow' : 'invalid_quote'
                 })
+                this.logPriceIngestion({
+                    asset,
+                    outcome: 'blocked',
+                    reasonCode: 'INVALID_QUOTE',
+                    observedLedger: row.ledger,
+                    decimals: Number.isInteger(decimals) ? decimals : undefined
+                })
                 return
             }
-            if (stale) {
+
+            if (this.isPriceStale(row.timestamp)) {
+                staleCount += 1
+                recordReflectorStalePrice(asset)
                 stalePrices.set(asset, price)
+                this.logPriceIngestion({
+                    asset,
+                    outcome: 'delayed',
+                    reasonCode: 'STALE_QUOTE',
+                    observedLedger: row.ledger,
+                    quoteAgeSeconds: this.quoteAgeSeconds(row.timestamp)
+                })
                 return
             }
 
@@ -468,35 +528,39 @@ export class ReflectorService {
                     nowMs
                 })
             } catch {
-                logger.error('[ORACLE] price_ingestion', {
-                    source: 'reflector', asset, outcome: 'blocked', reasonCode: 'PERSISTENCE_FAILED'
+                this.logPriceIngestion({
+                    asset,
+                    outcome: 'blocked',
+                    reasonCode: 'PERSISTENCE_FAILED',
+                    observedLedger: row.ledger
                 })
                 return
             }
             if (decision.result === 'rejected') {
-                logger.warn('[ORACLE] price_ingestion', {
-                    source: 'reflector',
+                this.logPriceIngestion({
                     asset,
                     outcome: 'blocked',
                     reasonCode: decision.reasonCode,
                     observedLedger: decision.observedLedger,
+                    observedPrice: decision.observedPrice,
                     acceptedLedger: decision.acceptedLedger,
-                    acceptedPrice: decision.acceptedPrice
+                    acceptedPrice: decision.acceptedPrice,
+                    acceptedSource: decision.acceptedSource,
+                    ageMs: decision.ageMs
                 })
                 return
             }
 
+            this.logPriceIngestion({
+                asset,
+                outcome: 'success',
+                reasonCode: decision.reasonCode,
+                observedLedger: decision.observedLedger,
+                acceptedLedger: decision.acceptedLedger,
+                acceptedPrice: decision.acceptedPrice,
+                ageMs: decision.ageMs
+            })
             logger.info('[ORACLE] quote_precision', { ...context, outcome: 'success', reason: 'normalized' })
-            if (decision.reasonCode === 'FRESH_AT_LIMIT') {
-                logger.info('[ORACLE] price_ingestion', {
-                    source: 'reflector',
-                    asset,
-                    outcome: 'accepted',
-                    reasonCode: decision.reasonCode,
-                    ledger: decision.acceptedLedger,
-                    price: decision.acceptedPrice
-                })
-            }
 
             out[asset] = {
                 price,
