@@ -11,6 +11,10 @@ export const appCopy = {
 export const dashboardCopy = {
     title: 'Portfolio Dashboard',
     demoMode: 'Demo Mode — connect a wallet for full functionality',
+    demoBoundarySummary: 'Simulated $10,000 portfolio (40% XLM / 60% USDC). On-chain rebalancing is disabled in demo mode.',
+    demoSwitchToWalletNote: 'Switching to a connected wallet replaces the simulated $10,000 demo balance with your real on-chain balances. Demo data is never merged with real funds.',
+    walletSwitchToDemoNote: 'Disconnecting ends your wallet session and returns to the landing screen; real balances stay separate from the $10,000 demo portfolio.',
+    demoRebalanceBlocked: 'Simulated $10,000 demo balances are read-only and never mixed with real wallet funds.',
     contractLabel: 'Contract',
     walletSuffix: 'Wallet',
     loadingPortfolio: 'Loading portfolio data…',
