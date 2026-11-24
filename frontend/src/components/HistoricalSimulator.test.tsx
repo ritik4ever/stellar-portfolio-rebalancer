@@ -113,6 +113,72 @@ describe('HistoricalSimulator', () => {
         await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Run simulation' })))
     })
 
+    it('offers an Adjust dates path on insufficient history without losing edited dates', async () => {
+        vi.spyOn(api, 'post').mockRejectedValue(new ApiClientError(
+            'Not enough overlapping price history across the selected assets',
+            503,
+            'HISTORICAL_DATA_UNAVAILABLE',
+        ))
+        render(<HistoricalSimulator portfolioId="p1" />)
+        const start = screen.getByLabelText('Start date') as HTMLInputElement
+        const end = screen.getByLabelText('End date') as HTMLInputElement
+        fireEvent.change(start, { target: { value: '2028-02-10' } })
+        fireEvent.change(end, { target: { value: '2028-02-25' } })
+        submit()
+
+        await screen.findByRole('alert')
+        fireEvent.click(screen.getByRole('button', { name: 'Adjust dates' }))
+
+        expect(document.activeElement).toBe(start)
+        expect(start.value).toBe('2028-02-10')
+        expect(end.value).toBe('2028-02-25')
+    })
+
+    it('offers a shorter 7-day range on insufficient history without firing a duplicate request', async () => {
+        const post = vi.spyOn(api, 'post').mockRejectedValue(new ApiClientError(
+            'Not enough overlapping price history across the selected assets',
+            503,
+            'HISTORICAL_DATA_UNAVAILABLE',
+        ))
+        render(<HistoricalSimulator portfolioId="p1" />)
+        submit()
+
+        await screen.findByRole('alert')
+        expect(post).toHaveBeenCalledTimes(1)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Try last 7 days' }))
+
+        expect(screen.queryByRole('alert')).toBeNull()
+        expect((screen.getByLabelText('Start date') as HTMLInputElement).value).toBe('2028-02-27')
+        expect((screen.getByLabelText('End date') as HTMLInputElement).value).toBe('2028-03-04')
+        expect(post).toHaveBeenCalledTimes(1)
+        await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Run simulation' })))
+    })
+
+    it('retries after insufficient history without duplicating requests or losing edited dates', async () => {
+        const post = vi.spyOn(api, 'post')
+            .mockRejectedValueOnce(new ApiClientError(
+                'Not enough overlapping price history across the selected assets',
+                503,
+                'HISTORICAL_DATA_UNAVAILABLE',
+            ))
+            .mockResolvedValueOnce(completed({ startDate: '2028-02-10', endDate: '2028-02-25' }))
+        render(<HistoricalSimulator portfolioId="p1" />)
+        const start = screen.getByLabelText('Start date') as HTMLInputElement
+        const end = screen.getByLabelText('End date') as HTMLInputElement
+        fireEvent.change(start, { target: { value: '2028-02-10' } })
+        fireEvent.change(end, { target: { value: '2028-02-25' } })
+        submit()
+
+        await screen.findByRole('alert')
+        fireEvent.click(screen.getByRole('button', { name: 'Retry simulation' }))
+
+        await screen.findByRole('heading', { name: 'Simulation result' })
+        expect(post).toHaveBeenCalledTimes(2)
+        expect(start.value).toBe('2028-02-10')
+        expect(end.value).toBe('2028-02-25')
+    })
+
     it('lets a keyboard user abandon a run with Escape and ignores the late response', async () => {
         let resolve!: (value: unknown) => void
         vi.spyOn(api, 'post').mockReturnValue(new Promise((done) => { resolve = done }))
