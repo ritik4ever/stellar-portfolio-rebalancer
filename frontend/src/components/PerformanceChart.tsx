@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, ReferenceDot, BarChart, Bar, Cell
@@ -10,7 +10,7 @@ import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
 import { performanceChartCopy, DEFAULT_LOCALE } from '../content/uiCopy'
 import { formatUsdCompact, formatPercent } from '../utils/localeFormat'
 import { downloadCSV, toCSV } from '../utils/export'
-import { isCompleteSnapshot, summarizePerformanceSeries } from '../utils/performanceSeries'
+
 
 interface PerformanceChartProps {
   portfolioId: string | null
@@ -18,16 +18,18 @@ interface PerformanceChartProps {
 
 interface TimeRangeOption {
   label: string
+  /** spoken name, e.g. "1 week" */
+  name: string
   days: number
   value: string
 }
 
 const TIME_RANGES: TimeRangeOption[] = [
-  { label: '1D', days: 1, value: '1d' },
-  { label: '1W', days: 7, value: '1w' },
-  { label: '1M', days: 30, value: '1m' },
-  { label: '3M', days: 90, value: '3m' },
-  { label: 'ALL', days: 3650, value: 'all' },
+  { label: '1D', name: '1 day', days: 1, value: '1d' },
+  { label: '1W', name: '1 week', days: 7, value: '1w' },
+  { label: '1M', name: '1 month', days: 30, value: '1m' },
+  { label: '3M', name: '3 months', days: 90, value: '3m' },
+  { label: 'ALL', name: 'all time', days: 3650, value: 'all' },
 ]
 
 function formatChartDate(timestamp: string): string {
@@ -57,9 +59,15 @@ function formatPercentage(value: number): string {
   return formatPercent(value)
 }
 
+interface Refetchable {
+  error: unknown
+  refetch?: () => Promise<unknown>
+}
+
 const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
   const [days, setDays] = useState(1)
   const { isDark } = useTheme()
+  const selectedRange = TIME_RANGES.find((r) => r.days === days) ?? TIME_RANGES[0]
 
   const requestedDays = days
 
@@ -69,17 +77,51 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
     return { from: fromDate.toISOString(), to: toDate.toISOString() }
   }, [requestedDays])
 
-  const { data: analyticsDataResult, isLoading: analyticsLoading, error: analyticsError } = usePortfolioAnalytics(portfolioId, requestedDays)
-  const { data: summaryDataResult, isLoading: summaryLoading, error: summaryError } = usePerformanceSummary(portfolioId)
-  const { data: historyResult, isLoading: historyLoading, error: historyError } = useRebalanceHistory(portfolioId, 1, 50)
+  const analyticsQuery = usePortfolioAnalytics(portfolioId, requestedDays)
+  const summaryQuery = usePerformanceSummary(portfolioId)
+  const historyQuery = useRebalanceHistory(portfolioId, 1, 50)
   const { data: benchmarkResult, isLoading: benchmarkLoading, error: benchmarkError } = usePortfolioBenchmark(portfolioId, from, to)
+  const { data: analyticsDataResult, isLoading: analyticsLoading, error: analyticsError } = analyticsQuery
+  const { data: summaryDataResult, isLoading: summaryLoading, error: summaryError } = summaryQuery
+  const { data: historyResult, isLoading: historyLoading, error: historyError } = historyQuery
 
   const analyticsData = analyticsDataResult?.data || []
   const performanceSummary = summaryDataResult
   const benchmarks = benchmarkResult?.benchmarks || []
 
-  const loading = portfolioId && portfolioId !== 'demo' ? (analyticsLoading || summaryLoading || historyLoading || benchmarkLoading) : false
-  const error = analyticsError || summaryError || historyError ? 'Failed to load performance data' : null
+  const isLivePortfolio = !!portfolioId && portfolioId !== 'demo'
+  const loading = isLivePortfolio ? !!(analyticsLoading || summaryLoading || historyLoading || benchmarkLoading) : false
+  const error = analyticsError || summaryError || historyError ? performanceChartCopy.loadError : null
+
+  // Retry and dismiss state. A ref guards against a second request while one is in flight (double clicks,
+  // Enter held down), so recovering never duplicates work.
+  const retryInFlight = useRef(false)
+  const [retrying, setRetrying] = useState(false)
+  const [dismissedMissingKey, setDismissedMissingKey] = useState<string | null>(null)
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  const missingBadgeRef = useRef<HTMLButtonElement>(null)
+  const missingPanelRef = useRef<HTMLDivElement>(null)
+  const pendingFocus = useRef<'heading' | 'badge' | 'panel' | null>(null)
+
+  const retry = useCallback(async (queries: Refetchable[]) => {
+    if (retryInFlight.current) return
+    const targets = queries.filter((q) => typeof q.refetch === 'function')
+    if (targets.length === 0) return
+    retryInFlight.current = true
+    setRetrying(true)
+    try {
+      await Promise.all(targets.map((q) => q.refetch!()))
+    } catch {
+      // the query's own error state reports the failure, and Retry is offered again
+    } finally {
+      retryInFlight.current = false
+      setRetrying(false)
+      pendingFocus.current = 'heading'
+    }
+  }, [])
+
+  const retryFailed = () => retry([analyticsQuery, summaryQuery, historyQuery].filter((q) => q.error))
+  const retryPrices = () => retry([analyticsQuery])
 
   const formatChartData = useMemo(() => {
     return analyticsData.map((snapshot: any) => {
@@ -93,9 +135,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
     })
   }, [analyticsData])
 
-  const seriesSummary = useMemo(() => summarizePerformanceSeries(analyticsData), [analyticsData])
-  const selectedRange = TIME_RANGES.find((range) => range.days === days) ?? TIME_RANGES[0]
-  const selectedRangeDescription = performanceChartCopy.rangeDescription(selectedRange.label, selectedRange.days)
+
 
   const exportChartDataCSV = () => {
     const rows = formatChartData.map((dataPoint: { date: string; value: number; timestamp: any }) => ({
@@ -108,7 +148,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
     downloadCSV(filename, csv)
   }
 
-  if (!portfolioId || portfolioId === 'demo') {
+  if (!isLivePortfolio) {
     return (
       <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
         <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
@@ -121,76 +161,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
     )
   }
 
-  const rangeSelector = (
-    <div className="flex flex-wrap items-center gap-2" role="group" aria-label={performanceChartCopy.rangeSelector}>
-      {TIME_RANGES.map((range) => (
-        <button
-          key={range.value}
-          type="button"
-          onClick={() => setDays(range.days)}
-          aria-pressed={days === range.days}
-          aria-label={`Show ${range.label}`}
-          className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-            days === range.days
-              ? 'bg-blue-600 text-white'
-              : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-          }`}
-        >
-          {range.label}
-        </button>
-      ))}
-    </div>
-  )
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        {rangeSelector}
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse motion-safe:animate-pulse" role="status" aria-busy="true">
-          <div className="flex items-center justify-between mb-6">
-            <div className="w-48 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
-            <div className="flex items-center space-x-2">
-              <div className="w-32 h-8 bg-gray-300 dark:bg-gray-700 rounded" />
-              <div className="w-32 h-8 bg-gray-300 dark:bg-gray-700 rounded" />
-            </div>
-          </div>
-          <div className="h-80 bg-gray-200 dark:bg-gray-700 rounded" />
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-            <div key={i} className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm animate-pulse motion-safe:animate-pulse">
-              <div className="flex items-center justify-between mb-2">
-                <div className="w-20 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
-                <div className="w-4 h-4 bg-gray-300 dark:bg-gray-700 rounded" />
-              </div>
-              <div className="w-16 h-6 bg-gray-300 dark:bg-gray-700 rounded mb-2" />
-              <div className="w-12 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-        {rangeSelector}
-        <div className="flex items-center justify-center h-64 text-red-500">
-          <div className="text-center">
-            <AlertCircle className="w-12 h-12 mx-auto mb-2" />
-            <p role="alert">{performanceChartCopy.loadError}</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  const chartData = formatChartData
-  const plottedData = seriesSummary.state === 'single'
-    ? chartData.filter((point: { isComplete: boolean }) => point.isComplete)
-    : chartData
-  const metrics = performanceSummary?.metrics
 
   const CustomTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null
@@ -207,19 +178,11 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
     )
   }
 
+  const secondaryButton =
+    'px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed'
+
   return (
-    <div className="space-y-6">
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            {performanceChartCopy.title}
-          </h2>
-          <div className="flex flex-wrap items-center gap-2">
-            {rangeSelector}
-            <button
-              type="button"
-              onClick={exportChartDataCSV}
-              className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+
               aria-label="Export chart data as CSV"
             >
               Export
@@ -227,89 +190,63 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
           </div>
         </div>
 
-        <p role="status" className="mb-4 break-words text-sm text-gray-600 dark:text-gray-400">
-          {`${selectedRangeDescription}: ${performanceChartCopy.pointCount(seriesSummary.validPoints)}. `}
-          {seriesSummary.state === 'ready'
-            ? performanceChartCopy.boundaryReady
-            : seriesSummary.state === 'single'
-              ? performanceChartCopy.boundarySingle
-              : performanceChartCopy.boundaryEmpty}
-          {seriesSummary.incompletePoints > 0 ? ` ${performanceChartCopy.incompletePoints(seriesSummary.incompletePoints)}` : ''}
-        </p>
 
-        {seriesSummary.state === 'empty' ? (
-          <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
-            <div className="text-center">
-              <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400 dark:text-gray-500" />
-              <p>{performanceChartCopy.emptyTitle}</p>
-              <p className="text-sm mt-1">{performanceChartCopy.emptyDetail}</p>
-            </div>
-          </div>
-        ) : (
-          <div>
-            <div className="h-80" role="img" aria-label={seriesSummary.state === 'single'
-              ? performanceChartCopy.singleChartLabel(selectedRangeDescription)
-              : `Portfolio performance chart showing ${seriesSummary.validPoints} data points for ${selectedRangeDescription}`}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={plottedData} data-testid="line-chart" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f0f0f0'} />
-                  <XAxis
-                    dataKey="date"
-                    stroke={isDark ? '#9CA3AF' : '#666'}
-                    tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }}
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis
-                    stroke={isDark ? '#9CA3AF' : '#666'}
-                    tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }}
-                    tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="value"
-                    stroke="#3B82F6"
-                    strokeWidth={3}
-                    dot={seriesSummary.state === 'single' ? { r: 5 } : false}
-                    name="Portfolio value"
-                  />
-                  {(historyResult?.history ?? []).map((event: any) => {
-                    const eventTimestamp = new Date(event.timestamp).getTime()
-                    const bestMatch = plottedData.reduce((best: any | null, item: any) => {
-                      const itemTimestamp = new Date(item.timestamp).getTime()
-                      if (!Number.isFinite(itemTimestamp)) return best
-                      if (itemTimestamp > eventTimestamp) return best
-                      return !best || itemTimestamp > new Date(best.timestamp).getTime() ? item : best
-                    }, null)
-
-                    if (!bestMatch) return null
-
-                    return (
-                      <ReferenceDot
-                        key={event.id}
-                        data-testid="reference-dot"
-                        x={bestMatch.date}
-                        y={bestMatch.value}
-                        r={5}
-                        stroke="#fff"
-                        strokeWidth={2}
-                        fill={event.status === 'failed' ? '#ef4444' : '#f59e0b'}
-                        label={{
-                          position: 'top',
-                          value: event.status === 'failed' ? '⚠' : '●',
-                          fill: isDark ? '#F9FAFB' : '#111827',
-                          fontSize: 12,
-                        }}
                       />
-                    )
-                  })}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+                      <YAxis
+                        stroke={isDark ? '#9CA3AF' : '#666'}
+                        tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }}
+                        tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                        width={48}
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="value"
+                        stroke="#3B82F6"
+                        strokeWidth={3}
+                        // a single point has no line to draw, so show it as a dot
+                        dot={dataState === 'single' ? { r: 5 } : false}
+                        name="Portfolio value"
+                      />
+                      {(historyResult?.history ?? []).map((event: any) => {
+                        const eventTimestamp = new Date(event.timestamp).getTime()
+                        const bestMatch = chartData.reduce((best: any | null, item: any) => {
+                          const itemTimestamp = new Date(item.timestamp).getTime()
+                          if (!Number.isFinite(itemTimestamp)) return best
+                          if (itemTimestamp > eventTimestamp) return best
+                          return !best || itemTimestamp > new Date(best.timestamp).getTime() ? item : best
+                        }, null)
+
+                        if (!bestMatch) return null
+
+                        return (
+                          <ReferenceDot
+                            key={event.id}
+                            data-testid="reference-dot"
+                            x={bestMatch.date}
+                            y={bestMatch.value}
+                            r={5}
+                            stroke="#fff"
+                            strokeWidth={2}
+                            fill={event.status === 'failed' ? '#ef4444' : '#f59e0b'}
+                            label={{
+                              position: 'top',
+                              value: event.status === 'failed' ? '⚠' : '●',
+                              fill: isDark ? '#F9FAFB' : '#111827',
+                              fontSize: 12,
+                            }}
+                          />
+                        )
+                      })}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+          </>
         )}
-      </div>
+      </section>
 
       {metrics && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
