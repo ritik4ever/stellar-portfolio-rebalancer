@@ -155,6 +155,58 @@ If the container remains `starting`, wait for readiness and inspect `/readiness`
    node scripts/validate-compose-resources.mjs
    ```
 
+### Validating Terraform rollout from a clean environment (SPR-2026-271)
+
+The portfolio rebalancing infrastructure defines AWS alerting, budgets, and rollout outcome detection (`terraform/` and `deployment/terraform/`). A contributor can validate state consistency, reproduce clean plans without infrastructure changes, and execute safe rollback steps from a fresh checkout or isolated service without undocumented local state.
+
+1. **Clean environment initialisation and verification**:
+   All root module variables have self-contained defaults (`project = "stellar-portfolio-rebalancer"`, `environment = "dev"`, `region = "us-east-1"`). Initialisation succeeds without requiring pre-existing `.env` secrets or machine-local state files:
+   ```bash
+   cd terraform
+   terraform init -input=false
+   terraform validate
+   ```
+
+2. **Reproducing a plan with no infrastructure changes**:
+   Check state consistency against remote infrastructure without mutating local state:
+   ```bash
+   # Returns exit code 0 when configuration matches state with no pending changes:
+   terraform plan -detailed-exitcode -no-color
+
+   # Or perform a refresh-only consistency check:
+   terraform plan -refresh-only
+   ```
+
+3. **Isolated service execution**:
+   Rollout and testing can be isolated to a single component (e.g. AWS Budgets alert topic or ECS service) using targeted commands:
+   ```bash
+   terraform plan -target=aws_sns_topic.budget_alerts
+   terraform apply -target=aws_sns_topic.budget_alerts
+   ```
+
+4. **Rollout outcome signal and safe rollback boundary**:
+   The workflow surfaces structured rollout status tokens after apply:
+   - `success`: Desired state reached; all partial-apply fields are `null`.
+   - `transient_delay`: Dependency or propagation delay; default owner action is `retry_apply`. Wait and re-apply.
+   - `blocked`: Hard prerequisite failure; default owner action is `resolve_blocker`. Do not retry blindly.
+   ```bash
+   terraform output -raw rollout_outcome
+   terraform output -raw rollout_owner_action
+   terraform output -raw rollout_affected_service
+   ```
+   **Rollback boundary:** When `blocked`, rollback is confined strictly to the affected service. Do not modify or destroy unrelated resources. For an ECS rollout failure, roll back the task definition revision via AWS CLI (`aws ecs update-service --task-definition <previous-arn> --force-new-deployment`) without modifying remote state locks or other modules.
+
+5. **Offline verification tests**:
+   Run offline verification suites without needing live AWS credentials:
+   ```bash
+   # Terraform native tests (offline with mock_provider)
+   cd terraform && terraform test
+   cd deployment/terraform/modules/ecs && terraform test
+
+   # Node.js clean checkout integration test
+   node --test deployment/deploy.test.mjs
+   ```
+
 ## Contract event indexer
 
 - **Code:** `backend/src/services/contractEventIndexer.ts`.
@@ -164,7 +216,7 @@ If the container remains `starting`, wait for readiness and inspect `/readiness`
 
 ### Durable cursor
 
-The indexer persists its resume state in the `contract_event_indexer_state` table. The `kv_store` keys remain populated as legacy compatibility mirrors only.
+The incremental sync persists its resume state in these `kv_store` keys:
 
 | Key                                   | Purpose                                              |
 | ------------------------------------- | ---------------------------------------------------- |
@@ -182,7 +234,7 @@ The cursor is written after each fetched page is processed and again when a sync
 ### Inspecting indexer position
 
 - **API:** `GET /api/v1/indexer/cursor` returns stored cursor, latest ledger, last successful/failed sync timestamps, and errors.
-- **SQL:** `SELECT * FROM contract_event_indexer_state WHERE name = 'soroban_event_indexer'` (legacy mirrors are also visible with `SELECT * FROM kv_store WHERE key LIKE 'soroban_event_indexer%'`).
+- **SQL:** `SELECT * FROM kv_store WHERE key LIKE 'soroban_event_indexer%'` shows the incremental sync's durable cursor and latest ledger.
 
 ### Re-sync and backfill
 
@@ -200,6 +252,22 @@ The script requires `ADMIN_REINDEX_KEY` to be set (matches the env var on the se
 ### RPC resilience
 
 The indexer uses bounded exponential backoff when the Soroban RPC is unreachable. It tracks last successful sync time, last failed sync time, and a ring buffer of recent error summaries. These are exposed through the `/api/v1/indexer/cursor` and `/ready` endpoints so operators can tell whether the indexer is healthy, catching up, or stuck.
+
+A nonempty page must supply a new resume token. If RPC repeats a cursor (including
+a cycle such as A → B → A), the current sync stops with `INDEXER_CURSOR_STALLED`.
+A missing page token or indexed-event token stops it with `INDEXER_CURSOR_MISSING`.
+These failures use the existing error status and consecutive-failure backoff; they
+are not reported as successful syncs. The normal page limit still bounds passes
+whose cursors keep advancing.
+
+Only completed pages advance the stored cursor. After a failed write or stalled
+page, the next poll retries from that checkpoint. Successfully written events are
+cached only after persistence, and the existing unique paging-token index returns
+the original history row on replay, including after a process restart. Distinct
+event tokens in the same transaction remain distinct. No new schema is required.
+Historical rows written without paging tokens cannot be deduplicated retroactively.
+For a persistent cursor error, inspect the configured RPC endpoint and its event
+pagination before requesting a re-sync; avoid deleting recorded history to retry.
 
 ## Notification delivery backoff
 

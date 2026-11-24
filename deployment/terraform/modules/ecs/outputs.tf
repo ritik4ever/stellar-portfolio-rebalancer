@@ -2,6 +2,21 @@ output "alb_dns_name" {
   value = aws_lb.main.dns_name
 }
 
+output "ecs_cluster_name" {
+  description = "Name of the ECS cluster hosting the backend service."
+  value       = aws_ecs_cluster.main.name
+}
+
+output "ecs_service_name" {
+  description = "Name of the ECS backend service."
+  value       = aws_ecs_service.main.name
+}
+
+output "ecs_task_definition_family" {
+  description = "Task definition family used by the ECS backend service."
+  value       = aws_ecs_task_definition.main.family
+}
+
 output "blue_target_group_arn" {
   description = "ARN of the blue target group"
   value       = aws_lb_target_group.main.arn
@@ -20,6 +35,11 @@ output "codedeploy_app_name" {
 output "deployment_group_name" {
   description = "Name of the CodeDeploy deployment group (if blue/green enabled)"
   value       = try(aws_codedeploy_deployment_group.main[0].deployment_group_name, null)
+}
+
+output "deployment_config_name" {
+  description = "Name of the CodeDeploy deployment configuration (if blue/green enabled)"
+  value       = try(aws_codedeploy_deployment_config.main[0].deployment_config_name, null)
 }
 
 output "deployment_sns_topic_arn" {

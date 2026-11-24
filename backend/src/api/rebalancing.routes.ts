@@ -167,13 +167,21 @@ rebalancingRouter.get('/rebalance/summary/:portfolioId', async (req: Request, re
         const targetAllocations = portfolio.allocations || {}
         let maxDrift = 0
 
-        if (portfolioDetails?.allocations) {
+        if (Array.isArray(portfolioDetails?.allocations)) {
             portfolioDetails.allocations.forEach((alloc: any) => {
                 currentAllocations[alloc.asset] = alloc.current
                 const target = targetAllocations[alloc.asset] || 0
                 const drift = Math.abs(alloc.current - target)
                 maxDrift = Math.max(maxDrift, drift)
             })
+        } else if (portfolioDetails?.allocations && typeof portfolioDetails.allocations === 'object') {
+            for (const [asset, current] of Object.entries(portfolioDetails.allocations)) {
+                const currentVal = typeof current === 'number' ? current : (current as any)?.current ?? 0
+                currentAllocations[asset] = currentVal
+                const target = targetAllocations[asset] || 0
+                const drift = Math.abs(currentVal - target)
+                maxDrift = Math.max(maxDrift, drift)
+            }
         }
 
         // Slippage analysis

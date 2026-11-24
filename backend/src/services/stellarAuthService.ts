@@ -11,6 +11,8 @@ import { Keypair } from '@stellar/stellar-sdk'
 import { randomBytes } from 'node:crypto'
 import { issueTokens } from './authService.js'
 import { logger } from '../utils/logger.js'
+import { authorizationContext, classifyChallengeReplay, detectOtherNetwork, recordChallengeDisposition, recordWalletAuthorization } from './walletAuthorization.js'
+import type { WalletAuthorizationContext } from './walletAuthorization.js'
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000  // 5 minutes
 const CHALLENGE_CLEANUP_INTERVAL_MS = 60 * 1000  // GC every minute
@@ -21,6 +23,7 @@ interface ChallengeEntry {
     nonce: string
     expiresAt: number
     attempts: number
+    context: WalletAuthorizationContext
 }
 
 // In-memory nonce store — keyed by address.
@@ -31,7 +34,10 @@ const challenges = new Map<string, ChallengeEntry>()
 setInterval(() => {
     const now = Date.now()
     for (const [addr, entry] of challenges) {
-        if (entry.expiresAt <= now) challenges.delete(addr)
+        if (entry.expiresAt <= now) {
+            recordChallengeDisposition('stellar_challenge', 'expired', entry.context)
+            challenges.delete(addr)
+        }
     }
 }, CHALLENGE_CLEANUP_INTERVAL_MS)
 
@@ -49,7 +55,9 @@ export function createChallenge(address: string): string {
         throw new Error('Invalid Stellar address')
     }
     const nonce = randomBytes(32).toString('hex')
-    challenges.set(address, { nonce, expiresAt: Date.now() + CHALLENGE_TTL_MS, attempts: 0 })
+    const context = authorizationContext(address, nonce)
+    challenges.set(address, { nonce, expiresAt: Date.now() + CHALLENGE_TTL_MS, attempts: 0, context })
+    recordWalletAuthorization('stellar_challenge', context, 'pending', 'challenge_issued')
     return nonce
 }
 
@@ -58,15 +66,21 @@ export async function verifyChallenge(
     signature: string,
 ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; refreshExpiresIn: number }> {
     if (!isValidStellarAddress(address)) {
+        recordWalletAuthorization('stellar_challenge', authorizationContext(address), 'blocked', 'invalid_address', { retryable: false })
         throw new InvalidSignatureError('Invalid Stellar address')
     }
 
     const entry = challenges.get(address)
     if (!entry) {
+        const replay = classifyChallengeReplay('stellar_challenge', address)
+        recordWalletAuthorization('stellar_challenge', replay?.context ?? authorizationContext(address),
+            'blocked', replay?.reason ?? 'missing_challenge', { retryable: false })
         throw new InvalidSignatureError('No active challenge for this address')
     }
     if (entry.expiresAt <= Date.now()) {
         challenges.delete(address)
+        recordChallengeDisposition('stellar_challenge', 'expired', entry.context)
+        recordWalletAuthorization('stellar_challenge', entry.context, 'blocked', 'expired_challenge', { retryable: false })
         throw new InvalidSignatureError('Challenge expired')
     }
 
@@ -83,6 +97,13 @@ export async function verifyChallenge(
 
     if (!valid) {
         entry.attempts += 1
+        const detectedNetwork = detectOtherNetwork(keypair, sigBuffer, entry.nonce, entry.context.expectedNetwork)
+        recordWalletAuthorization('stellar_challenge', entry.context, 'blocked', detectedNetwork ? 'wrong_network' : 'invalid_signature', {
+            attempts: entry.attempts,
+            remainingAttempts: Math.max(0, MAX_CHALLENGE_ATTEMPTS - entry.attempts),
+            retryable: entry.attempts < MAX_CHALLENGE_ATTEMPTS,
+            ...(detectedNetwork ? { detectedNetwork } : {}),
+        })
         if (entry.attempts >= MAX_CHALLENGE_ATTEMPTS) {
             challenges.delete(address)
             logger.warn('[stellarAuth] Invalid signature, maximum retry attempts exhausted', {
@@ -101,8 +122,17 @@ export async function verifyChallenge(
 
     // Consume the challenge — one-time use
     challenges.delete(address)
+    recordChallengeDisposition('stellar_challenge', 'consumed', entry.context)
 
-    return issueTokens(address)
+    recordWalletAuthorization('stellar_challenge', entry.context, 'pending', 'issuing_tokens')
+    try {
+        const tokens = await issueTokens(address)
+        recordWalletAuthorization('stellar_challenge', entry.context, 'success', 'authorized')
+        return tokens
+    } catch (error) {
+        recordWalletAuthorization('stellar_challenge', entry.context, 'blocked', 'token_issuance_failed', { retryable: false })
+        throw error
+    }
 }
 
 export class InvalidSignatureError extends Error {

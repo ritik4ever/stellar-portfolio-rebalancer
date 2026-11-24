@@ -5,11 +5,18 @@ import { getAnalyticsOptOut, setAnalyticsOptOut } from '../analytics'
 import { downloadJSON } from '../utils/export'
 
 const REBALANCE_THRESHOLD_KEY = 'user-rebalance-threshold'
+const MIN_THRESHOLD = 1
+const MAX_THRESHOLD = 50
+const THRESHOLD_RANGE = 'Enter a percentage from 1% to 50%, including both endpoints.'
+
+function isValidThreshold(value: number): boolean {
+    return Number.isFinite(value) && value >= MIN_THRESHOLD && value <= MAX_THRESHOLD
+}
 
 function readThreshold(): number {
     try {
         const raw = localStorage.getItem(REBALANCE_THRESHOLD_KEY)
-        const n = parseFloat(raw ?? '')
+        const n = raw?.trim() ? Number(raw) : NaN
         return Number.isFinite(n) && n >= 0 && n <= 100 ? n : 5
     } catch {
         return 5
@@ -41,8 +48,8 @@ function validateImportData(data: unknown): { valid: true; values: FormValues } 
     if (typeof obj.analyticsOptOut !== 'boolean') {
         return { valid: false, error: 'Missing or invalid "analyticsOptOut" field (must be boolean).' }
     }
-    if (typeof obj.rebalanceThreshold !== 'number' || !Number.isFinite(obj.rebalanceThreshold) || obj.rebalanceThreshold < 0 || obj.rebalanceThreshold > 100) {
-        return { valid: false, error: 'Missing or invalid "rebalanceThreshold" field (must be a number between 0 and 100).' }
+    if (typeof obj.rebalanceThreshold !== 'number' || !isValidThreshold(obj.rebalanceThreshold)) {
+        return { valid: false, error: 'Missing or invalid "rebalanceThreshold" field (must be a number from 1 to 50 inclusive).' }
     }
     return { valid: true, values: { analyticsOptOut: obj.analyticsOptOut, rebalanceThreshold: obj.rebalanceThreshold } }
 }
@@ -54,17 +61,21 @@ interface SettingsProps {
 
 const Settings: React.FC<SettingsProps> = ({ onNavigate, onDirtyChange }) => {
     const [saved, setSaved] = useState<FormValues>(loadSaved)
-    const [form, setForm] = useState<FormValues>(loadSaved)
+    const [analyticsOptOut, setAnalyticsDraft] = useState(saved.analyticsOptOut)
+    const [thresholdDraft, setThresholdDraft] = useState(String(saved.rebalanceThreshold))
     const [saveSuccess, setSaveSuccess] = useState(false)
+    const [saveError, setSaveError] = useState(false)
     const [importError, setImportError] = useState<string | null>(null)
     const [importPreview, setImportPreview] = useState<ImportPreview | null>(null)
     const [importSuccess, setImportSuccess] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-    const isDirty =
-        form.analyticsOptOut !== saved.analyticsOptOut ||
-        form.rebalanceThreshold !== saved.rebalanceThreshold
+    const pendingThreshold = thresholdDraft.trim() ? Number(thresholdDraft) : NaN
+    const thresholdError = !isValidThreshold(pendingThreshold)
+    const thresholdChanged = pendingThreshold !== saved.rebalanceThreshold
+    const isDirty = analyticsOptOut !== saved.analyticsOptOut || thresholdChanged
+    const canSave = isDirty && !(thresholdChanged && thresholdError)
 
     useEffect(() => {
         onDirtyChange?.(isDirty)
@@ -91,11 +102,17 @@ const Settings: React.FC<SettingsProps> = ({ onNavigate, onDirtyChange }) => {
     )
 
     const handleSave = () => {
-        setAnalyticsOptOut(form.analyticsOptOut)
+        if (!canSave) return
+        setSaveError(false)
         try {
-            localStorage.setItem(REBALANCE_THRESHOLD_KEY, String(form.rebalanceThreshold))
-        } catch { /* ignore */ }
-        setSaved(form)
+            if (thresholdChanged) localStorage.setItem(REBALANCE_THRESHOLD_KEY, String(pendingThreshold))
+        } catch {
+            setSaveError(true)
+            return
+        }
+        setAnalyticsOptOut(analyticsOptOut)
+        setSaved({ analyticsOptOut, rebalanceThreshold: pendingThreshold })
+        setThresholdDraft(String(pendingThreshold))
         if (successTimer.current) clearTimeout(successTimer.current)
         setSaveSuccess(true)
         successTimer.current = setTimeout(() => setSaveSuccess(false), 2500)
@@ -134,7 +151,8 @@ const Settings: React.FC<SettingsProps> = ({ onNavigate, onDirtyChange }) => {
 
     const handleApplyImport = () => {
         if (!importPreview) return
-        setForm(importPreview.values)
+        setAnalyticsDraft(importPreview.values.analyticsOptOut)
+        setThresholdDraft(String(importPreview.values.rebalanceThreshold))
         setImportPreview(null)
         setImportSuccess(true)
         setTimeout(() => setImportSuccess(false), 3000)
@@ -199,9 +217,9 @@ const Settings: React.FC<SettingsProps> = ({ onNavigate, onDirtyChange }) => {
                             <div className="flex h-5 items-center pt-0.5">
                                 <input
                                     type="checkbox"
-                                    checked={!form.analyticsOptOut}
+                                    checked={!analyticsOptOut}
                                     onChange={(e) =>
-                                        setForm((f) => ({ ...f, analyticsOptOut: !e.target.checked }))
+                                        setAnalyticsDraft(!e.target.checked)
                                     }
                                     className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600"
                                 />
@@ -231,23 +249,33 @@ const Settings: React.FC<SettingsProps> = ({ onNavigate, onDirtyChange }) => {
                                 >
                                     Drift threshold (%)
                                 </label>
-                                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                                    Trigger a rebalance alert when any allocation drifts beyond this amount
+                                <p id="rebalance-threshold-help" className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                                    {THRESHOLD_RANGE} An allocation must drift beyond this threshold to trigger an alert.
                                 </p>
+                                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                                    Saved threshold is {saved.rebalanceThreshold}%.
+                                </p>
+                                {saveError && <p role="alert" className="text-xs text-red-600">Could not save the threshold. Try again.</p>}
+                                {thresholdError && (
+                                    <p id="rebalance-threshold-error" role="status" className="text-xs text-red-600 dark:text-red-400">
+                                        {thresholdDraft === '' ? 'A threshold is required.' : 'The threshold must be from 1% to 50%.'}
+                                    </p>
+                                )}
                             </div>
                             <input
                                 id="rebalance-threshold"
                                 type="number"
-                                min={0}
-                                max={100}
-                                step={0.5}
-                                value={form.rebalanceThreshold}
-                                onChange={(e) =>
-                                    setForm((f) => ({
-                                        ...f,
-                                        rebalanceThreshold: Math.min(100, Math.max(0, Number(e.target.value))),
-                                    }))
-                                }
+                                min={MIN_THRESHOLD}
+                                max={MAX_THRESHOLD}
+                                step="any"
+                                value={thresholdDraft}
+                                aria-invalid={thresholdError}
+                                aria-describedby={thresholdError ? 'rebalance-threshold-help rebalance-threshold-error' : 'rebalance-threshold-help'}
+                                onChange={(e) => {
+                                    setThresholdDraft(e.target.value)
+                                    setSaveSuccess(false)
+                                    setSaveError(false)
+                                }}
                                 className="w-24 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                             />
                         </div>
@@ -364,7 +392,7 @@ const Settings: React.FC<SettingsProps> = ({ onNavigate, onDirtyChange }) => {
                         <button
                             type="button"
                             onClick={handleSave}
-                            disabled={!isDirty}
+                            disabled={!canSave}
                             className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
                         >
                             <Save className="h-4 w-4" aria-hidden />

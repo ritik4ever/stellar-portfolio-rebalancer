@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as notificationDb from "../db/notificationDb.js";
-import { deliverWithBackoff } from "../services/notificationDelivery.js";
+import {
+  deliveryStateForFailureKind,
+  deliverWithBackoff,
+  NotificationDeliveryError,
+} from "../services/notificationDelivery.js";
 import { webhookDeadLetterQueue } from "../services/webhookDeadLetter.js";
 
 vi.mock("../services/webhookDeadLetter.js", () => ({
@@ -11,6 +15,20 @@ vi.mock("../services/webhookDeadLetter.js", () => ({
     _resetForTest: vi.fn(),
   },
 }));
+
+describe("deliverStateForFailureKind", () => {
+  it("maps retryable failures to delayed work", () => {
+    expect(deliveryStateForFailureKind("retryable")).toBe("delayed");
+  });
+
+  it("maps ambiguous failures to blocked work", () => {
+    expect(deliveryStateForFailureKind("ambiguous")).toBe("blocked");
+  });
+
+  it("maps permanent failures to blocked work", () => {
+    expect(deliveryStateForFailureKind("permanent")).toBe("blocked");
+  });
+});
 
 describe("deliverWithBackoff", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -58,7 +76,7 @@ describe("deliverWithBackoff", () => {
       "rebalance",
       "retried",
       "temporary failure",
-      expect.objectContaining({ attempt: 1, backoffDelayMs: 1000 }),
+      expect.objectContaining({ attempt: 1, backoffDelayMs: 1000, deliveryState: "delayed" }),
     );
     expect(logSpy).toHaveBeenCalledWith(
       "user-1",
@@ -66,11 +84,11 @@ describe("deliverWithBackoff", () => {
       "rebalance",
       "sent",
       undefined,
-      expect.objectContaining({ attempt: 2 }),
+      expect.objectContaining({ attempt: 2, deliveryState: "success" }),
     );
   });
 
-  it("logs failed after exhausting max attempts", async () => {
+  it("logs delayed work after exhausting max attempts on a retryable failure", async () => {
     const execute = vi.fn().mockRejectedValue(new Error("persistent failure"));
 
     const promise = deliverWithBackoff(
@@ -99,7 +117,102 @@ describe("deliverWithBackoff", () => {
       "riskChange",
       "failed",
       "persistent failure",
-      expect.objectContaining({ attempt: 2, maxAttempts: 2 }),
+      expect.objectContaining({ attempt: 2, maxAttempts: 2, deliveryState: "delayed" }),
+    );
+  });
+
+  it("stops on an ambiguous email failure instead of risking a duplicate", async () => {
+    const ambiguous = new NotificationDeliveryError("Email delivery outcome unknown", {
+      kind: "ambiguous",
+      reason: "delivery_unknown",
+      idempotencyKey: "<abc@example.com>",
+    });
+    const execute = vi.fn().mockRejectedValue(ambiguous);
+
+    const promise = deliverWithBackoff(
+      {
+        provider: "email",
+        userId: "user-4",
+        eventType: "rebalance",
+        policy: {
+          maxAttempts: 3,
+          initialBackoffMs: 1000,
+          maxBackoffMs: 5000,
+          backoffMultiplier: 2,
+        },
+      },
+      execute,
+    );
+
+    await expect(promise).rejects.toThrow("Email delivery outcome unknown");
+    await vi.runAllTimersAsync();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(logSpy).not.toHaveBeenCalledWith(
+      "user-4",
+      "email",
+      "rebalance",
+      "retried",
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      "user-4",
+      "email",
+      "rebalance",
+      "uncertain",
+      "Email delivery outcome unknown",
+      expect.objectContaining({
+        attempt: 1,
+        maxAttempts: 3,
+        failureKind: "ambiguous",
+        retryable: false,
+        stoppedEarly: true,
+        idempotencyKey: "<abc@example.com>",
+        deliveryState: "blocked",
+      }),
+    );
+  });
+
+  it("does not retry a permanent failure", async () => {
+    const permanent = new NotificationDeliveryError("Email delivery rejected", {
+      kind: "permanent",
+      reason: "rejected",
+      idempotencyKey: "<def@example.com>",
+    });
+    const execute = vi.fn().mockRejectedValue(permanent);
+
+    const promise = deliverWithBackoff(
+      {
+        provider: "email",
+        userId: "user-5",
+        eventType: "riskChange",
+        policy: {
+          maxAttempts: 3,
+          initialBackoffMs: 1000,
+          maxBackoffMs: 5000,
+          backoffMultiplier: 2,
+        },
+      },
+      execute,
+    );
+
+    await expect(promise).rejects.toThrow("Email delivery rejected");
+    await vi.runAllTimersAsync();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(logSpy).toHaveBeenCalledWith(
+      "user-5",
+      "email",
+      "riskChange",
+      "failed",
+      "Email delivery rejected",
+      expect.objectContaining({
+        failureKind: "permanent",
+        stoppedEarly: true,
+        idempotencyKey: "<def@example.com>",
+        deliveryState: "blocked",
+      }),
     );
   });
 
@@ -121,12 +234,13 @@ describe("deliverWithBackoff", () => {
       execute,
     );
 
+    const expectation = expect(promise).rejects.toThrow("HTTP 503");
+
     for (let i = 1; i <= 4; i++) {
       const delay = Math.min(1000 * Math.pow(2, i - 1), 60000);
       await vi.advanceTimersByTimeAsync(delay);
     }
 
-    const expectation = expect(promise).rejects.toThrow("HTTP 503");
     await expectation;
 
     expect(execute).toHaveBeenCalledTimes(5);
@@ -136,7 +250,7 @@ describe("deliverWithBackoff", () => {
       "rebalance",
       "failed",
       "HTTP 503",
-      expect.objectContaining({ attempt: 5, maxAttempts: 5 }),
+      expect.objectContaining({ attempt: 5, maxAttempts: 5, deliveryState: "delayed" }),
     );
   });
 });

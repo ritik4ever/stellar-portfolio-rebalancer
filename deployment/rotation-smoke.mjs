@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 /**
  * Secret rotation smoke check (SPR-2026-280).
  *
@@ -49,7 +49,15 @@ export function evaluateRotation(env = process.env) {
 
   if (worker === active) return { exitCode: 0, report: { status: 'ok', ...report } };
   const reason = previous && worker === previous ? 'worker holds previous key' : 'worker holds unknown key';
-  return { exitCode: 1, report: { status: 'stale-worker', reason, ...report } };
+  return {
+    exitCode: 1,
+    report: {
+      status: 'stale-worker',
+      reason,
+      recommendedAction: 'restart-worker-with-current-secret',
+      ...report,
+    },
+  };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

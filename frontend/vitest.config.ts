@@ -12,7 +12,11 @@ export default defineConfig({
       provider: 'v8',
       reportsDirectory: './coverage',
       reporter: ['text', 'json-summary', 'lcov', 'html'],
-      include: ['src/utils/calculations.ts'],
+      include: [
+        'src/utils/calculations.ts',
+        'src/components/**/*.{ts,tsx}',
+        'src/hooks/**/*.{ts,tsx}'
+      ],
       thresholds: {
         lines: 70,
         functions: 70,

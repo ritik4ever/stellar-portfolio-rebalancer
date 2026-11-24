@@ -1,6 +1,6 @@
 
 
-export const BACKEND_CONTRACT_EVENT_SCHEMA_VERSION = 1
+export const BACKEND_CONTRACT_EVENT_SCHEMA_VERSION = 2
 
 export interface ContractEventSchemaCheck {
     ok: boolean

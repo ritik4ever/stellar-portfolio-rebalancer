@@ -6,6 +6,36 @@ output "backend_url" {
   value = module.ecs.alb_dns_name
 }
 
+output "ecs_cluster_name" {
+  description = "Name of the ECS cluster hosting the backend service."
+  value       = module.ecs.ecs_cluster_name
+}
+
+output "ecs_service_name" {
+  description = "Name of the ECS backend service."
+  value       = module.ecs.ecs_service_name
+}
+
+output "ecs_task_definition_family" {
+  description = "Task definition family used by the ECS backend service."
+  value       = module.ecs.ecs_task_definition_family
+}
+
+output "ecs_codedeploy_app_name" {
+  description = "CodeDeploy application name, or null when blue/green is disabled."
+  value       = module.ecs.codedeploy_app_name
+}
+
+output "ecs_codedeploy_deployment_group_name" {
+  description = "CodeDeploy deployment group name, or null when blue/green is disabled."
+  value       = module.ecs.deployment_group_name
+}
+
+output "ecs_codedeploy_deployment_config_name" {
+  description = "CodeDeploy deployment configuration name, or null when blue/green is disabled."
+  value       = module.ecs.deployment_config_name
+}
+
 output "frontend_url" {
   value = module.s3_cloudfront.cloudfront_domain_name
 }
@@ -22,6 +52,11 @@ output "db_secret_arn" {
 output "redis_secret_arn" {
   value       = module.elasticache.redis_secret_arn
   description = "ARN of the Secrets Manager secret containing Redis AUTH token"
+}
+
+output "redis_replication_group_id" {
+  value       = module.elasticache.redis_replication_group_id
+  description = "ElastiCache replication-group ID used to inspect rotation state."
 }
 
 output "rds_rotation_lambda_arn" {

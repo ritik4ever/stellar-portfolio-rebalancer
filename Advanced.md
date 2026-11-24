@@ -1,7 +1,7 @@
 # Advanced
 
 <<<<<<< HEAD
-> **Last verified:** 2026-09-29 against commit `ce5699b` (`backend/src/services/rebalancePlan.ts`, `docs/REBALANCING_STRATEGIES.md`, `backend/src/types/index.ts`).
+> **Last verified:** 2026-09-29 against commit `ce5699b` (`backend/src/services/rebalancePlan.ts`, `docs/REBALANCING_STRATEGIES.md`, `backend/src/types/index.ts`).  
 
 =======
 >>>>>>> 2e44dab7a59fbd78588429a8042fcabf8fef3e8d
