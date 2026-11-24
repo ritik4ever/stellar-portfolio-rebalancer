@@ -843,6 +843,11 @@ Set `ENABLE_DEBUG_ROUTES=true` before running these steps locally.
 4. Check backend logs for specific error messages
 5. Test webhook with webhook.site first
 
+When a test delivery fails, the notification settings show the delivery error
+and a Retry button. Correct the webhook URL or endpoint response, save the
+settings if changed, then retry. The endpoint must return a 2xx status code;
+failed webhook test deliveries are reported as failures rather than successes.
+
 ### Notifications Not Triggering
 
 **Problem**: No notifications received after rebalance

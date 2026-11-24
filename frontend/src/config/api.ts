@@ -296,6 +296,13 @@ export const apiRequest = async <T>(
         const contentType = response.headers.get('content-type')
         if (!contentType || !contentType.includes('application/json')) {
             const text = await response.text()
+            if (!response.ok) {
+                throw new ApiClientError(
+                    text || `HTTP ${response.status}: ${response.statusText}`,
+                    response.status,
+                    'HTTP_ERROR'
+                )
+            }
             return text as unknown as T
         }
 

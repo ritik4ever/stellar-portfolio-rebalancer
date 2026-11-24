@@ -81,4 +81,23 @@ describe('apiRequest envelope handling', () => {
 
         expect(result).toBe('pong')
     })
+
+    it('throws ApiClientError for non-2xx plain-text responses', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => ({
+            ok: false,
+            status: 502,
+            statusText: 'Bad Gateway',
+            headers: new Headers({ 'content-type': 'text/plain' }),
+            text: async () => 'Webhook test failed'
+        })))
+
+        const { apiRequest } = await import('./api')
+
+        await expect(apiRequest('/api/v1/notifications/test')).rejects.toMatchObject({
+            name: 'ApiClientError',
+            status: 502,
+            code: 'HTTP_ERROR',
+            message: 'Webhook test failed'
+        })
+    })
 })
