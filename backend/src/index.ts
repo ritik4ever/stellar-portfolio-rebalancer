@@ -63,7 +63,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
     app.use(enforceCorsOriginAllowlist(config.corsOrigins))
     app.use(cors(corsOptions))
-    app.options('*', cors(corsOptions))
+    app.options(/.*/, cors(corsOptions))
     app.use(requestContextMiddleware)
     app.use(metricsMiddleware)
     app.use(express.json({ limit: '10mb' }))
@@ -84,7 +84,15 @@ export async function main(argv: string[] = process.argv): Promise<void> {
         const ip = req.ip ?? req.socket?.remoteAddress ?? ''
         const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip === 'localhost'
         if (isLocal) return true
-        return config.metricsAllowlist.some((entry) => ip.includes(entry))
+        return config.metricsAllowlist.some((entry) => {
+            if (entry.includes('/')) {
+                const [net, mask] = entry.split('/')
+                if (mask === '8') return ip.startsWith(net.split('.')[0] + '.')
+                if (mask === '16') return ip.startsWith(net.split('.').slice(0, 2).join('.') + '.')
+                if (mask === '24') return ip.startsWith(net.split('.').slice(0, 3).join('.') + '.')
+            }
+            return ip.includes(entry)
+        })
     }
 
     app.get('/metrics', async (req, res, next) => {

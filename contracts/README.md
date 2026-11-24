@@ -8,6 +8,14 @@ exposes the strategy-aware lifecycle (`check_rebalance_needed`,
 See [`CONTRACT_ABI.md`](./CONTRACT_ABI.md) for the full contract surface and
 [`BENCHMARKS.md`](./BENCHMARKS.md) for benchmark results.
 
+Portfolio entries renew when their remaining TTL reaches 17,280 ledgers,
+extending to 518,400 ledgers (one day and thirty days respectively at five
+seconds per ledger). Expired entries cannot be recovered by the contract. A
+successful rebalance emits one `portfolio/rebalance_committed` event with the
+trades, complete resulting balance map, and total fees. Failed invocations
+emit no committed event; Soroban rolls back contract and token changes in that
+invocation.
+
 ## Toolchain
 
 The contract pins `soroban-sdk = "27.0.2"`. Use the pinned nightly toolchain

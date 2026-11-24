@@ -56,6 +56,30 @@ export const dashboardCopy = {
     noTradesPlanned: 'No trades are required at current allocations.',
     preconditionMet: 'Ready',
     preconditionBlocked: 'Blocked',
+    withinThresholdTitle: 'Allocation is within its drift threshold',
+    withinThresholdDetail: (asset: string, drift: string, threshold: string) =>
+        `${asset} has drifted ${drift} from target, inside the ${threshold} threshold. No trade is planned for it.`,
+    withinThresholdBadge: 'Within threshold',
+    withinThresholdBadgeLabel: (asset: string) =>
+        `Within threshold: ${asset} is inside its drift threshold, so no trade is planned.`,
+    withinThresholdAnnounce: (count: number) =>
+        count === 1
+            ? '1 allocation is within its drift threshold. No trade is planned for it.'
+            : `${count} allocations are within their drift thresholds. No trades are planned for them.`,
+    simulationTimeoutTitle: 'Simulation request timed out',
+    simulationTimeoutDetail:
+        'The dry-run simulation did not respond in time, so no preview result is shown. Retry, or cancel to abandon the preview.',
+    simulationTimeoutAnnounce:
+        'Dry-run simulation timed out. No preview result is shown. Retry is available, or cancel to abandon the preview.',
+    retrySimulation: 'Retry simulation',
+    cancelSimulation: 'Cancel simulation',
+    simulationRunningAnnounce: 'Dry-run simulation started. Press Escape or Cancel to abandon the preview.',
+    simulationCompleteAnnounce: 'Dry-run preview ready. Review the estimated trades, then confirm or cancel.',
+    simulationCancelledAnnounce: 'Dry-run preview cancelled. No trades were submitted.',
+    previewDismissedAnnounce: 'Dry-run preview closed. No trades were submitted.',
+    previewFocusLabel: 'Dry-run preview',
+    previewDescription:
+        'Dry-run preview of the rebalance. Review estimated trades and preconditions. Confirm to submit, or cancel to abandon without submitting any trades.',
 } as const
 
 export const rebalanceHistoryCopy = {
@@ -63,6 +87,30 @@ export const rebalanceHistoryCopy = {
     subtitle: 'Recent portfolio rebalancing activities with risk management',
     exportCsv: 'Export CSV',
     loadError: 'Failed to load rebalance history',
+    retryHistory: 'Retry loading rebalance history',
+    retry: 'Retry',
+    retrying: 'Retrying…',
+    dismissError: 'Dismiss rebalance history error',
+    dismiss: 'Dismiss',
+    loading: 'Loading rebalance history',
+    listLabel: 'Rebalance history events',
+    paginationLabel: 'Rebalance history pagination',
+    previousPage: 'Previous page',
+    nextPage: 'Next page',
+    pageChangedAnnounce: (page: number, totalPages: number) =>
+        `Showing rebalance history page ${page} of ${totalPages}.`,
+    retryAnnounce: 'Retrying rebalance history request.',
+    dismissedAnnounce: 'Rebalance history error dismissed.',
+    eventItemLabel: (
+        index: number,
+        total: number,
+        trigger: string,
+        status: string,
+        trades: number,
+        dateFormatted: string,
+        timeFormatted: string,
+    ) =>
+        `Event ${index} of ${total}: ${trigger}, ${status}, ${trades} trade${trades !== 1 ? 's' : ''}, ${dateFormatted} at ${timeFormatted}`,
     emptyTitle: 'No rebalancing history yet',
     emptyDetail: 'Portfolio rebalances will appear here when they occur',
     showing: (shown: number, total: number) =>
@@ -78,8 +126,27 @@ export const performanceChartCopy = {
     title: 'Portfolio performance',
     demoHint: 'Connect a wallet and create a portfolio to view performance analytics',
     loadError: 'Failed to load performance data',
+    loadErrorDetail: 'Your selected time range is kept. Retry, or pick another range.',
+    retry: 'Retry',
+    retrying: 'Retrying…',
     emptyTitle: 'No performance data available yet',
     emptyDetail: 'Data will appear as your portfolio value changes',
+    singlePoint: 'Only one price point in this range, so there is no trend to draw yet. Choose a longer range or check back later.',
+    rangeLabel: (label: string) => `Range: ${label}`,
+    missingHistoryTitle: (assets: string) => `Price history is missing for ${assets}.`,
+    missingHistoryDetail: (asset: string, missing: number, total: number) =>
+        `${asset}: no price for ${missing} of ${total} points`,
+    missingHistoryHint:
+        'Portfolio value at those points may be understated. Retry to reload prices, or dismiss to keep viewing the chart.',
+    missingHistoryBadge: (count: number) => `Missing data (${count})`,
+    missingHistoryBadgeLabel: (assets: string) => `Missing price history for ${assets}. Show details`,
+    retryPrices: 'Retry loading prices',
+    dismiss: 'Dismiss',
+    announceLoading: (range: string) => `Loading performance data for ${range}.`,
+    announceError: (range: string) => `Performance data failed to load for ${range}. Retry is available.`,
+    announceEmpty: (range: string) => `No performance data for ${range}.`,
+    announceSingle: (range: string) => `One price point for ${range}.`,
+    announceSeries: (range: string, count: number) => `${count} data points for ${range}.`,
     compareEnabled: 'Comparing previous period',
     compareDisabled: 'Compare previous period',
     compareUnavailable:
@@ -87,6 +154,69 @@ export const performanceChartCopy = {
     days7: '7 days',
     days30: '30 days',
     days90: '90 days',
+    rangeSelector: 'Time range selector',
+    rangeDescription: (label: string, days: number) =>
+        label === 'ALL'
+            ? 'ALL (up to 3,650 days)'
+            : `${label} (last ${days} ${days === 1 ? 'day' : 'days'})`,
+    pointCount: (count: number) => `${count} price ${count === 1 ? 'point' : 'points'}`,
+    boundaryReady: 'A trend line needs at least 2 price points.',
+    boundarySingle: 'A trend line needs at least 2 price points, so this value is shown as one dot.',
+    boundaryEmpty: 'A trend line needs at least 2 price points. Choose a longer range or check back later.',
+    incompletePoints: (count: number) =>
+        `${count} incomplete ${count === 1 ? 'snapshot is' : 'snapshots are'} not counted.`,
+    singleChartLabel: (range: string) => `Portfolio performance chart showing one price point for ${range}`,
+} as const
+
+export const historicalSimulatorCopy = {
+    title: 'Historical simulator',
+    sourceBefore: 'Replays real CoinGecko daily closing prices. Synthetic prices are never used.',
+    rangeLegend: 'Simulation range (UTC, both dates included)',
+    presetsLabel: 'Quick ranges',
+    presetLabel: (days: number) => `${days}D`,
+    presetName: (days: number) => `Use the last ${days} closed days`,
+    startLabel: 'Start date',
+    endLabel: 'End date',
+    allowedRange: (earliest: string, latest: string) =>
+        `Allowed: 7 to 364 days, from ${earliest} through ${latest}. The current UTC day is excluded until it closes.`,
+    selectedDays: (days: number) => `Selected: ${days} ${days === 1 ? 'day' : 'days'}.`,
+    leapDayNotice: (dates: string) =>
+        `Includes leap day ${dates}. It is simulated only if every asset has a closing price. Otherwise it is skipped and listed in the result.`,
+    run: 'Run simulation',
+    retry: 'Retry simulation',
+    cancel: 'Cancel',
+    dismiss: 'Dismiss',
+    clearResult: 'Clear result',
+    runningHint: 'Running simulation. Press Escape or Cancel to stop waiting.',
+    running: (start: string, end: string) => `Running simulation from ${start} to ${end}.`,
+    completed: (included: number, requested: number) =>
+        `Simulation complete. Evaluated ${included} of ${requested} requested days.`,
+    cancelled: 'Simulation cancelled. No result is shown.',
+    dismissed: 'Simulation result cleared.',
+    resultCleared: 'Range changed. The previous simulation result was cleared.',
+    insufficientTitle: 'Not enough real price history',
+    insufficientDetail: 'No result was produced because synthetic prices are never substituted. Try a different range or retry later.',
+    failedTitle: 'Simulation failed',
+    conflictDetail: 'A simulation is already running for this portfolio. Wait for it to finish, then retry.',
+    timeoutDetail: 'The simulation timed out. Retry or choose a shorter range.',
+    genericDetail: 'The simulation could not be completed. Retry in a moment.',
+    resultTitle: 'Simulation result',
+    requestedRange: 'Requested range',
+    evaluatedRange: 'Evaluated range',
+    dataSource: 'Data source',
+    finalValue: 'Final value',
+    totalReturn: 'Total return',
+    buyAndHold: 'Buy and hold return',
+    rebalances: 'Rebalances',
+    maxDrawdown: 'Max drawdown',
+    dayCount: (days: number) => `${days} ${days === 1 ? 'day' : 'days'}`,
+    sourceName: (source: string) =>
+        source === 'coingecko_market_chart' ? 'CoinGecko daily closes' : source,
+    partial: (included: number, requested: number) =>
+        `Only ${included} of ${requested} requested days had real prices for every asset.`,
+    leapIncluded: 'Leap day (Feb 29) was included in this simulation.',
+    leapOmitted: 'Leap day (Feb 29) was skipped because a closing price was missing.',
+    absentSummary: (count: number) => `${count} skipped ${count === 1 ? 'day' : 'days'}`,
 } as const
 
 export const assetCardCopy = {

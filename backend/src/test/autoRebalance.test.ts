@@ -16,6 +16,7 @@ import { ReflectorService } from "../services/reflector.js";
 import { CircuitBreakers } from "../services/circuitBreakers.js";
 import { riskManagementService } from "../services/serviceContainer.js";
 import { getRebalanceQueue } from "../queue/queues.js";
+import { cooldownGate } from "../services/guardrailOutcomes.js";
 import type { Portfolio } from "../types/index.js";
 
 vi.mock("../services/portfolioStorage.js", () => ({
@@ -62,6 +63,7 @@ describe("Per-user exponential backoff after auto-rebalance failures (#1402)", (
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     resetAllBackoffStates();
+    cooldownGate.reset();
     mockAdd.mockReset();
     vi.clearAllMocks();
   });

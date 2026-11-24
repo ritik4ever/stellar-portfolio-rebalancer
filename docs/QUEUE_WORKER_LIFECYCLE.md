@@ -164,6 +164,7 @@ interface PortfolioCheckJobData {
 - If portfolio fetch fails: entire job fails and retries
 - If individual portfolio check fails: logged but job continues
 - If rebalance enqueue fails: logged but job continues
+- If VaR/CVaR would block rebalancing but feed metadata reports `staleOrLimited=true` (for example, a missing interval served from recovery cache), the cycle is skipped without persisting a new auto-pause or sending duplicate pause notifications.
 
 ---
 
