@@ -24,20 +24,29 @@ export type RebalancePrecondition = {
     detail?: string
 }
 
+export type RebalancePlanBoundary = {
+    reasonCode: 'WITHIN_EVERY_THRESHOLD' | 'DRIFT_EXCEEDS_THRESHOLD' | 'TRADES_REQUIRED'
+    result?: 'no_trades_needed' | 'trades_required'
+    reason?: string
+    withinEveryThreshold?: boolean
+    /** Inclusive drift allowance supplied by the backend plan boundary. */
+    thresholdPercent?: number
+    /** Largest absolute drift observed in the captured plan. */
+    maxDriftPercent?: number
+    trades: { asset: string; action: 'buy' | 'sell'; amount: number }[]
+    quoteSnapshot: {
+        prices?: Record<string, { timestamp: number }>
+        feedMeta: PriceFeedClientMeta
+    }
+}
+
 export type RebalancePlanSnapshot = {
     portfolioId: string
     totalValue: number
     maxSlippagePercent: number
     estimatedSlippageBps: number
     estimatedFees: { xlm: number; usd: number; tradeCount: number }
-    boundary: {
-        reasonCode: 'WITHIN_EVERY_THRESHOLD' | 'DRIFT_EXCEEDS_THRESHOLD' | 'TRADES_REQUIRED'
-        trades: { asset: string; action: 'buy' | 'sell'; amount: number }[]
-        quoteSnapshot: {
-            prices?: Record<string, { timestamp: number }>
-            feedMeta: PriceFeedClientMeta
-        }
-    }
+    boundary: RebalancePlanBoundary
 }
 
 export type PortfolioCostSummary = {

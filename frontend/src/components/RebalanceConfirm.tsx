@@ -36,9 +36,10 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
         const timer = setInterval(() => setNow(Date.now()), 15000)
         return () => clearInterval(timer)
     }, [])
-    const trades = plan?.boundary.trades ?? []
+    const boundary = plan?.boundary
+    const trades = boundary?.trades ?? []
     const fees = plan?.estimatedFees
-    const quote = plan?.boundary.quoteSnapshot
+    const quote = boundary?.quoteSnapshot
     const requiredQuotes = new Set(trades.map(({ asset }) => asset))
     if (fees && fees.xlm > 0) requiredQuotes.add('XLM')
     const quoteDates = Array.from(requiredQuotes, asset => {
@@ -52,6 +53,15 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
     const confirmed = !!plan && reviewedPlan === plan
     const inFlight = isSubmitting || execute.isPending
     const canConfirm = hasTrades && confirmed && !isFetching && !isError && !inFlight
+    const withinThreshold = boundary?.reasonCode === 'WITHIN_EVERY_THRESHOLD'
+    const thresholdAmountCopy = boundary?.thresholdPercent != null && Number.isFinite(boundary.thresholdPercent)
+        ? `${boundary.thresholdPercent.toFixed(2)} percentage points`
+        : null
+    const thresholdCopy = thresholdAmountCopy ? `±${thresholdAmountCopy}` : null
+    const maxDriftCopy = boundary?.maxDriftPercent != null && Number.isFinite(boundary.maxDriftPercent)
+        ? `${boundary.maxDriftPercent.toFixed(2)} percentage points`
+        : null
+    const noTradeStatusId = plan && !hasTrades && !isError ? 'dry-run-boundary-status' : undefined
 
     const handleConfirm = async () => {
         if (submittingRef.current || inFlight) {
@@ -85,7 +95,7 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
             onClose={() => { if (!inFlight) onClose() }}
             footer={(
                 <>
-                    <Button variant="secondary" onClick={onClose} disabled={inFlight}>
+                    <Button variant="secondary" onClick={onClose} disabled={inFlight} aria-describedby={noTradeStatusId}>
                         {plan && !hasTrades ? 'Close' : 'Cancel'}
                     </Button>
                     {hasTrades && !isError && (
@@ -118,11 +128,19 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                     </Button>
                 </>
             ) : !hasTrades ? (
-                <p role="status">
-                    {plan.boundary.reasonCode === 'WITHIN_EVERY_THRESHOLD'
-                        ? 'All allocations are within the drift threshold. No trades are required and there is no network fee.'
-                        : 'This plan contains no executable trades. Close the review and try again when quotes or balances change.'}
-                </p>
+                <div id="dry-run-boundary-status" role="status" aria-live="polite" aria-atomic="true">
+                    <p className="font-semibold">0 planned trades — read-only preview</p>
+                    {withinThreshold && thresholdCopy ? (
+                        <p>
+                            {maxDriftCopy ? `Largest observed drift is ${maxDriftCopy}. ` : ''}
+                            Allowed drift is {thresholdCopy} or less from target (inclusive): an allocation exactly at {thresholdCopy} is still inside the threshold, and only absolute drift above {thresholdAmountCopy} is traded. No trades are required and there is no network fee.
+                        </p>
+                    ) : withinThreshold ? (
+                        <p>All allocations are within the configured drift threshold. No trades are required and there is no network fee.</p>
+                    ) : (
+                        <p>This plan contains no executable trades. Close the review and try again when quotes or balances change.</p>
+                    )}
+                </div>
             ) : (
                 <div className="max-h-[65vh] space-y-3 overflow-y-auto text-sm">
                     <h3 id="quoted-trades" className="font-semibold">
