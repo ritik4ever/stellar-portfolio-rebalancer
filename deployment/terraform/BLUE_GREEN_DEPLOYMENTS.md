@@ -129,12 +129,25 @@ terraform -chdir=deployment/terraform apply -var-file=production.tfvars
 
 ### Via AWS CLI
 
+For a credential-only worker restart, set `TASK_DEF_ARN` to the revision
+currently serving the ECS service. The lookup in step 1 keeps that value and
+uses the latest registered revision only when `TASK_DEF_ARN` is unset:
+
 ```bash
-# 1. Look up the latest registered task definition for the service
-TASK_DEF_ARN=$(aws ecs describe-task-definition \
+CLUSTER=$(terraform -chdir=deployment/terraform output -raw ecs_cluster_name)
+SERVICE=$(terraform -chdir=deployment/terraform output -raw ecs_service_name)
+TASK_DEF_ARN=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].taskDefinition' --output text)
+```
+
+```bash
+# 1. Look up the latest registered task definition for a normal deployment.
+# For credential-only recovery, this preserves the current service revision
+# captured above instead.
+TASK_DEF_ARN=${TASK_DEF_ARN:-$(aws ecs describe-task-definition \
   --task-definition stellar-portfolio-production-app \
   --query 'taskDefinition.taskDefinitionArn' \
-  --output text)
+  --output text)}
 
 # 2. Create the deployment
 aws deploy create-deployment \

@@ -6,15 +6,17 @@ import { mkdirSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { Portfolio } from '../types/index.js'
+import { rebalanceHistoryService } from '../services/serviceContainer.js'
 
+const QUOTE_TIMESTAMP = 1_700_000_000
 const PRICES = {
-  XLM: { price: 0.35, change: 0, timestamp: Date.now() },
-  USDC: { price: 1, change: 0, timestamp: Date.now() },
+  XLM: { price: 0.35, change: 0, timestamp: QUOTE_TIMESTAMP },
+  USDC: { price: 1, change: 0, timestamp: QUOTE_TIMESTAMP },
 }
 
 const FEED_META = {
   provider: 'backend' as const,
-  resolvedAtMs: Date.now(),
+  resolvedAtMs: QUOTE_TIMESTAMP * 1000,
   degraded: false,
   staleOrLimited: false,
   resolutionHint: 'fresh_primary' as const,
@@ -91,8 +93,8 @@ function makePortfolio(id: string, allocations: Record<string, number>, balances
     threshold: 5,
     balances,
     totalValue: 0,
-    createdAt: new Date().toISOString(),
-    lastRebalance: new Date().toISOString(),
+    createdAt: new Date(QUOTE_TIMESTAMP * 1000).toISOString(),
+    lastRebalance: new Date(QUOTE_TIMESTAMP * 1000).toISOString(),
     version: 1,
   }
 }
@@ -174,6 +176,53 @@ describe('POST /api/portfolios/rebalance-plans (batch, no trades)', () => {
       .send({ portfolioIds: [] })
       .expect(422)
     expect(res.body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  it('uses one snapshot per request and keeps previews read-only through a price feed failure and retry', async () => {
+    mockGetPortfolio.mockResolvedValue(makePortfolio('within-threshold', { XLM: 50, USDC: 50 }, { XLM: 55, USDC: 45 }))
+    const earlyPrices = { ...PRICES, XLM: { ...PRICES.XLM, price: 1, source: 'reflector', ledger: 200 } }
+    const laterPrices = { ...earlyPrices, XLM: { ...earlyPrices.XLM, price: 2, ledger: 201, timestamp: QUOTE_TIMESTAMP + 1 } }
+    const laterMeta = { ...FEED_META, resolvedAtMs: FEED_META.resolvedAtMs + 1000 }
+    mockGetCurrentPricesWithMeta
+      .mockResolvedValueOnce({ prices: earlyPrices, feedMeta: FEED_META })
+      .mockRejectedValueOnce(new Error('interrupted price read'))
+      .mockResolvedValue({ prices: laterPrices, feedMeta: laterMeta })
+
+    const url = '/api/portfolio/within-threshold/rebalance-plan'
+    const initial = await request(app).get(url).expect(200)
+    expect(initial.body.data).toMatchObject({
+      prices: earlyPrices,
+      estimatedFees: { tradeCount: 0, xlm: 0, usd: 0 },
+      projectedAllocations: { USDC: 45, XLM: 55 },
+      boundary: {
+        result: 'no_trades_needed',
+        reasonCode: 'WITHIN_EVERY_THRESHOLD',
+        maxDriftPercent: 5,
+        trades: [],
+        quoteSnapshot: { prices: earlyPrices, feedMeta: FEED_META },
+      },
+    })
+
+    const responses = await Promise.all([request(app).get(url), request(app).get(url)])
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 500])
+    const success = responses.find(({ status }) => status === 200)
+    const retry = await request(app).get(url).expect(200)
+    expect(retry.body.data).toEqual(success?.body.data)
+    expect(retry.body.data).toMatchObject({
+      prices: laterPrices,
+      estimatedFees: { tradeCount: 2 },
+      boundary: {
+        trades: [
+          { asset: 'USDC', action: 'buy', amount: 32.5, value: 32.5 },
+          { asset: 'XLM', action: 'sell', amount: 16.25, value: 32.5 },
+        ],
+        quoteSnapshot: { prices: laterPrices, feedMeta: laterMeta },
+      },
+    })
+    expect(mockGetPortfolio).toHaveBeenCalledTimes(4)
+    expect(mockGetCurrentPricesWithMeta).toHaveBeenCalledTimes(4)
+    expect(mockExecuteRebalance).not.toHaveBeenCalled()
+    expect(rebalanceHistoryService.recordRebalanceEvent).not.toHaveBeenCalled()
   })
 
   it('does not execute any trades', async () => {

@@ -236,3 +236,36 @@ variable "ecs_max_capacity" {
     production = 10
   }
 }
+
+# ─── Rollout signal variables ─────────────────────────────────────────────────
+# These are set by the CI wrapper step that runs `terraform apply`.  They let
+# the post-apply step and the ECS module expose a structured recovery signal.
+
+variable "rollout_outcome_signal" {
+  description = <<-EOT
+    Outcome of the Terraform apply as reported by the CI wrapper:
+      success         – apply completed; all resources are in the desired state.
+      transient_delay – apply is still in progress or hit a retry-able condition;
+                        the caller should wait and re-run.
+      blocked         – apply failed; owner action is required before a retry.
+  EOT
+  type    = string
+  default = "success"
+
+  validation {
+    condition     = contains(["success", "transient_delay", "blocked"], var.rollout_outcome_signal)
+    error_message = "rollout_outcome_signal must be one of: success, transient_delay, blocked."
+  }
+}
+
+variable "rollout_owner_action" {
+  description = "Remediation token for a partial apply. Empty string uses the automatic default per status."
+  type        = string
+  default     = ""
+}
+
+variable "rollout_affected_service" {
+  description = "Name of the service (module or resource) affected by a partial apply. Empty string when not applicable."
+  type        = string
+  default     = ""
+}

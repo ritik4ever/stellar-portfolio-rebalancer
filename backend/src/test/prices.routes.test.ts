@@ -261,6 +261,12 @@ describe('GET /api/v1/prices — integration', () => {
         const res = await request(app).get('/api/v1/prices')
         expect(res.status).toBe(200)
         expect(res.body.success).toBe(true)
+        expect(res.body.data.boundary).toMatchObject({
+            result: expect.any(String),
+            reasonCode: expect.any(String),
+            provenance: expect.any(Object),
+            quoteSnapshot: { prices: expect.any(Object), feedMeta: expect.any(Object) },
+        })
     })
 
     it('returns 400 when unknown query params are supplied', async () => {

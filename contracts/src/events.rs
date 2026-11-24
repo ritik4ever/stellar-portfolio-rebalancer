@@ -17,9 +17,7 @@ pub fn emit_admin_proposed(env: &Env, current_admin: &Address, pending_admin: &A
     );
 }
 
-/// Step 2 of the two-step admin transfer: `new_admin` accepted the pending
-/// proposal and is now the contract admin; `previous_admin` has lost all
-/// admin rights as of this event.
+
 pub fn emit_admin_transferred(env: &Env, previous_admin: &Address, new_admin: &Address) {
     env.events().publish(
         (Symbol::new(env, "admin_transferred"), previous_admin.clone()),
