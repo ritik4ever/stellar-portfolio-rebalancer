@@ -132,6 +132,83 @@ describe('NotificationPreferences', () => {
         expect(postSpy).not.toHaveBeenCalled()
     })
 
+    it('shows required-field validation immediately when clearing an enabled email and clears it when disabled', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({
+            preferences: {
+                emailEnabled: true,
+                emailAddress: 'user@example.com',
+                webhookEnabled: false,
+                webhookUrl: '',
+                telegramEnabled: false,
+                telegramChatId: '',
+                events: {
+                    rebalance: true,
+                    circuitBreaker: true,
+                    priceMovement: true,
+                    riskChange: true,
+                },
+                digestEnabled: false,
+                digestFrequency: 'realtime',
+            },
+        } as any)
+        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        const emailInput = await screen.findByLabelText('Email Address')
+        const saveBtn = screen.getByRole('button', { name: /save preferences/i })
+
+        expect(emailInput).toHaveAttribute('aria-required', 'true')
+        fireEvent.change(emailInput, { target: { value: '' } })
+
+        expect(screen.getByRole('alert')).toHaveTextContent(/Email address is required when email notifications are enabled/i)
+        expect(emailInput).toHaveAttribute('aria-invalid', 'true')
+        expect(saveBtn).toBeDisabled()
+
+        fireEvent.click(getEmailSwitch())
+        expect(screen.getByText(/0 of 3 notification channels enabled/i)).toBeTruthy()
+        expect(saveBtn).not.toBeDisabled()
+
+        fireEvent.click(saveBtn)
+        await waitFor(() => expect(postSpy).toHaveBeenCalled())
+    })
+
+    it('validates Telegram Chat ID when Telegram is the only enabled channel and blocks save when blank', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
+        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        expect(await screen.findByText('Notifications')).toBeTruthy()
+
+        fireEvent.click(screen.getByRole('switch', { name: /telegram notifications/i }))
+        expect(screen.getByText(/1 of 3 notification channels enabled: Telegram only/i)).toBeTruthy()
+
+        const telegramInput = screen.getByLabelText('Telegram Chat ID')
+        const saveBtn = screen.getByRole('button', { name: /save preferences/i })
+        expect(telegramInput).toHaveAttribute('aria-required', 'true')
+
+        fireEvent.change(telegramInput, { target: { value: '   ' } })
+        expect(screen.getByRole('alert')).toHaveTextContent(/Telegram Chat ID is required/i)
+        expect(telegramInput).toHaveAttribute('aria-invalid', 'true')
+        expect(saveBtn).toBeDisabled()
+        expect(postSpy).not.toHaveBeenCalled()
+
+        fireEvent.change(telegramInput, { target: { value: '123456789' } })
+        expect(saveBtn).not.toBeDisabled()
+        fireEvent.click(saveBtn)
+
+        await waitFor(() => {
+            expect(postSpy).toHaveBeenCalledWith(
+                ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
+                expect.objectContaining({
+                    emailEnabled: false,
+                    webhookEnabled: false,
+                    telegramEnabled: true,
+                    telegramChatId: '123456789',
+                })
+            )
+        })
+    })
+
     it('saves preferences successfully', async () => {
         vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
         const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)

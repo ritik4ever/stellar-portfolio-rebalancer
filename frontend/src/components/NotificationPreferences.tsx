@@ -120,7 +120,9 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
     const handleEmailAddressChange = (email: string) => {
         setPreferences(prev => ({ ...prev, emailAddress: email }))
-        if (email && !validateEmail(email)) {
+        if (preferences.emailEnabled && !email.trim()) {
+            setEmailError('Email address is required when email notifications are enabled')
+        } else if (email && !validateEmail(email.trim())) {
             setEmailError('Invalid email address format')
         } else {
             setEmailError(null)
@@ -137,7 +139,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
     const handleTelegramChatIdChange = (id: string) => {
         setPreferences(prev => ({ ...prev, telegramChatId: id }))
-        if (preferences.telegramEnabled && !id) {
+        if (preferences.telegramEnabled && !id.trim()) {
             setTelegramError('Telegram Chat ID is required')
         } else {
             setTelegramError(null)
@@ -146,15 +148,15 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
     const handleSave = async () => {
         // Validate email address if email is enabled
-        if (preferences.emailEnabled && !preferences.emailAddress) {
+        if (preferences.emailEnabled && !preferences.emailAddress.trim()) {
             setEmailError('Email address is required when email notifications are enabled')
             return
         }
 
         if (
             preferences.emailEnabled &&
-            preferences.emailAddress &&
-            !validateEmail(preferences.emailAddress)
+            preferences.emailAddress.trim() &&
+            !validateEmail(preferences.emailAddress.trim())
         ) {
             setEmailError('Invalid email address format')
             return
@@ -163,7 +165,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         if (webhookError) return
 
         // Validate telegram if enabled
-        if (preferences.telegramEnabled && !preferences.telegramChatId) {
+        if (preferences.telegramEnabled && !preferences.telegramChatId?.trim()) {
             setTelegramError('Telegram Chat ID is required when telegram notifications are enabled')
             return
         }
@@ -504,7 +506,13 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             role="switch"
                             aria-checked={preferences.emailEnabled}
                             aria-label="Email notifications"
-                            onClick={() => setPreferences(prev => ({ ...prev, emailEnabled: !prev.emailEnabled }))}
+                            onClick={() => {
+                                setPreferences(prev => {
+                                    const nextEnabled = !prev.emailEnabled
+                                    if (!nextEnabled) setEmailError(null)
+                                    return { ...prev, emailEnabled: nextEnabled }
+                                })
+                            }}
                             disabled={actionPending}
                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                                 preferences.emailEnabled ? 'bg-blue-600' : 'bg-gray-300'
@@ -549,6 +557,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                                 value={preferences.emailAddress}
                                 onChange={(e) => handleEmailAddressChange(e.target.value)}
                                 placeholder="your-email@example.com"
+                                aria-required="true"
                                 aria-invalid={Boolean(emailError)}
                                 aria-describedby={emailError ? 'notification-email-help notification-email-error' : 'notification-email-help'}
                                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
@@ -661,7 +670,13 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             role="switch"
                             aria-checked={preferences.telegramEnabled}
                             aria-label="Telegram notifications"
-                            onClick={() => setPreferences(prev => ({ ...prev, telegramEnabled: !prev.telegramEnabled }))}
+                            onClick={() => {
+                                setPreferences(prev => {
+                                    const nextEnabled = !prev.telegramEnabled
+                                    if (!nextEnabled) setTelegramError(null)
+                                    return { ...prev, telegramEnabled: nextEnabled }
+                                })
+                            }}
                             disabled={actionPending}
                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                                 preferences.telegramEnabled ? 'bg-blue-600' : 'bg-gray-300'
@@ -706,6 +721,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                                 value={preferences.telegramChatId}
                                 onChange={(e) => handleTelegramChatIdChange(e.target.value)}
                                 placeholder="123456789"
+                                aria-required="true"
                                 aria-invalid={Boolean(telegramError)}
                                 aria-describedby={telegramError ? 'notification-telegram-help notification-telegram-error' : 'notification-telegram-help'}
                                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
@@ -1028,7 +1044,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
                 <button
                     onClick={handleSave}
-                    disabled={actionPending || !hasUnsavedChanges() || (preferences.webhookEnabled && !!webhookError) || (preferences.emailEnabled && !!emailError)}
+                    disabled={actionPending || !hasUnsavedChanges() || (preferences.webhookEnabled && !!webhookError) || (preferences.emailEnabled && !!emailError) || (preferences.telegramEnabled && !!telegramError)}
                     className="flex items-center px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
                 >
                     {savePending ? (
