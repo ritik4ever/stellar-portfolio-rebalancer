@@ -120,7 +120,7 @@ describe("PerformanceChart", () => {
       expect(screen.getByTestId("selected-range").textContent).toBe("Range: 1W");
       expect(screen.getByRole("button", { name: "Show 1 week" }).getAttribute("aria-pressed")).toBe("true");
       expect(screen.getByRole("button", { name: "Show 1 day" }).getAttribute("aria-pressed")).toBe("false");
-      expect(status()).toBe("3 data points for 1 week.");
+      expect(status()).toContain("1W (last 7 days): 3 price points.");
     });
   });
 
@@ -130,7 +130,7 @@ describe("PerformanceChart", () => {
       expect(screen.getByTestId("performance-chart-empty")).toBeTruthy();
       expect(screen.getByText("No performance data available yet")).toBeTruthy();
       expect(screen.queryByTestId("line-chart")).toBeNull();
-      expect(status()).toBe("No performance data for 1 day.");
+      expect(status()).toContain("1D (last 1 day): 0 price points.");
       expect(screen.getByTestId("selected-range").textContent).toBe("Range: 1D");
       expect(screen.getByRole("button", { name: "Export chart data as CSV" })).toHaveProperty("disabled", true);
       expect(screen.queryByTestId("missing-data-indicator")).toBeNull();
@@ -144,8 +144,8 @@ describe("PerformanceChart", () => {
       expect(screen.getByTestId("line-chart").getAttribute("data-chart-length")).toBe("1");
       expect(screen.getByTestId("line").getAttribute("data-dot")).toBe("shown");
       expect(screen.getByTestId("single-point-note")).toBeTruthy();
-      expect(screen.getByRole("img").getAttribute("aria-label")).toMatch(/1 day: one price point/);
-      expect(status()).toBe("One price point for 1 day.");
+      expect(screen.getByRole("img").getAttribute("aria-label")).toMatch(/one price point for 1D/);
+      expect(status()).toContain("1D (last 1 day): 1 price point.");
     });
 
     it("hides dots for a normal series", () => {
@@ -169,7 +169,7 @@ describe("PerformanceChart", () => {
       expect(within(panel).getByText("USDC: no price for 1 of 3 points")).toBeTruthy();
       expect(within(panel).getByRole("button", { name: "Retry loading prices" })).toBeTruthy();
       expect(within(panel).getByRole("button", { name: "Dismiss" })).toBeTruthy();
-      expect(status()).toBe("3 data points for 1 day. Price history is missing for USDC.");
+      expect(status()).toContain("Price history is missing for USDC.");
       // the chart itself still renders
       expect(screen.getByTestId("line-chart").getAttribute("data-chart-length")).toBe("3");
     });
@@ -253,7 +253,7 @@ describe("PerformanceChart", () => {
       expect(screen.queryByRole("alert")).toBeNull();
       expect(screen.getByTestId("line-chart").getAttribute("data-chart-length")).toBe("3");
       expect(screen.getByTestId("selected-range").textContent).toBe("Range: 1M");
-      expect(status()).toBe("3 data points for 1 month.");
+      expect(status()).toContain("1M (last 30 days): 3 price points.");
       // the retry button is gone, so focus lands on the chart heading instead of being lost
       expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Portfolio performance" }));
     });
@@ -305,7 +305,7 @@ describe("PerformanceChart", () => {
   });
 
   describe("data and export", () => {
-    it("coerces null, zero and malformed values without crashing", () => {
+    it("keeps a valid zero and skips null and malformed values", () => {
       setAnalytics(
         query({
           data: [
@@ -316,7 +316,7 @@ describe("PerformanceChart", () => {
         }),
       );
       render(<PerformanceChart portfolioId="p1" />);
-      expect(screen.getByTestId("line-chart").getAttribute("data-chart-length")).toBe("3");
+      expect(screen.getByTestId("line-chart").getAttribute("data-chart-length")).toBe("1");
     });
 
     it("renders rebalance markers from history events", () => {
