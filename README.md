@@ -35,6 +35,10 @@ It helps users maintain optimal asset allocation through automated rebalancing t
 * **Real-Time Price Feeds** – Powered by Reflector oracles with API fallbacks.
 * **Risk Management** – Circuit breakers, concentration limits, and volatility detection.
 * **Professional UI** – Responsive interface with real-time portfolio visualization.
+* **Portfolio Drift Chart UX Contract** – Signed zero/negative drift, the chart scale, and an as-of timestamp stay visible across time ranges.
+  A late price update after a range change must expose retry or correction without duplicate actions or losing unrelated edits.
+  Keyboard and screen-reader users must get named controls, retained focus, and state announcements.
+  Controls and chart details must remain operable at 320px and 200% text size without horizontal clipping.
 * **Demo Mode** – $10,000 simulated portfolio for testing.
 * **Trust & Transparency** – Landing page summarizes architecture, risk controls, and observability; legal documents show a fixed version and effective date.
 
