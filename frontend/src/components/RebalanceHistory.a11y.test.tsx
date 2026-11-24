@@ -5,10 +5,17 @@
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import RebalanceHistory from './RebalanceHistory'
 import Dashboard from './Dashboard'
+
+// jsdom has no matchMedia; AssetList reads prefers-reduced-motion.
+Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false }),
+})
 
 const mocks = vi.hoisted(() => ({
     useHistoryMock: vi.fn(),
@@ -39,6 +46,7 @@ vi.mock('../hooks/queries/usePortfolioQuery', () => ({
     usePortfolioCostSummary: mocks.usePortfolioCostSummary,
     isUnavailablePortfolio: vi.fn(() => false),
     portfolioKeys: { all: ['portfolios'] },
+    isUnavailablePortfolio: vi.fn(() => false),
 }))
 
 vi.mock('../hooks/queries/usePricesQuery', () => ({
@@ -261,6 +269,77 @@ describe('RebalanceHistory accessibility (SPR-2026-053)', () => {
         fireEvent.click(dismissBtn)
         expect(screen.queryByRole('alert')).toBeNull()
         expect(screen.getByText('Rebalance history error dismissed.')).toBeTruthy()
+    })
+
+    it('blocks duplicate retries while a history refetch is in flight', async () => {
+        let resolveRefetch!: (value: { isSuccess: boolean }) => void
+        const refetch = vi.fn(() => new Promise<{ isSuccess: boolean }>(resolve => {
+            resolveRefetch = resolve
+        }))
+        const mutateAsync = vi.fn()
+        mocks.useExecuteRebalanceMutation.mockReturnValue({ mutateAsync, isPending: false })
+        mocks.useHistoryMock.mockReturnValue({
+            data: undefined,
+            isLoading: false,
+            error: new Error('history unavailable'),
+            refetch,
+            isFetching: false,
+        })
+        renderDashboard()
+        const retryBtn = await screen.findByRole('button', { name: 'Retry loading rebalance history' })
+        fireEvent.click(retryBtn)
+        fireEvent.click(retryBtn)
+        expect(refetch).toHaveBeenCalledTimes(1)
+        expect(mutateAsync).not.toHaveBeenCalled()
+        expect(screen.getByText('Portfolio Value')).toBeTruthy()
+        resolveRefetch({ isSuccess: false })
+    })
+    it('allows another retry after a failed retry and keeps the error visible', async () => {
+        const refetch = vi.fn().mockRejectedValueOnce(new Error('still down')).mockResolvedValue({ isSuccess: false })
+        mocks.useHistoryMock.mockReturnValue({
+            data: undefined,
+            isLoading: false,
+            error: new Error('history unavailable'),
+            refetch,
+            isFetching: false,
+        })
+        renderDashboard()
+        const retryBtn = await screen.findByRole('button', { name: 'Retry loading rebalance history' })
+        fireEvent.click(retryBtn)
+        await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1))
+        expect(screen.getByRole('alert').textContent).toContain('Failed to load rebalance history')
+        await waitFor(() => {
+            fireEvent.click(screen.getByRole('button', { name: 'Retry loading rebalance history' }))
+            expect(refetch).toHaveBeenCalledTimes(2)
+        })
+        expect(screen.getByRole('alert')).toBeTruthy()
+    })
+
+    it('keeps the current page after a failed history load is retried', async () => {
+        const events = Array.from({ length: 10 }, (_, index) => ({
+            id: `e-${index}`,
+            timestamp: TIMESTAMP,
+            trigger: 'Scheduled rebalance',
+            trades: 1,
+            gasUsed: '0.01 XLM',
+            status: 'completed',
+            portfolioId: 'p-1',
+        }))
+        const refetch = vi.fn().mockResolvedValue({ isSuccess: true })
+        const ok = { data: { history: events, total: 25 }, isLoading: false, isFetching: false, error: null, refetch }
+        const failed = { data: undefined, isLoading: false, isFetching: false, error: new Error('history unavailable'), refetch }
+        mocks.useHistoryMock.mockReturnValue(ok)
+        const { rerender } = render(<RebalanceHistory portfolioId="p-1" />)
+        fireEvent.click(await screen.findByRole('button', { name: '2' }))
+        expect(mocks.useHistoryMock).toHaveBeenLastCalledWith('p-1', 2, 10, '', '', '', '')
+        mocks.useHistoryMock.mockReturnValue(failed)
+        rerender(<RebalanceHistory portfolioId="p-1" />)
+        fireEvent.click(await screen.findByRole('button', { name: 'Retry loading rebalance history' }))
+        await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1))
+        mocks.useHistoryMock.mockReturnValue(ok)
+        rerender(<RebalanceHistory portfolioId="p-1" />)
+        expect(screen.queryByRole('alert')).toBeNull()
+        expect(mocks.useHistoryMock).toHaveBeenLastCalledWith('p-1', 2, 10, '', '', '', '')
     })
 
     it('exposes accessible pagination names, current page state, and page-change announcements', async () => {
