@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useId } from 'react'
 import { AlertTriangle, RefreshCw, ArrowLeft } from 'lucide-react'
 
 const RETRY_BASE_DELAY_MS = 1000
@@ -14,6 +14,7 @@ type Props = {
     retryLabel?: string
     backLabel?: string
     loading?: boolean
+    focusHeading?: boolean
 }
 
 export default function RouteErrorState({
@@ -25,10 +26,17 @@ export default function RouteErrorState({
     retryLabel = 'Retry',
     backLabel = 'Back',
     loading = false,
+    focusHeading = false,
 }: Props) {
     const [retryCount, setRetryCount] = useState(0)
     const [backoffLoading, setBackoffLoading] = useState(false)
     const prevLoading = useRef(loading)
+    const headingRef = useRef<HTMLHeadingElement>(null)
+    const messageId = useId()
+
+    useEffect(() => {
+        if (focusHeading) headingRef.current?.focus()
+    }, [focusHeading])
 
     const isRetrying = loading || backoffLoading
 
@@ -62,12 +70,12 @@ export default function RouteErrorState({
                         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-red-700 dark:text-red-300">
                             Route error
                         </p>
-                        <h1 className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{title}</h1>
+                        <h1 ref={headingRef} tabIndex={focusHeading ? -1 : undefined} aria-describedby={focusHeading ? messageId : undefined} className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{title}</h1>
                     </div>
                 </div>
 
                 <div className="space-y-2">
-                    <p className="text-sm leading-6 text-gray-700 dark:text-gray-300">{message}</p>
+                    <p id={messageId} className="text-sm leading-6 text-gray-700 dark:text-gray-300">{message}</p>
                     {detail ? (
                         <p className="text-xs leading-5 text-gray-500 dark:text-gray-400">{detail}</p>
                     ) : null}

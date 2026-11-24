@@ -32,6 +32,18 @@ const defaultPreferences: Preferences = {
     digestFrequency: 'realtime',
 }
 
+const WEBHOOK_SAVE_ERROR = 'Could not save webhook settings. Delivery still uses the previously saved settings.'
+
+function getWebhookUrlError(value: string): string | null {
+    if (!value) return 'A callback URL is required when webhook delivery is enabled.'
+    try {
+        if (/^https?:\/\/[^/\s?#][^\s]*$/.test(value) && new URL(value).hostname) return null
+    } catch {
+        // The format message also covers invalid hosts and ports.
+    }
+    return 'Enter a valid callback URL starting with http:// or https://.'
+}
+
 const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userId, portfolioId }) => {
     const [preferences, setPreferences] = useState<Preferences>(defaultPreferences)
 
@@ -41,7 +53,6 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const unsubscribeMutation = useUnsubscribeNotificationsMutation(userId)
     const [successMessage, setSuccessMessage] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [webhookError, setWebhookError] = useState<string | null>(null)
     const [emailError, setEmailError] = useState<string | null>(null)
     const [telegramError, setTelegramError] = useState<string | null>(null)
     const [exporting, setExporting] = useState<'json' | 'csv' | 'pdf' | null>(null)
@@ -100,17 +111,6 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const loadErrMsg =
         loadError instanceof Error ? loadError.message : loadError ? String(loadError) : null
 
-    const validateWebhookUrl = (url: string): boolean => {
-        if (!url) return true // Empty is valid when webhook is disabled
-
-        try {
-            const parsed = new URL(url)
-            return parsed.protocol === 'http:' || parsed.protocol === 'https:'
-        } catch {
-            return false
-        }
-    }
-
     const validateEmail = (email: string): boolean => {
         if (!email) return true // Empty is valid when email is disabled
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
@@ -125,15 +125,13 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         }
     }
 
-    const handleWebhookUrlChange = (url: string) => {
-        setPreferences(prev => ({ ...prev, webhookUrl: url }))
-        
-        if (url && !validateWebhookUrl(url)) {
-            setWebhookError('Invalid URL format. Must start with http:// or https://')
-        } else {
-            setWebhookError(null)
-        }
-    }
+    const savedWebhookUrl = originalPreferences?.webhookUrl ?? ''
+    const savedWebhookActive = Boolean(originalPreferences?.webhookEnabled && savedWebhookUrl)
+    const webhookUrl = preferences.webhookUrl ?? ''
+    const webhookUrlChanged = webhookUrl !== savedWebhookUrl
+    const webhookError = preferences.webhookEnabled
+        ? getWebhookUrlError(webhookUrl)
+        : null
 
     const handleTelegramChatIdChange = (id: string) => {
         setPreferences(prev => ({ ...prev, telegramChatId: id }))
@@ -160,20 +158,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             return
         }
 
-        // Validate webhook URL if webhook is enabled
-        if (preferences.webhookEnabled && !preferences.webhookUrl) {
-            setWebhookError('Webhook URL is required when webhook notifications are enabled')
-            return
-        }
-
-        if (
-            preferences.webhookEnabled &&
-            preferences.webhookUrl &&
-            !validateWebhookUrl(preferences.webhookUrl)
-        ) {
-            setWebhookError('Invalid webhook URL format')
-            return
-        }
+        if (webhookError) return
 
         // Validate telegram if enabled
         if (preferences.telegramEnabled && !preferences.telegramChatId) {
@@ -185,13 +170,19 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         clearSuccessMessage()
 
         try {
-            await saveMutation.mutateAsync(preferences)
+            const submitted = preferences.webhookEnabled
+                ? preferences
+                : { ...preferences, webhookUrl: savedWebhookUrl }
+            await saveMutation.mutateAsync(submitted)
 
-            setOriginalPreferences(preferences)
+            setPreferences(submitted)
+            setOriginalPreferences(submitted)
             setSavedProviderActive(preferences.emailEnabled || preferences.webhookEnabled || preferences.telegramEnabled)
             showSuccessMessage('Preferences saved successfully')
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to save preferences')
+            setError(webhookHasUnsavedChanges
+                ? WEBHOOK_SAVE_ERROR
+                : err instanceof Error ? err.message : 'Failed to save preferences')
         }
     }
 
@@ -291,7 +282,11 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const eventsHaveUnsavedChanges = !!originalPreferences &&
         JSON.stringify(preferences.events) !== JSON.stringify(originalPreferences.events)
     const saveErrorMessage =
-        saveMutation.microstate.phase === 'error' ? saveMutation.microstate.description : null
+        saveMutation.microstate.phase === 'error'
+            ? webhookHasUnsavedChanges
+                ? WEBHOOK_SAVE_ERROR
+                : saveMutation.microstate.description
+            : null
     const unsubscribeErrorMessage =
         unsubscribeMutation.microstate.phase === 'error' ? unsubscribeMutation.microstate.description : null
     const actionStatus = savePending
@@ -513,35 +508,49 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                                   ? 'text-orange-600'
                                   : 'text-gray-500'
                         }`}
-                        role={webhookHasUnsavedChanges || savePending ? 'status' : undefined}
+                        role="status"
                         aria-live="polite"
                     >
                         {savePending && webhookHasUnsavedChanges
                             ? 'Saving webhook notification settings...'
-                            : webhookHasUnsavedChanges
-                              ? 'Webhook notification changes are pending save.'
-                              : 'Webhook notification settings are unchanged.'}
+                            : preferences.webhookEnabled && webhookUrlChanged
+                              ? savedWebhookActive
+                                  ? 'Replacement endpoint pending. Delivery uses the saved endpoint until you save.'
+                                  : 'New endpoint pending. Save to enable delivery.'
+                              : webhookHasUnsavedChanges
+                                ? 'Webhook notification changes are pending save.'
+                                : savedWebhookActive
+                                  ? 'Saved webhook endpoint active.'
+                                  : 'Webhook delivery is off.'}
                     </p>
 
                     {preferences.webhookEnabled && (
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Webhook URL
+                            <label htmlFor="notification-webhook-url" className="block text-sm font-medium text-gray-700 mb-1">
+                                Callback URL
                             </label>
                             <input
-                                type="url"
-                                value={preferences.webhookUrl}
-                                onChange={(e) => handleWebhookUrlChange(e.target.value)}
+                                id="notification-webhook-url"
+                                type="password"
+                                inputMode="url"
+                                autoComplete="off"
+                                spellCheck={false}
+                                value={webhookUrl}
+                                disabled={actionPending}
+                                aria-required="true"
+                                aria-invalid={Boolean(webhookError)}
+                                aria-describedby={webhookError ? 'webhook-url-help webhook-url-error' : 'webhook-url-help'}
+                                onChange={(e) => setPreferences(prev => ({ ...prev, webhookUrl: e.target.value }))}
                                 placeholder="https://your-domain.com/webhook"
                                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                                     webhookError ? 'border-red-300' : 'border-gray-300'
                                 }`}
                             />
                             {webhookError && (
-                                <p className="mt-1 text-sm text-red-600">{webhookError}</p>
+                                <p id="webhook-url-error" role="status" className="mt-1 text-sm text-red-600">{webhookError}</p>
                             )}
-                            <p className="mt-1 text-xs text-gray-500">
-                                Must be a valid HTTP or HTTPS URL
+                            <p id="webhook-url-help" className="mt-1 text-xs text-gray-500">
+                                Enter a complete URL starting with http:// or https://. To rotate the endpoint, replace the URL and save.
                             </p>
                         </div>
                     )}

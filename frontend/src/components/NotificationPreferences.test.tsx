@@ -21,6 +21,43 @@ describe('NotificationPreferences', () => {
         vi.stubGlobal('confirm', vi.fn(() => true))
     })
 
+    it('validates and masks a rotated webhook URL, keeping saved status until save succeeds', async () => {
+        const oldUrl = 'https://receiver.example/old?token=first-secret'
+        const newUrl = 'https://receiver.example/new?token=second-secret'
+        const preferences = {
+            emailEnabled: false, emailAddress: '', webhookEnabled: true, webhookUrl: oldUrl,
+            telegramEnabled: false, telegramChatId: '', digestEnabled: false, digestFrequency: 'realtime',
+            events: { rebalance: true, circuitBreaker: true, priceMovement: true, riskChange: true },
+        }
+        vi.spyOn(api, 'get').mockImplementation(async () => ({ preferences }) as any)
+        const post = vi.spyOn(api, 'post').mockRejectedValueOnce(new Error(newUrl))
+            .mockImplementationOnce(async () => {
+                preferences.webhookUrl = newUrl
+                return { success: true } as any
+            })
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        const input = await screen.findByLabelText('Callback URL')
+        const save = screen.getByRole('button', { name: 'Save Preferences' })
+        expect(input).toHaveAttribute('type', 'password')
+        expect(screen.getByText('Saved webhook endpoint active.')).toBeInTheDocument()
+
+        fireEvent.change(input, { target: { value: 'ftp://receiver.example' } })
+        expect(input).toHaveAttribute('aria-invalid', 'true')
+        expect(input).toHaveAccessibleDescription(/Enter a valid callback URL/)
+        expect(save).toBeDisabled()
+        expect(post).not.toHaveBeenCalled()
+
+        fireEvent.change(input, { target: { value: newUrl } })
+        expect(screen.getByText(/Delivery uses the saved endpoint until you save/)).toBeInTheDocument()
+        fireEvent.click(save)
+        expect(await screen.findByText(/Delivery still uses the previously saved settings/)).toBeInTheDocument()
+        expect(screen.queryByText(newUrl)).toBeNull()
+        fireEvent.click(save)
+        expect(await screen.findByText('Saved webhook endpoint active.')).toBeInTheDocument()
+        expect(post).toHaveBeenLastCalledWith(ENDPOINTS.NOTIFICATIONS_SUBSCRIBE, expect.objectContaining({ webhookUrl: newUrl }))
+        expect(screen.queryByText(/first-secret|second-secret/)).toBeNull()
+    })
+
     it('validates email format and blocks save', async () => {
         vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
         renderWithQuery(<NotificationPreferences userId="user-1" />)
@@ -135,6 +172,8 @@ describe('NotificationPreferences', () => {
                 emailAddress: 'user@example.com',
                 webhookEnabled: false,
                 webhookUrl: '',
+                telegramEnabled: false,
+                telegramChatId: '',
                 events: {
                     rebalance: true,
                     circuitBreaker: true,

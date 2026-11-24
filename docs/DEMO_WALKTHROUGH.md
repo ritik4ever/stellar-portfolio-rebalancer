@@ -144,9 +144,15 @@ This visual guide walks you through the main features of the Stellar Portfolio R
 
 **Validation Rules:**
 - Allocations must sum to 100%
-- Threshold must be between 1% and 50%
+- The drift threshold must be from 1% to 50% inclusive.
 - At least 2 assets required
 - Maximum 10 assets allowed
+
+**Dashboard and settings:**
+- Settings displays the saved threshold during editing. Empty and out-of-range changes cannot be saved. Imported changes follow the same bounds and take effect after saving.
+- When the selected portfolio is deleted or inaccessible, the dashboard focuses the unavailable heading and offers to reload the portfolio list or return to the landing page. If balance details fail, the dashboard announces the failure and leaves target allocations available with a balance retry.
+- Review rebalance shows all planned trades in a keyboard-scrollable list, the fee for the complete plan, and the age of its oldest required quote. An empty plan has no confirmation action.
+- Under Dashboard → Notifications, webhook delivery requires a complete callback URL beginning with `http://` or `https://`. Replace the masked URL and save to rotate it. Delivery and notification tests keep using the saved settings until the save succeeds.
 
 **Screenshot Locations:**
 - `docs/screenshots/04a-create-portfolio-assets.png`

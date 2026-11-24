@@ -81,7 +81,7 @@ describe('NotificationTest', () => {
         expect(screen.getByRole('button', { name: /retry rebalance test/i })).toBeTruthy()
     })
 
-    it('shows webhook delivery destination when webhook is configured', async () => {
+    it('reports webhook delivery without showing the callback URL', async () => {
         vi.spyOn(api, 'post').mockResolvedValue({
             message: 'Sent',
             sentTo: { email: null, webhook: 'https://hooks.example.com/notify' },
@@ -92,7 +92,8 @@ describe('NotificationTest', () => {
 
         fireEvent.click(screen.getByRole('button', { name: /^test circuit breaker$/i }))
 
-        expect(await screen.findByText(/https:\/\/hooks\.example\.com\/notify/i)).toBeTruthy()
+        expect(await screen.findByText(/Saved webhook endpoint/)).toBeTruthy()
+        expect(screen.queryByText('https://hooks.example.com/notify')).toBeNull()
     })
 
     it('shows Re-test label after a result is already present', async () => {
