@@ -40,6 +40,7 @@ vi.mock('../hooks/queries/usePortfolioQuery', () => ({
     useRebalanceEstimate: mocks.useRebalanceEstimate,
     useRebalancePlan: mocks.useRebalancePlan,
     usePortfolioCostSummary: mocks.usePortfolioCostSummary,
+    isUnavailablePortfolio: vi.fn(() => false),
     portfolioKeys: { all: ['portfolios'] },
 }))
 
