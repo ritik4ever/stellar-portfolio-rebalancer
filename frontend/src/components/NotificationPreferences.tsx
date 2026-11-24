@@ -60,6 +60,8 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const [showUnsubscribeReason, setShowUnsubscribeReason] = useState(false)
     const [unsubscribeReason, setUnsubscribeReason] = useState('')
     const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const unsubscribeDialogRef = useRef<HTMLDivElement>(null)
+    const unsubscribeTriggerRef = useRef<HTMLButtonElement>(null)
 
     const savePending = saveMutation.microstate.phase === 'pending'
     const unsubscribePending = unsubscribeMutation.microstate.phase === 'pending'
@@ -197,6 +199,94 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         setUnsubscribeReason('')
         setError(null)
     }
+
+    const cancelUnsubscribeRef = useRef(handleCancelUnsubscribe)
+    useEffect(() => {
+        cancelUnsubscribeRef.current = handleCancelUnsubscribe
+    })
+
+    const actionPendingRef = useRef(actionPending)
+    useEffect(() => {
+        actionPendingRef.current = actionPending
+    }, [actionPending])
+
+    // Focus management for the unsubscribe dialog, following the pattern in
+    // components/ui/Modal.tsx: move focus into the dialog when it opens, keep
+    // Tab navigation inside it, let Escape abandon it, and return focus to the
+    // invoking button when it closes.
+    useEffect(() => {
+        if (!showUnsubscribeReason) return
+
+        const dialog = unsubscribeDialogRef.current
+        if (!dialog) return
+
+        const previouslyFocused = document.activeElement as HTMLElement | null
+        dialog.focus()
+
+        const getFocusableElements = (): HTMLElement[] => {
+            const focusableSelectors = [
+                'button:not([disabled])',
+                '[href]',
+                'input:not([disabled])',
+                'select:not([disabled])',
+                'textarea:not([disabled])',
+                '[tabindex]:not([tabindex="-1"])',
+            ]
+            return Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelectors.join(',')))
+        }
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                if (!actionPendingRef.current) cancelUnsubscribeRef.current()
+                return
+            }
+            if (e.key !== 'Tab') return
+
+            const focusableElements = getFocusableElements()
+            if (focusableElements.length === 0) {
+                e.preventDefault()
+                dialog.focus()
+                return
+            }
+
+            const firstElement = focusableElements[0]
+            const lastElement = focusableElements[focusableElements.length - 1]
+            const active = document.activeElement as HTMLElement | null
+            const activeIndex = active ? focusableElements.indexOf(active) : -1
+
+            if (activeIndex === -1) {
+                e.preventDefault()
+                if (e.shiftKey) {
+                    lastElement.focus()
+                } else {
+                    firstElement.focus()
+                }
+                return
+            }
+
+            if (e.shiftKey) {
+                if (active === firstElement) {
+                    e.preventDefault()
+                    lastElement.focus()
+                }
+            } else if (active === lastElement) {
+                e.preventDefault()
+                firstElement.focus()
+            }
+        }
+
+        document.addEventListener('keydown', handleKeyDown)
+
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown)
+            const trigger = unsubscribeTriggerRef.current
+            if (trigger && document.contains(trigger)) {
+                trigger.focus()
+            } else if (previouslyFocused && document.contains(previouslyFocused)) {
+                previouslyFocused.focus()
+            }
+        }
+    }, [showUnsubscribeReason])
 
     const handleUnsubscribe = async (includeReason: boolean) => {
         if (actionPending) return
@@ -450,22 +540,25 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
                     {preferences.emailEnabled && (
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                            <label htmlFor="notification-email-address" className="block text-sm font-medium text-gray-700 mb-1">
                                 Email Address
                             </label>
                             <input
+                                id="notification-email-address"
                                 type="email"
                                 value={preferences.emailAddress}
                                 onChange={(e) => handleEmailAddressChange(e.target.value)}
                                 placeholder="your-email@example.com"
+                                aria-invalid={Boolean(emailError)}
+                                aria-describedby={emailError ? 'notification-email-help notification-email-error' : 'notification-email-help'}
                                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                                     emailError ? 'border-red-300' : 'border-gray-300'
                                 }`}
                             />
                             {emailError && (
-                                <p className="mt-1 text-sm text-red-600">{emailError}</p>
+                                <p id="notification-email-error" role="alert" className="mt-1 text-sm text-red-600">{emailError}</p>
                             )}
-                            <p className="mt-1 text-xs text-gray-500">
+                            <p id="notification-email-help" className="mt-1 text-xs text-gray-500">
                                 Enter the email address where you want to receive notifications
                             </p>
                         </div>
@@ -547,7 +640,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                                 }`}
                             />
                             {webhookError && (
-                                <p id="webhook-url-error" role="status" className="mt-1 text-sm text-red-600">{webhookError}</p>
+                                <p id="webhook-url-error" role="alert" className="mt-1 text-sm text-red-600">{webhookError}</p>
                             )}
                             <p id="webhook-url-help" className="mt-1 text-xs text-gray-500">
                                 Enter a complete URL starting with http:// or https://. To rotate the endpoint, replace the URL and save.
@@ -604,22 +697,25 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
                     {preferences.telegramEnabled && (
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                            <label htmlFor="notification-telegram-chat-id" className="block text-sm font-medium text-gray-700 mb-1">
                                 Telegram Chat ID
                             </label>
                             <input
+                                id="notification-telegram-chat-id"
                                 type="text"
                                 value={preferences.telegramChatId}
                                 onChange={(e) => handleTelegramChatIdChange(e.target.value)}
                                 placeholder="123456789"
+                                aria-invalid={Boolean(telegramError)}
+                                aria-describedby={telegramError ? 'notification-telegram-help notification-telegram-error' : 'notification-telegram-help'}
                                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                                     telegramError ? 'border-red-300' : 'border-gray-300'
                                 }`}
                             />
                             {telegramError && (
-                                <p className="mt-1 text-sm text-red-600">{telegramError}</p>
+                                <p id="notification-telegram-error" role="alert" className="mt-1 text-sm text-red-600">{telegramError}</p>
                             )}
-                            <p className="mt-1 text-xs text-gray-500">
+                            <p id="notification-telegram-help" className="mt-1 text-xs text-gray-500">
                                 Your Telegram User ID or Group Chat ID
                             </p>
                         </div>
@@ -855,8 +951,12 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             {/* Action Buttons */}
             {showUnsubscribeReason && (
                 <div
+                    ref={unsubscribeDialogRef}
                     role="dialog"
+                    aria-modal="true"
                     aria-labelledby="unsubscribe-reason-title"
+                    aria-describedby="unsubscribe-reason-description"
+                    tabIndex={-1}
                     className="mb-4 p-4 border border-red-200 rounded-lg bg-red-50"
                 >
                     <div className="flex items-start justify-between gap-3 mb-3">
@@ -864,7 +964,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             <h3 id="unsubscribe-reason-title" className="text-sm font-semibold text-red-900">
                                 Before you unsubscribe
                             </h3>
-                            <p className="mt-1 text-sm text-red-800">
+                            <p id="unsubscribe-reason-description" className="mt-1 text-sm text-red-800">
                                 Sharing why is optional and helps us improve notifications.
                             </p>
                         </div>
@@ -918,6 +1018,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-200">
                 <button
                     type="button"
+                    ref={unsubscribeTriggerRef}
                     onClick={handleUnsubscribeClick}
                     disabled={actionPending || showUnsubscribeReason || (!preferences.emailEnabled && !preferences.webhookEnabled && !preferences.telegramEnabled)}
                     className="text-sm text-red-600 hover:text-red-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"

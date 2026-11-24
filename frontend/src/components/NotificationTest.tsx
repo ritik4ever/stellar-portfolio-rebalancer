@@ -270,7 +270,7 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                                                 className="mt-2 overflow-hidden"
                                             >
                                                 <div
-                                                    role="status"
+                                                    role={result.success ? 'status' : 'alert'}
                                                     aria-label={`${label} test result`}
                                                     className={`flex items-start gap-1.5 text-xs ${
                                                         result.success
