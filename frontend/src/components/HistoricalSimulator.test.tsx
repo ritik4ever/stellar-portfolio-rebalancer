@@ -146,6 +146,114 @@ describe('HistoricalSimulator', () => {
         expect(screen.getByRole('status').textContent).toBe('Range changed. The previous simulation result was cleared.')
     })
 
+    it('handles a seven-day window ending directly on a leap-day boundary', async () => {
+        const post = vi.spyOn(api, 'post').mockResolvedValue(completed({
+            startDate: '2028-02-23',
+            endDate: '2028-02-29',
+            decision: { totalWindowDays: 7, includedDaysCount: 7, hasLeapDay: true, leapDayIncluded: true },
+        }))
+        render(<HistoricalSimulator portfolioId="p1" />)
+
+        fireEvent.change(screen.getByLabelText('Start date'), { target: { value: '2028-02-23' } })
+        fireEvent.change(screen.getByLabelText('End date'), { target: { value: '2028-02-29' } })
+
+        expect(screen.getByText('Selected: 7 days.')).toBeTruthy()
+        expect(screen.getByText(/Includes leap day 2028-02-29/)).toBeTruthy()
+
+        submit()
+
+        await screen.findByRole('heading', { name: 'Simulation result' })
+        expect(post).toHaveBeenCalledTimes(1)
+        expect(post).toHaveBeenCalledWith(expect.stringContaining('/backtest'), {
+            portfolioId: 'p1',
+            days: 7,
+            from: '2028-02-23T00:00:00.000Z',
+            to: '2028-02-29T23:59:59.999Z',
+        })
+        expect(screen.getAllByText('2028-02-23 to 2028-02-29 (7 days)')).toHaveLength(2)
+        expect(screen.getByText('CoinGecko daily closes')).toBeTruthy()
+        expect(screen.getByText('Leap day (Feb 29) was included in this simulation.')).toBeTruthy()
+    })
+
+    it('recovers from insufficient real price history when retrying the simulation', async () => {
+        const post = vi.spyOn(api, 'post')
+            .mockRejectedValueOnce(new ApiClientError(
+                'Not enough overlapping price history across the selected assets',
+                503,
+                'HISTORICAL_DATA_UNAVAILABLE',
+            ))
+            .mockResolvedValueOnce(completed())
+
+        render(<HistoricalSimulator portfolioId="p1" />)
+        selectSevenDays()
+        submit()
+
+        const alert = await screen.findByRole('alert')
+        expect(alert.textContent).toContain('Not enough real price history')
+        expect(alert.textContent).toContain('synthetic prices are never substituted')
+        expect(screen.queryByRole('heading', { name: 'Simulation result' })).toBeNull()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Retry simulation' }))
+
+        const heading = await screen.findByRole('heading', { name: 'Simulation result' })
+        expect(post).toHaveBeenCalledTimes(2)
+        expect(post).toHaveBeenLastCalledWith(expect.stringContaining('/backtest'), {
+            portfolioId: 'p1',
+            days: 7,
+            from: '2028-02-27T00:00:00.000Z',
+            to: '2028-03-04T23:59:59.999Z',
+        })
+        expect(screen.queryByRole('alert')).toBeNull()
+        expect(screen.getAllByText('2028-02-27 to 2028-03-04 (7 days)')).toHaveLength(2)
+        expect(screen.getByText('CoinGecko daily closes')).toBeTruthy()
+        await waitFor(() => expect(document.activeElement).toBe(heading))
+    })
+
+    it('recovers from timeout and conflict failures on retry', async () => {
+        const post = vi.spyOn(api, 'post')
+            .mockRejectedValueOnce(new ApiClientError('Timed out', 504, 'REQUEST_TIMEOUT'))
+            .mockRejectedValueOnce(new ApiClientError('Already running', 409, 'CONFLICT'))
+            .mockResolvedValueOnce(completed())
+
+        render(<HistoricalSimulator portfolioId="p1" />)
+        selectSevenDays()
+        submit()
+
+        expect((await screen.findByRole('alert')).textContent).toContain('The simulation timed out.')
+        fireEvent.click(screen.getByRole('button', { name: 'Retry simulation' }))
+
+        expect((await screen.findByRole('alert')).textContent).toContain('A simulation is already running for this portfolio.')
+        fireEvent.click(screen.getByRole('button', { name: 'Retry simulation' }))
+
+        await screen.findByRole('heading', { name: 'Simulation result' })
+        expect(post).toHaveBeenCalledTimes(3)
+        expect(screen.queryByRole('alert')).toBeNull()
+        expect(screen.getByText('CoinGecko daily closes')).toBeTruthy()
+    })
+
+    it('prevents duplicate submissions while a simulation is already running', async () => {
+        let resolve!: (value: unknown) => void
+        const post = vi.spyOn(api, 'post').mockReturnValue(new Promise((done) => { resolve = done }))
+        const { container } = render(<HistoricalSimulator portfolioId="p1" />)
+        selectSevenDays()
+        submit()
+
+        await screen.findByRole('button', { name: 'Cancel' })
+        const form = container.querySelector('form')!
+        expect(form.getAttribute('aria-busy')).toBe('true')
+        expect(screen.queryByRole('button', { name: 'Run simulation' })).toBeNull()
+
+        fireEvent.submit(form)
+        fireEvent.submit(form)
+        expect(post).toHaveBeenCalledTimes(1)
+
+        await act(async () => { resolve(completed()) })
+        await screen.findByRole('heading', { name: 'Simulation result' })
+        expect(post).toHaveBeenCalledTimes(1)
+        expect(screen.getAllByText('2028-02-27 to 2028-03-04 (7 days)')).toHaveLength(2)
+        expect(screen.getByText('CoinGecko daily closes')).toBeTruthy()
+    })
+
     it('keeps narrow-layout guards on the controls', () => {
         render(<HistoricalSimulator portfolioId="p1" />)
         const start = screen.getByLabelText('Start date')
