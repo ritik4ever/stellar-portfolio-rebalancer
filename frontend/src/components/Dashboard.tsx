@@ -223,22 +223,147 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
     const [showDemoResetConfirm, setShowDemoResetConfirm] = useState(false)
     const [resettingDemo, setResettingDemo] = useState(false)
+    const [demoResetError, setDemoResetError] = useState<string | null>(null)
+    const [demoAnnouncement, setDemoAnnouncement] = useState<string | null>(null)
+    const prevPublicKeyRef = React.useRef<string | null>(publicKey)
+    const demoResetTriggerRef = React.useRef<HTMLElement | null>(null)
+    const demoResetDialogRef = React.useRef<HTMLDivElement | null>(null)
+    const demoResetCancelBtnRef = React.useRef<HTMLButtonElement | null>(null)
+    const demoResetErrorRef = React.useRef<HTMLDivElement | null>(null)
+
+    const restoreDemoResetFocus = useCallback(() => {
+        const trigger = demoResetTriggerRef.current
+        if (trigger && document.contains(trigger)) {
+            trigger.focus()
+        } else {
+            headingRef.current?.focus()
+        }
+    }, [])
+
+    const openDemoResetConfirm = useCallback((triggerEl?: HTMLElement | null) => {
+        demoResetTriggerRef.current = triggerEl ?? (document.activeElement as HTMLElement | null)
+        setDemoResetError(null)
+        setShowDemoResetConfirm(true)
+    }, [])
+
+    const closeDemoResetConfirm = useCallback((announcement?: string) => {
+        if (resettingDemo) return
+        setShowDemoResetConfirm(false)
+        setDemoResetError(null)
+        if (announcement) {
+            setDemoAnnouncement(announcement)
+        }
+        restoreDemoResetFocus()
+    }, [resettingDemo, restoreDemoResetFocus])
+
+    React.useEffect(() => {
+        if (prevPublicKeyRef.current === publicKey) return
+        prevPublicKeyRef.current = publicKey
+        if (publicKey) {
+            setShowDemoResetConfirm(false)
+            setDemoResetError(null)
+            setDemoAnnouncement(
+                `Switched from Demo Mode to connected wallet ${publicKey.slice(0, 4)}...${publicKey.slice(-4)}. Real wallet balances and on-chain portfolios are now active.`
+            )
+        } else {
+            setDemoAnnouncement(
+                'Switched to Demo Mode. Simulated portfolio balances are now active.'
+            )
+        }
+        headingRef.current?.focus()
+    }, [publicKey])
+
+    React.useEffect(() => {
+        if (!showDemoResetConfirm) return
+        const dialog = demoResetDialogRef.current
+        if (!dialog) return
+
+        demoResetCancelBtnRef.current?.focus()
+
+        const getFocusableElements = (): HTMLElement[] =>
+            Array.from(
+                dialog.querySelectorAll<HTMLElement>(
+                    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+                )
+            )
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                event.preventDefault()
+                closeDemoResetConfirm('Demo reset cancelled.')
+                return
+            }
+            if (event.key !== 'Tab') return
+
+            const focusables = getFocusableElements()
+            if (focusables.length === 0) {
+                event.preventDefault()
+                dialog.focus()
+                return
+            }
+
+            const first = focusables[0]
+            const last = focusables[focusables.length - 1]
+            const active = document.activeElement as HTMLElement | null
+
+            if (!active || !focusables.includes(active)) {
+                event.preventDefault()
+                ;(event.shiftKey ? last : first).focus()
+                return
+            }
+
+            if (event.shiftKey && active === first) {
+                event.preventDefault()
+                last.focus()
+            } else if (!event.shiftKey && active === last) {
+                event.preventDefault()
+                first.focus()
+            }
+        }
+
+        document.addEventListener('keydown', handleKeyDown)
+        return () => document.removeEventListener('keydown', handleKeyDown)
+    }, [showDemoResetConfirm, closeDemoResetConfirm])
+
+    React.useEffect(() => {
+        if (demoResetError && showDemoResetConfirm) {
+            demoResetErrorRef.current?.focus()
+        }
+    }, [demoResetError, showDemoResetConfirm])
 
     const resetDemoPortfolio = useCallback(async () => {
         if (publicKey) return
         setResettingDemo(true)
+        setDemoResetError(null)
+        setDemoAnnouncement('Resetting demo portfolio...')
+        let portfoliosInvalidated = false
+        let pricesInvalidated = false
         try {
             await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
+            portfoliosInvalidated = true
             await queryClient.invalidateQueries({ queryKey: priceKeys.all })
+            pricesInvalidated = true
             await new Promise(resolve => setTimeout(resolve, 500))
             setShowDemoResetConfirm(false)
+            setDemoAnnouncement(
+                'Demo portfolio reset to default $10,000 balance (40% XLM / 60% USDC).'
+            )
+            restoreDemoResetFocus()
         } catch (error) {
             console.error('Demo reset failed:', error)
-            alert('Failed to reset demo portfolio. Please refresh the page.')
+            if (portfoliosInvalidated && !pricesInvalidated) {
+                setDemoResetError(
+                    'Demo reset failed halfway: portfolio data was reset, but demo price data failed to refresh. Retry to finish resetting or cancel to return to the dashboard.'
+                )
+            } else {
+                setDemoResetError(
+                    'Demo portfolio reset failed before completing. Retry to try again or cancel to return to the dashboard.'
+                )
+            }
         } finally {
             setResettingDemo(false)
         }
-    }, [publicKey, queryClient])
+    }, [publicKey, queryClient, restoreDemoResetFocus])
 
     const disconnectWallet = async () => {
         if (publicKey) {
@@ -512,6 +637,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     {dashboardCopy.demoMode}
                                 </span>
                             )}
+                            <div
+                                role="status"
+                                aria-live="polite"
+                                aria-atomic="true"
+                                className="sr-only"
+                            >
+                                {demoAnnouncement}
+                            </div>
                         </div>
                     </div>
 
@@ -621,9 +754,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     className="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap min-w-0">
                                     Connect Wallet
                                 </button>
-                                <button type="button" onClick={() => setShowDemoResetConfirm(true)}
+                                <button type="button" onClick={event => openDemoResetConfirm(event.currentTarget)}
                                     aria-label="Reset demo portfolio"
-                                    className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1 whitespace-nowrap min-w-0">
+                                    className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1 whitespace-nowrap min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
                                     <RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />
                                     <span>Reset Demo</span>
                                 </button>
@@ -741,23 +874,56 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             {/* Demo reset confirmation modal */}
             {showDemoResetConfirm && (
                 <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-3 sm:p-4">
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-4 sm:p-6 min-w-0 max-h-[90vh] overflow-y-auto">
+                    <div
+                        ref={demoResetDialogRef}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="demo-reset-dialog-title"
+                        aria-describedby="demo-reset-dialog-description"
+                        aria-busy={resettingDemo}
+                        tabIndex={-1}
+                        className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-4 sm:p-6 min-w-0 max-h-[90vh] overflow-y-auto focus:outline-none"
+                    >
                         <div className="flex items-center gap-2 mb-4 min-w-0">
-                            <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0" />
-                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white break-words">Reset Demo Portfolio</h2>
+                            <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0" aria-hidden="true" />
+                            <h2 id="demo-reset-dialog-title" className="text-xl font-semibold text-gray-900 dark:text-white break-words">Reset Demo Portfolio</h2>
                         </div>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6 break-words">
+                        <p id="demo-reset-dialog-description" className="text-gray-600 dark:text-gray-400 text-sm mb-4 break-words">
                             This will reset the demo portfolio to its default state with $10,000 total value and 40% XLM / 60% USDC allocation. Real wallet balances and on-chain portfolios are not affected.
                         </p>
+                        {demoResetError && (
+                            <div
+                                ref={demoResetErrorRef}
+                                role="alert"
+                                aria-live="assertive"
+                                tabIndex={-1}
+                                className="mb-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 p-3 text-sm text-red-800 dark:text-red-200 focus:outline-none focus:ring-2 focus:ring-red-500"
+                            >
+                                {demoResetError}
+                            </div>
+                        )}
                         <div className="flex flex-wrap justify-end gap-2 sm:gap-3">
-                            <button type="button" onClick={() => setShowDemoResetConfirm(false)} disabled={resettingDemo}
-                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 text-sm">Cancel</button>
-                            <button type="button" onClick={resetDemoPortfolio} disabled={resettingDemo}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2 text-sm">
+                            <button
+                                ref={demoResetCancelBtnRef}
+                                type="button"
+                                onClick={() => closeDemoResetConfirm('Demo reset cancelled.')}
+                                disabled={resettingDemo}
+                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={resetDemoPortfolio}
+                                disabled={resettingDemo}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                            >
                                 {resettingDemo ? (
-                                    <><RefreshCw className="w-4 h-4 animate-spin flex-shrink-0" />Resetting...</>
+                                    <><RefreshCw className="w-4 h-4 animate-spin flex-shrink-0" aria-hidden="true" />Resetting...</>
+                                ) : demoResetError ? (
+                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden="true" />Retry Reset</>
                                 ) : (
-                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" />Reset Demo</>
+                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden="true" />Reset Demo</>
                                 )}
                             </button>
                         </div>
@@ -1170,9 +1336,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 <span className="hidden sm:inline">New</span>
                             </button>
                         ) : (
-                            <button type="button" onClick={() => setShowDemoResetConfirm(true)}
+                            <button type="button" onClick={event => openDemoResetConfirm(event.currentTarget)}
                                 aria-label="Reset demo portfolio"
-                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-2.5 sm:px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1">
+                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-2.5 sm:px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
                                 <RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />
                                 <span>Reset</span>
                             </button>

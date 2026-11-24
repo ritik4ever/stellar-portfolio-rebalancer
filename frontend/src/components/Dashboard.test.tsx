@@ -20,6 +20,7 @@ const queryMocks = vi.hoisted(() => ({
     useRebalancePlan: vi.fn(),
     usePrices: vi.fn(),
     useExecuteRebalanceMutation: vi.fn(),
+    invalidateQueries: vi.fn(async () => undefined),
 }))
 
 vi.mock('../hooks/queries/usePortfolioQuery', async importOriginal => ({
@@ -44,6 +45,7 @@ vi.mock('../hooks/queries/usePortfolioQuery', async importOriginal => ({
 vi.mock('../hooks/queries/usePricesQuery', () => ({
     usePrices: queryMocks.usePrices,
     formatPriceFeedSummary: vi.fn(() => 'Live prices'),
+    priceKeys: { all: ['prices'] },
 }))
 
 vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
@@ -56,7 +58,7 @@ vi.mock('../context/ThemeContext', () => ({
 vi.mock('@tanstack/react-query', async importOriginal => ({
     ...await importOriginal<typeof import('@tanstack/react-query')>(),
     useQueryClient: vi.fn(() => ({
-        invalidateQueries: vi.fn(async () => undefined),
+        invalidateQueries: queryMocks.invalidateQueries,
     })),
 }))
 
@@ -420,5 +422,145 @@ describe('Dashboard', () => {
 
         // Shows connected wallet header details
         expect(screen.getByText(/GABC\.\.\.TEST/)).toBeInTheDocument()
+    })
+
+    it('announces mode switches between demo and connected wallet and moves focus to the heading', async () => {
+        queryMocks.useUserPortfolios.mockReturnValue({ data: [], isLoading: false })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            data: { id: 'demo', totalValue: 10000, dayChange: 0, assets: [] },
+            isLoading: false,
+        })
+        queryMocks.usePrices.mockReturnValue({ data: { prices: {}, feedMeta: null }, isLoading: false })
+
+        const onNavigate = vi.fn()
+        const queryClient = new QueryClient({
+            defaultOptions: { queries: { retry: false } },
+        })
+        const { rerender } = render(
+            <QueryClientProvider client={queryClient}>
+                <Dashboard onNavigate={onNavigate} publicKey={null} />
+            </QueryClientProvider>
+        )
+
+        const heading = await screen.findByRole('heading', { level: 1 })
+
+        // Switch from Demo Mode to connected wallet
+        queryMocks.useUserPortfolios.mockReturnValue({ data: [{ id: 'live-1', name: 'Main' }], isLoading: false })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            data: { id: 'live-1', totalValue: 25000, dayChange: 1.5, assets: [] },
+            isLoading: false,
+        })
+        rerender(
+            <QueryClientProvider client={queryClient}>
+                <Dashboard onNavigate={onNavigate} publicKey="GABCD1234567890TEST" />
+            </QueryClientProvider>
+        )
+
+        const statuses = screen.getAllByRole('status')
+        expect(statuses.some(el => /Switched from Demo Mode to connected wallet GABC\.\.\.TEST/i.test(el.textContent || ''))).toBe(true)
+        expect(heading).toHaveFocus()
+
+        // Switch back from connected wallet to Demo Mode
+        queryMocks.useUserPortfolios.mockReturnValue({ data: [], isLoading: false })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            data: { id: 'demo', totalValue: 10000, dayChange: 0, assets: [] },
+            isLoading: false,
+        })
+        rerender(
+            <QueryClientProvider client={queryClient}>
+                <Dashboard onNavigate={onNavigate} publicKey={null} />
+            </QueryClientProvider>
+        )
+
+        expect(
+            screen.getAllByRole('status').some(el => /Switched to Demo Mode\. Simulated portfolio balances are now active\./i.test(el.textContent || ''))
+        ).toBe(true)
+        expect(heading).toHaveFocus()
+    })
+
+    it('manages keyboard focus, focus trap, and Escape abandonment in the demo reset dialog', async () => {
+        queryMocks.useUserPortfolios.mockReturnValue({ data: [], isLoading: false })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            data: { id: 'demo', totalValue: 10000, dayChange: 0, assets: [] },
+            isLoading: false,
+        })
+        queryMocks.usePrices.mockReturnValue({ data: { prices: {}, feedMeta: null }, isLoading: false })
+
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey={null} />)
+
+        const resetButtons = await screen.findAllByRole('button', { name: /reset demo portfolio/i })
+        const trigger = resetButtons[0]
+        trigger.focus()
+        fireEvent.click(trigger)
+
+        const dialog = screen.getByRole('dialog', { name: 'Reset Demo Portfolio' })
+        expect(dialog).toHaveAttribute('aria-modal', 'true')
+        expect(dialog).toHaveAccessibleDescription(/reset the demo portfolio to its default state/i)
+
+        const cancelBtn = within(dialog).getByRole('button', { name: 'Cancel' })
+        const confirmBtn = within(dialog).getByRole('button', { name: /Reset Demo/i })
+        expect(cancelBtn).toHaveFocus()
+
+        // Shift+Tab from first button wraps to last button
+        fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
+        expect(confirmBtn).toHaveFocus()
+
+        // Tab from last button wraps to first button
+        fireEvent.keyDown(document, { key: 'Tab' })
+        expect(cancelBtn).toHaveFocus()
+
+        // Escape abandons the flow, announces cancellation, and restores focus to trigger
+        fireEvent.keyDown(document, { key: 'Escape' })
+        expect(screen.queryByRole('dialog', { name: 'Reset Demo Portfolio' })).not.toBeInTheDocument()
+        expect(trigger).toHaveFocus()
+        expect(
+            screen.getAllByRole('status').some(el => /Demo reset cancelled\./i.test(el.textContent || ''))
+        ).toBe(true)
+    })
+
+    it('announces halfway demo reset failure inline with role=alert and allows retry to succeed', async () => {
+        queryMocks.useUserPortfolios.mockReturnValue({ data: [], isLoading: false })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            data: { id: 'demo', totalValue: 10000, dayChange: 0, assets: [] },
+            isLoading: false,
+        })
+        queryMocks.usePrices.mockReturnValue({ data: { prices: {}, feedMeta: null }, isLoading: false })
+
+        const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+        // First call (portfolioKeys) resolves, second call (priceKeys) rejects -> halfway failure
+        queryMocks.invalidateQueries
+            .mockResolvedValueOnce(undefined)
+            .mockRejectedValueOnce(new Error('Price feed reset failed'))
+            .mockResolvedValue(undefined)
+
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey={null} />)
+
+        const trigger = (await screen.findAllByRole('button', { name: /reset demo portfolio/i }))[0]
+        fireEvent.click(trigger)
+
+        const dialog = screen.getByRole('dialog', { name: 'Reset Demo Portfolio' })
+        fireEvent.click(within(dialog).getByRole('button', { name: /Reset Demo/i }))
+
+        const errorAlert = await within(dialog).findByRole('alert')
+        expect(errorAlert).toHaveTextContent(/Demo reset failed halfway/i)
+        expect(errorAlert).toHaveFocus()
+        expect(alertSpy).not.toHaveBeenCalled()
+
+        // Retry completes the reset, closes dialog, restores focus, and announces completion
+        const retryBtn = within(dialog).getByRole('button', { name: /Retry Reset/i })
+        fireEvent.click(retryBtn)
+
+        await vi.waitFor(() => {
+            expect(screen.queryByRole('dialog', { name: 'Reset Demo Portfolio' })).not.toBeInTheDocument()
+        }, { timeout: 2000 })
+        expect(trigger).toHaveFocus()
+        expect(
+            screen.getAllByRole('status').some(el => /Demo portfolio reset to default \$10,000 balance/i.test(el.textContent || ''))
+        ).toBe(true)
+
+        alertSpy.mockRestore()
+        consoleErrorSpy.mockRestore()
     })
 })

@@ -397,7 +397,12 @@ When using the platform without connecting a wallet:
 **Visual Separation & Narrow Width Support:**
 - Clear "Demo balance" and "Demo Mode Active (Simulated)" tags explicitly distinguish simulated demo data from real wallet balances.
 - Sticky mobile action bar and headers flex and wrap gracefully down to 320px viewports and with 200% text scaling.
-- Dedicated "Reset Demo" action (`aria-label="Reset demo portfolio"`) on header and mobile bar opens a responsive confirmation modal explaining real wallet balances and on-chain portfolios are unaffected.
+- Dedicated "Reset Demo" action (`aria-label="Reset demo portfolio"`) on header and mobile bar opens an accessible confirmation dialog (`role="dialog"`, `aria-modal="true"`) explaining real wallet balances and on-chain portfolios are unaffected.
+
+**Keyboard & Screen-Reader Accessibility:**
+- Switching between Demo Mode and a connected wallet announces the transition via a polite live region (`role="status"`) and moves keyboard focus to the dashboard heading.
+- The Reset Demo confirmation dialog traps `Tab` / `Shift+Tab` focus, supports `Escape` to abandon the flow, and restores focus to the triggering button on cancel or completion.
+- If demo reset fails halfway (for example, portfolio cache resets while price refresh fails), an inline `role="alert"` message describes the partial failure, receives focus, and lets keyboard and screen-reader users either retry (`Retry Reset`) or cancel cleanly.
 
 ---
 
