@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import express from 'express'
 import request from 'supertest'
-import { PortfolioStorage } from '../services/portfolioStorage.js'
+import { PortfolioStorage, portfolioStorage } from '../services/portfolioStorage.js'
 import { portfoliosRouter } from '../api/portfolios.routes.js'
 import {
     encodePortfolioCursor,
@@ -213,6 +213,22 @@ describe('Portfolio API pagination boundary handling (SPR-2026-181)', () => {
             expect(res.body.data).toHaveProperty('nextCursor')
             expect(res.body.data).toHaveProperty('count')
             expect(res.body.data).toHaveProperty('total')
+        })
+
+        it('returns a diagnosed count change so clients can safely restart traversal', async () => {
+            const searchPage = vi.spyOn(portfolioStorage, 'searchPortfoliosPage').mockResolvedValue({
+                portfolios: [], limit: 20, cursor: 'cursor', nextCursor: null,
+                count: 0, total: 2, itemsChanged: true, changeKind: 'items_deleted',
+            })
+
+            try {
+                const res = await request(app).get('/api/portfolios?cursor=eyJjcmVhdGVkQXQiOiIyMDI2LTAxLTAxVDAwOjAwOjAwLjAwMFoiLCJpZCI6InAxIiwidG90YWwiOjN9')
+                expect(res.status).toBe(200)
+                expect(res.body.data.itemsChanged).toBe(true)
+                expect(res.body.data.changeKind).toBe('items_deleted')
+            } finally {
+                searchPage.mockRestore()
+            }
         })
 
         it('returns 400 Bad Request on invalid/malformed cursor', async () => {

@@ -1007,6 +1007,8 @@ portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
             nextCursor: nextCursor ?? null,
             count: count ?? portfolios.length,
             total,
+            itemsChanged: !!itemsChanged,
+            changeKind: changeKind ?? 'none',
         })
     } catch (error) {
         const durationSeconds = (Date.now() - startTime) / 1000
