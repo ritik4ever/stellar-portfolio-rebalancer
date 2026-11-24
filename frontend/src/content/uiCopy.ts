@@ -109,8 +109,20 @@ export const rebalanceHistoryCopy = {
         trades: number,
         dateFormatted: string,
         timeFormatted: string,
-    ) =>
-        `Event ${index} of ${total}: ${trigger}, ${status}, ${trades} trade${trades !== 1 ? 's' : ''}, ${dateFormatted} at ${timeFormatted}`,
+        sameTimestampPosition?: number,
+        sameTimestampTotal?: number,
+    ) => {
+        const base = `Event ${index} of ${total}: ${trigger}, ${status}, ${trades} trade${trades !== 1 ? 's' : ''}, ${dateFormatted} at ${timeFormatted}`
+        if (sameTimestampPosition && sameTimestampTotal && sameTimestampTotal > 1) {
+            return `${base}, same-timestamp order ${sameTimestampPosition} of ${sameTimestampTotal}`
+        }
+        return base
+    },
+    sameTimestampBoundaryTitle: 'Same-timestamp events allowed',
+    sameTimestampBoundaryDetail: (sharedEventCount: number) =>
+        `${sharedEventCount} events on this page share an exact timestamp (2+ events per timestamp are allowed). Events stay in recorded order with separate trade amounts.`,
+    sameTimestampBadge: (position: number, totalAtTimestamp: number) =>
+        `Same timestamp · #${position} of ${totalAtTimestamp}`,
     emptyTitle: 'No rebalancing history yet',
     emptyDetail: 'Portfolio rebalances will appear here when they occur',
     showing: (shown: number, total: number) =>

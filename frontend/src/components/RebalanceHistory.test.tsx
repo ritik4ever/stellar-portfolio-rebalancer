@@ -204,6 +204,94 @@ describe('RebalanceHistory', () => {
     expect(true).toBe(true);
   });
 
+  it('explains same-timestamp boundary behavior and keeps order and trade amounts aligned (SPR-2026-051)', async () => {
+    const sharedTimestamp = '2026-01-01T10:00:00.000Z'
+    useHistoryMock.mockReturnValue({
+      data: {
+        history: [
+          {
+            id: 'e-first',
+            timestamp: sharedTimestamp,
+            trigger: 'Automatic Rebalancing',
+            trades: 2,
+            gasUsed: '0.02 XLM',
+            status: 'completed',
+            portfolioId: 'p1',
+            details: { amount: 1200, fromAsset: 'XLM', toAsset: 'USDC' },
+          },
+          {
+            id: 'e-second',
+            timestamp: sharedTimestamp,
+            trigger: 'Manual Rebalance',
+            trades: 3,
+            gasUsed: '0.03 XLM',
+            status: 'completed',
+            portfolioId: 'p1',
+            details: { amount: 800, fromAsset: 'USDC', toAsset: 'BTC' },
+          },
+        ],
+        total: 2,
+      },
+      isLoading: false,
+      error: null,
+    })
+
+    render(<RebalanceHistory portfolioId="p1" />)
+
+    const boundaryNote = await screen.findByTestId('same-timestamp-boundary-note')
+    expect(boundaryNote.textContent).toMatch(/Same-timestamp events allowed/i)
+    expect(boundaryNote.textContent).toMatch(/2\+ events per timestamp are allowed/i)
+    expect(boundaryNote.textContent).toMatch(/recorded order with separate trade amounts/i)
+
+    expect(screen.getByTestId('same-timestamp-badge-e-first').textContent).toBe('Same timestamp · #1 of 2')
+    expect(screen.getByTestId('same-timestamp-badge-e-second').textContent).toBe('Same timestamp · #2 of 2')
+
+    const items = screen.getAllByRole('listitem')
+    expect(items).toHaveLength(2)
+    expect(items[0].getAttribute('aria-label')).toContain('same-timestamp order 1 of 2')
+    expect(items[1].getAttribute('aria-label')).toContain('same-timestamp order 2 of 2')
+    expect(items[0].textContent).toContain('Automatic Rebalancing')
+    expect(items[0].textContent).toContain('2 trades')
+    expect(items[0].textContent).toContain('Amount: $1,200')
+    expect(items[1].textContent).toContain('Manual Rebalance')
+    expect(items[1].textContent).toContain('3 trades')
+    expect(items[1].textContent).toContain('Amount: $800')
+  })
+
+  it('does not show same-timestamp boundary notice when all timestamps are distinct', async () => {
+    useHistoryMock.mockReturnValue({
+      data: {
+        history: [
+          {
+            id: 'e1',
+            timestamp: '2026-01-01T10:00:00.000Z',
+            trigger: 'Automatic Rebalancing',
+            trades: 2,
+            gasUsed: '0.02 XLM',
+            status: 'completed',
+            portfolioId: 'p1',
+          },
+          {
+            id: 'e2',
+            timestamp: '2026-01-01T11:00:00.000Z',
+            trigger: 'Manual Rebalance',
+            trades: 1,
+            gasUsed: '0.01 XLM',
+            status: 'completed',
+            portfolioId: 'p1',
+          },
+        ],
+        total: 2,
+      },
+      isLoading: false,
+      error: null,
+    })
+
+    render(<RebalanceHistory portfolioId="p1" />)
+    await screen.findByText('Automatic Rebalancing')
+    expect(screen.queryByTestId('same-timestamp-boundary-note')).toBeNull()
+  })
+
   describe('snapshots', () => {
     it('matches snapshot with fetched history data', async () => {
       useHistoryMock.mockReturnValue({
