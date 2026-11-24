@@ -506,4 +506,116 @@ describe('NotificationPreferences', () => {
         expect(screen.queryByRole('dialog')).toBeNull()
         expect(deleteSpy).toHaveBeenCalled()
     })
+
+    // ── Responsive layout: 320px viewport & 200% text sizing (SPR-2026-079) ──
+
+    describe('webhook settings at 320px viewport and 200% text sizing', () => {
+        const originalInnerWidth = window.innerWidth
+        const originalFontSize = document.documentElement.style.fontSize
+
+        beforeEach(() => {
+            Object.defineProperty(window, 'innerWidth', {
+                writable: true,
+                configurable: true,
+                value: 320,
+            })
+            document.documentElement.style.fontSize = '200%'
+        })
+
+        afterEach(() => {
+            Object.defineProperty(window, 'innerWidth', {
+                writable: true,
+                configurable: true,
+                value: originalInnerWidth,
+            })
+            document.documentElement.style.fontSize = originalFontSize
+        })
+
+        it('keeps webhook controls and endpoint status visible, wrapping, and operable without exposing secrets', async () => {
+            const secretUrl = 'https://receiver.example/hook?token=super-secret-value-12345'
+            const rotatedSecretUrl = 'https://receiver.example/rotated?token=another-secret-67890'
+            vi.spyOn(api, 'get').mockResolvedValue({
+                preferences: { ...webhookPreferences, webhookUrl: secretUrl },
+            } as any)
+            const post = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+
+            const { container } = renderWithQuery(<NotificationPreferences userId="user-1" />)
+
+            const webhookSwitch = await screen.findByRole('switch', { name: /webhook notifications/i })
+            const callbackInput = screen.getByLabelText('Callback URL')
+            const status = screen.getByText('Saved webhook endpoint active.')
+            const saveButton = screen.getByRole('button', { name: 'Save Preferences' })
+
+            // Controls and status remain visible and use wrapping/shrinking classes to prevent horizontal clipping
+            expect(webhookSwitch).toBeVisible()
+            expect(webhookSwitch.className).toContain('flex-shrink-0')
+            expect(webhookSwitch.parentElement?.className).toContain('flex-wrap')
+
+            expect(status).toBeVisible()
+            expect(status.className).toContain('break-words')
+
+            expect(callbackInput).toBeVisible()
+            expect(callbackInput).toHaveAttribute('type', 'password')
+            expect(callbackInput.className).toContain('w-full')
+            expect(callbackInput.className).toContain('min-w-0')
+
+            expect(saveButton).toBeVisible()
+            expect(saveButton.className).toContain('w-full')
+            expect(saveButton.className).toContain('flex-wrap')
+
+            // Secret token is never exposed in rendered text content
+            expect(container.textContent).not.toContain('super-secret-value-12345')
+            expect(container.textContent).not.toContain(secretUrl)
+
+            // Invalid URL state remains visible with wrapping error alert
+            fireEvent.change(callbackInput, { target: { value: 'invalid-url' } })
+            const alert = screen.getByRole('alert')
+            expect(alert).toBeVisible()
+            expect(alert.className).toContain('break-words')
+            expect(saveButton).toBeDisabled()
+
+            // Rotating to a valid URL keeps status visible without exposing the new secret and allows saving
+            fireEvent.change(callbackInput, { target: { value: rotatedSecretUrl } })
+            const pendingStatus = screen.getByText(/Replacement endpoint pending/)
+            expect(pendingStatus).toBeVisible()
+            expect(pendingStatus.className).toContain('break-words')
+            expect(container.textContent).not.toContain('another-secret-67890')
+            expect(saveButton).not.toBeDisabled()
+
+            fireEvent.click(saveButton)
+            expect(await screen.findByText('Saved webhook endpoint active.')).toBeVisible()
+            expect(post).toHaveBeenCalledWith(
+                ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
+                expect.objectContaining({ webhookUrl: rotatedSecretUrl })
+            )
+            expect(container.textContent).not.toContain('another-secret-67890')
+        })
+
+        it('keeps webhook delivery off state and save failure banner readable without horizontal clipping', async () => {
+            vi.spyOn(api, 'get').mockResolvedValue({
+                preferences: { ...webhookPreferences, webhookEnabled: false, webhookUrl: '' },
+            } as any)
+            vi.spyOn(api, 'post').mockRejectedValue(new Error('Network error'))
+
+            renderWithQuery(<NotificationPreferences userId="user-1" />)
+
+            const offStatus = await screen.findByText('Webhook delivery is off.')
+            expect(offStatus).toBeVisible()
+            expect(offStatus.className).toContain('break-words')
+
+            const webhookSwitch = screen.getByRole('switch', { name: /webhook notifications/i })
+            fireEvent.click(webhookSwitch)
+
+            const callbackInput = screen.getByLabelText('Callback URL')
+            fireEvent.change(callbackInput, { target: { value: 'https://receiver.example/new-hook' } })
+            fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }))
+
+            const errorAlert = await screen.findByRole('alert')
+            expect(errorAlert).toBeVisible()
+            expect(errorAlert.className).toContain('min-w-0')
+            expect(errorAlert).toHaveTextContent(
+                'Could not save webhook settings. Delivery still uses the previously saved settings.'
+            )
+        })
+    })
 })
