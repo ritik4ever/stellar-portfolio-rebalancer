@@ -150,7 +150,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             typeof (portfolioData as any)?.threshold === 'number'
                 ? (portfolioData as any).threshold
                 : 5 // sane default
-        return { name: asset.name, target: asset.value, current, threshold }
+        const rawTimestamp = (prices as Record<string, any>)?.[asset.name]?.timestamp
+        const asOfMs = typeof rawTimestamp === 'number' && Number.isFinite(rawTimestamp)
+            ? (rawTimestamp < 1e12 ? rawTimestamp * 1000 : rawTimestamp)
+            : priceBundle?.feedMeta?.resolvedAtMs
+        return { name: asset.name, target: asset.value, current, threshold, asOf: asOfMs }
     })
 
     const missingPriceAssets = allocationData.filter((asset: any) => {        const row = prices[asset.name]
