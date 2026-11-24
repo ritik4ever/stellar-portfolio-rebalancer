@@ -1426,11 +1426,12 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   </div>
                 )}
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <div className="min-w-0">
+                  <label htmlFor="max-slippage-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 break-words">
                     Max Slippage (%)
                   </label>
                   <input
+                    id="max-slippage-input"
                     type="number"
                     min="0.1"
                     max="5"
@@ -1439,9 +1440,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     onChange={(e) =>
                       setSlippageTolerance(parseFloat(e.target.value) || 1)
                     }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    className="w-full max-w-full min-w-0 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 break-words min-w-0">
                     Trades will be rejected if price moves beyond this (0.1% -
                     5%)
                   </p>
@@ -1499,33 +1500,33 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             </div>
 
             {/* Settings summary card */}
-            <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600 dark:text-gray-400">
+            <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 space-y-2 min-w-0">
+              <div className="flex flex-wrap justify-between gap-1 min-w-0">
+                <span className="text-sm text-gray-600 dark:text-gray-400 break-words">
                   Rebalance Threshold:
                 </span>
-                <span className="text-sm font-medium dark:text-gray-200">
+                <span className="text-sm font-medium dark:text-gray-200 break-words">
                   {threshold}%
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600 dark:text-gray-400">
+              <div className="flex flex-wrap justify-between gap-1 min-w-0">
+                <span className="text-sm text-gray-600 dark:text-gray-400 break-words">
                   Auto-Rebalance:
                 </span>
-                <span className="text-sm font-medium dark:text-gray-200">
+                <span className="text-sm font-medium dark:text-gray-200 break-words">
                   {autoRebalance ? 'Enabled' : 'Disabled'}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600 dark:text-gray-400">
+              <div className="flex flex-wrap justify-between gap-1 min-w-0">
+                <span className="text-sm text-gray-600 dark:text-gray-400 break-words">
                   Max Slippage:
                 </span>
-                <span className="text-sm font-medium dark:text-gray-200">
+                <span className="text-sm font-medium dark:text-gray-200 break-words">
                   {slippageTolerance}%
                 </span>
               </div>
               <div className="flex flex-wrap justify-between gap-1 min-w-0">
-                <span className="text-sm text-gray-600 dark:text-gray-400">
+                <span className="text-sm text-gray-600 dark:text-gray-400 break-words">
                   Portfolio Value:
                 </span>
                 <span className="text-sm font-medium dark:text-gray-200 break-words">
