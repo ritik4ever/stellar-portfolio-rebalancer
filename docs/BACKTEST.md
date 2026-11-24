@@ -178,6 +178,18 @@ The backtest service guarantees state consistency across execution success, fail
 | `503`  | `HISTORICAL_DATA_UNAVAILABLE` | External market price history provider is down or rate-limited. Record persisted as `failed`. |
 | `500`  | `INTERNAL_ERROR` | Unexpected simulation failure (record persisted as `failed`), or portfolio retrieval error before run initialization (no record created). |
 
+## Frontend Historical simulator
+
+The Analytics page exposes this API through `frontend/src/components/HistoricalSimulator.tsx`. Its date rules live in `frontend/src/utils/backtestWindow.ts`.
+
+- **Allowed range:** 7 to 364 inclusive UTC days. The API accepts `days: 365`, but its 365-day lookback minus the open UTC day leaves 364 complete closes.
+- **Seven-day window:** the start and end dates both count, so `2028-02-27` through `2028-03-04` is exactly 7 days. A 6-day range is blocked next to the date fields.
+- **Leap day:** Feb 29 counts as a normal day when it is in the selectable range. The result states whether it was included or skipped. Impossible dates such as `2027-02-29` are rejected.
+- **Range and source alignment:** the result shows the requested range, evaluated range, and data source. Changing the range clears the previous result.
+- **Insufficient history:** a `HISTORICAL_DATA_UNAVAILABLE` response shows an alert with retry and dismiss actions. Synthetic prices are never substituted.
+- **Keyboard and screen readers:** status changes are announced, focus moves to the result or error, and Escape or Cancel abandons a running request. Cancelling stops the page from waiting, but the server may finish its run, so an immediate retry can return `409 CONFLICT`.
+- **Narrow screens:** controls stack and wrap at 320px and with 200% text sizing without horizontal page scrolling.
+
 ## Known feed gaps and related follow-up issues
 
 The current fetch boundary excludes the open UTC day and filters the requested

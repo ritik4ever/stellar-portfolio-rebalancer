@@ -10,7 +10,7 @@ import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
 import { performanceChartCopy, DEFAULT_LOCALE } from '../content/uiCopy'
 import { formatUsdCompact, formatPercent } from '../utils/localeFormat'
 import { downloadCSV, toCSV } from '../utils/export'
-import { chartDataState, findAssetsMissingHistory, missingHistoryKey } from '../utils/performanceChartState'
+
 
 interface PerformanceChartProps {
   portfolioId: string | null
@@ -130,24 +130,12 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
         date: formatChartDate(snapshot.timestamp),
         value: Number.isFinite(value) ? Number(value.toFixed(2)) : 0,
         timestamp: snapshot.timestamp,
+        isComplete: isCompleteSnapshot(snapshot),
       }
     })
   }, [analyticsData])
 
-  const missingHistory = useMemo(() => findAssetsMissingHistory(analyticsData), [analyticsData])
-  const missingKey = missingHistoryKey(selectedRange.value, missingHistory)
-  const missingDetailsOpen = missingHistory.length > 0 && dismissedMissingKey !== missingKey
 
-  // move focus somewhere sensible once the element that had it is gone (after a retry or a dismissal)
-  useEffect(() => {
-    const target = pendingFocus.current
-    if (!target || retrying) return
-    pendingFocus.current = null
-    const el = target === 'badge' ? missingBadgeRef.current : target === 'panel' ? missingPanelRef.current : headingRef.current
-    if (el && document.activeElement !== el && (document.activeElement === document.body || !document.activeElement)) {
-      el.focus()
-    }
-  })
 
   const exportChartDataCSV = () => {
     const rows = formatChartData.map((dataPoint: { date: string; value: number; timestamp: any }) => ({
@@ -173,32 +161,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
     )
   }
 
-  const chartData = formatChartData
-  const dataState = chartDataState(chartData.length)
-  const metrics = !loading && !error ? performanceSummary?.metrics : undefined
-  const missingAssetNames = missingHistory.map((m) => m.asset).join(', ')
 
-  const statusMessage = loading
-    ? performanceChartCopy.announceLoading(selectedRange.name)
-    : error
-      ? performanceChartCopy.announceError(selectedRange.name)
-      : [
-          dataState === 'empty'
-            ? performanceChartCopy.announceEmpty(selectedRange.name)
-            : dataState === 'single'
-              ? performanceChartCopy.announceSingle(selectedRange.name)
-              : performanceChartCopy.announceSeries(selectedRange.name, chartData.length),
-          missingHistory.length > 0 ? performanceChartCopy.missingHistoryTitle(missingAssetNames) : '',
-        ].filter(Boolean).join(' ')
-
-  const chartLabel = (() => {
-    if (dataState === 'single') {
-      return `${performanceChartCopy.title}, ${selectedRange.name}: one price point, ${formatCurrency(chartData[0].value)}`
-    }
-    const first = chartData[0]
-    const last = chartData[chartData.length - 1]
-    return `${performanceChartCopy.title}, ${selectedRange.name}: ${chartData.length} data points, from ${formatCurrency(first?.value ?? 0)} to ${formatCurrency(last?.value ?? 0)}`
-  })()
 
   const CustomTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null
@@ -219,69 +182,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
     'px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed'
 
   return (
-    <div className="space-y-6 min-w-0">
-      <section
-        className="bg-white dark:bg-gray-800 rounded-xl p-4 sm:p-6 shadow-sm min-w-0"
-        aria-labelledby="performance-chart-heading"
-        data-testid="performance-chart-card"
-      >
-        {/* one polite live region announces the selected range and the chart's state */}
-        <p className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="performance-chart-status">
-          {statusMessage}
-        </p>
 
-        <div className="flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center justify-between mb-4 gap-3 min-w-0">
-          <div className="flex flex-wrap items-center gap-2 min-w-0">
-            <h2
-              id="performance-chart-heading"
-              ref={headingRef}
-              tabIndex={-1}
-              className="text-lg font-semibold text-gray-900 dark:text-white break-words focus:outline-none"
-            >
-              {performanceChartCopy.title}
-            </h2>
-            <span className="text-sm text-gray-600 dark:text-gray-400" data-testid="selected-range">
-              {performanceChartCopy.rangeLabel(selectedRange.label)}
-            </span>
-            {missingHistory.length > 0 && !missingDetailsOpen && (
-              <button
-                type="button"
-                ref={missingBadgeRef}
-                data-testid="missing-data-indicator"
-                onClick={() => {
-                  setDismissedMissingKey(null)
-                  pendingFocus.current = 'panel'
-                }}
-                aria-label={performanceChartCopy.missingHistoryBadgeLabel(missingAssetNames)}
-                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-              >
-                <AlertCircle className="w-3 h-3" aria-hidden="true" />
-                {performanceChartCopy.missingHistoryBadge(missingHistory.length)}
-              </button>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-2 min-w-0" role="group" aria-label="Time range selector" data-testid="range-controls">
-            {TIME_RANGES.map((range) => (
-              <button
-                key={range.value}
-                type="button"
-                onClick={() => setDays(range.days)}
-                aria-pressed={days === range.days}
-                aria-label={`Show ${range.name}`}
-                className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                  days === range.days
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-                }`}
-              >
-                {range.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={exportChartDataCSV}
-              disabled={loading || !!error || chartData.length === 0}
-              className={secondaryButton}
               aria-label="Export chart data as CSV"
             >
               Export
@@ -289,97 +190,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
           </div>
         </div>
 
-        {loading ? (
-          <div className="animate-pulse motion-safe:animate-pulse" aria-busy="true" data-testid="performance-chart-loading">
-            <div className="h-80 bg-gray-200 dark:bg-gray-700 rounded" />
-          </div>
-        ) : error ? (
-          <div className="flex items-center justify-center min-h-64 py-8 text-center" data-testid="performance-chart-error">
-            <div className="max-w-sm">
-              <AlertCircle className="w-12 h-12 mx-auto mb-2 text-red-500" aria-hidden="true" />
-              <p role="alert" className="text-red-600 dark:text-red-400 break-words">{performanceChartCopy.loadError}</p>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 break-words">{performanceChartCopy.loadErrorDetail}</p>
-              <button
-                type="button"
-                onClick={retryFailed}
-                disabled={retrying}
-                aria-busy={retrying}
-                className={`${secondaryButton} mt-4`}
-              >
-                {retrying ? performanceChartCopy.retrying : performanceChartCopy.retry}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <>
-            {missingDetailsOpen && (
-              <div
-                ref={missingPanelRef}
-                tabIndex={-1}
-                role="group"
-                aria-labelledby="missing-history-title"
-                data-testid="missing-history-panel"
-                className="mb-4 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-3 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3 min-w-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-              >
-                <div className="flex items-start gap-2 min-w-0 flex-1">
-                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-600" aria-hidden="true" />
-                  <div className="min-w-0">
-                    <p id="missing-history-title" className="text-sm font-medium text-amber-900 dark:text-amber-100 break-words">
-                      {performanceChartCopy.missingHistoryTitle(missingAssetNames)}
-                    </p>
-                    <ul className="text-xs text-amber-800 dark:text-amber-200 mt-1 space-y-0.5">
-                      {missingHistory.map((m) => (
-                        <li key={m.asset} className="break-words">
-                          {performanceChartCopy.missingHistoryDetail(m.asset, m.missingPoints, m.totalPoints)}
-                        </li>
-                      ))}
-                    </ul>
-                    <p className="text-xs text-amber-800 dark:text-amber-200 mt-1 break-words">{performanceChartCopy.missingHistoryHint}</p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={retryPrices} disabled={retrying} aria-busy={retrying} className={secondaryButton}>
-                    {retrying ? performanceChartCopy.retrying : performanceChartCopy.retryPrices}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDismissedMissingKey(missingKey)
-                      pendingFocus.current = 'badge'
-                    }}
-                    className={secondaryButton}
-                  >
-                    {performanceChartCopy.dismiss}
-                  </button>
-                </div>
-              </div>
-            )}
 
-            {dataState === 'empty' ? (
-              <div className="flex items-center justify-center min-h-64 py-8 text-gray-500 dark:text-gray-400" data-testid="performance-chart-empty">
-                <div className="text-center">
-                  <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400 dark:text-gray-500" aria-hidden="true" />
-                  <p>{performanceChartCopy.emptyTitle}</p>
-                  <p className="text-sm mt-1">{performanceChartCopy.emptyDetail}</p>
-                </div>
-              </div>
-            ) : (
-              <div className="min-w-0">
-                {dataState === 'single' && (
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-2 break-words" data-testid="single-point-note">
-                    {performanceChartCopy.singlePoint}
-                  </p>
-                )}
-                <div className="h-80 w-full min-w-0" role="img" aria-label={chartLabel}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData} data-testid="line-chart" margin={{ top: 5, right: 16, left: 8, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f0f0f0'} />
-                      <XAxis
-                        dataKey="date"
-                        stroke={isDark ? '#9CA3AF' : '#666'}
-                        tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }}
-                        interval="preserveStartEnd"
-                        minTickGap={16}
                       />
                       <YAxis
                         stroke={isDark ? '#9CA3AF' : '#666'}
