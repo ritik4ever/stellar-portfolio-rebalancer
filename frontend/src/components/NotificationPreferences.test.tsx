@@ -429,4 +429,181 @@ describe('NotificationPreferences', () => {
         expect(screen.queryByRole('dialog')).toBeNull()
         expect(deleteSpy).toHaveBeenCalled()
     })
+
+    // ── Edge and failure states (SPR-2026-075) ────────────────────────────
+
+    const walletUserId = 'GD5DJQDDBKGAYNEAXU562HYGOOSYAEOO6AS53PZXBOZGCP5M2OPGMZV3'
+
+    const allDisabledPreferences = {
+        emailEnabled: false,
+        emailAddress: '',
+        webhookEnabled: false,
+        webhookUrl: '',
+        telegramEnabled: false,
+        telegramChatId: '',
+        events: {
+            rebalance: true,
+            circuitBreaker: true,
+            priceMovement: true,
+            riskChange: true,
+        },
+        digestEnabled: false,
+        digestFrequency: 'realtime',
+    }
+
+    it('reflects effective channel settings when all notifications are disabled and allows saving event updates', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: { ...allDisabledPreferences } } as any)
+        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId={walletUserId} />)
+        expect(await screen.findByText('Notifications')).toBeInTheDocument()
+
+        expect(getEmailSwitch()).toHaveAttribute('aria-checked', 'false')
+        expect(screen.getByRole('switch', { name: /webhook notifications/i })).toHaveAttribute('aria-checked', 'false')
+        expect(screen.getByRole('switch', { name: /telegram notifications/i })).toHaveAttribute('aria-checked', 'false')
+        expect(
+            screen.getByText(/0 of 3 notification channels enabled\. No notifications will be delivered with this selection\./i)
+        ).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /unsubscribe from all/i })).toBeDisabled()
+        expect(screen.getByRole('button', { name: /save preferences/i })).toBeDisabled()
+        expect(screen.getByText(/save at least one notification provider/i)).toBeInTheDocument()
+
+        // Toggle an event while all channels remain disabled and save
+        fireEvent.click(screen.getByRole('switch', { name: /rebalance alerts/i }))
+        const saveBtn = screen.getByRole('button', { name: /save preferences/i })
+        expect(saveBtn).toBeEnabled()
+        fireEvent.click(saveBtn)
+
+        await waitFor(() => {
+            expect(postSpy).toHaveBeenCalledTimes(1)
+            expect(postSpy).toHaveBeenCalledWith(
+                ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
+                expect.objectContaining({
+                    userId: walletUserId,
+                    emailEnabled: false,
+                    webhookEnabled: false,
+                    telegramEnabled: false,
+                    events: expect.objectContaining({ rebalance: false }),
+                })
+            )
+        })
+        expect(await screen.findByText(/preferences saved successfully/i)).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /unsubscribe from all/i })).toBeDisabled()
+        expect(screen.getByText(/save at least one notification provider/i)).toBeInTheDocument()
+    })
+
+    it('enforces effective channel settings when exactly one channel is enabled and saved', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
+        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId={walletUserId} />)
+        expect(await screen.findByText('Notifications')).toBeInTheDocument()
+
+        const telegramSwitch = screen.getByRole('switch', { name: /telegram notifications/i })
+        fireEvent.click(telegramSwitch)
+
+        expect(telegramSwitch).toHaveAttribute('aria-checked', 'true')
+        expect(getEmailSwitch()).toHaveAttribute('aria-checked', 'false')
+        expect(screen.getByRole('switch', { name: /webhook notifications/i })).toHaveAttribute('aria-checked', 'false')
+        expect(
+            screen.getByText(/1 of 3 notification channels enabled: Telegram only\. Notifications will be delivered only through Telegram\./i)
+        ).toBeInTheDocument()
+        expect(
+            screen.getByText(/changes take effect after saving; test delivery uses saved settings until then/i)
+        ).toBeInTheDocument()
+        expect(screen.getByText(/save at least one notification provider/i)).toBeInTheDocument()
+
+        fireEvent.change(screen.getByLabelText('Telegram Chat ID'), { target: { value: '987654321' } })
+        fireEvent.click(screen.getByRole('button', { name: /save preferences/i }))
+
+        await waitFor(() => {
+            expect(postSpy).toHaveBeenCalledTimes(1)
+            expect(postSpy).toHaveBeenCalledWith(
+                ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
+                expect.objectContaining({
+                    userId: walletUserId,
+                    emailEnabled: false,
+                    webhookEnabled: false,
+                    telegramEnabled: true,
+                    telegramChatId: '987654321',
+                })
+            )
+        })
+
+        expect(await screen.findByText(/preferences saved successfully/i)).toBeInTheDocument()
+        expect(screen.queryByText(/unsaved changes/i)).toBeNull()
+        expect(screen.queryByText(/save at least one notification provider/i)).toBeNull()
+        expect(screen.getByRole('button', { name: /unsubscribe from all/i })).toBeEnabled()
+    })
+
+    it('recovers from save failure after an optimistic update and prevents duplicate submissions', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: { ...allDisabledPreferences } } as any)
+
+        let rejectFirstSave!: (reason?: unknown) => void
+        const postSpy = vi
+            .spyOn(api, 'post')
+            .mockImplementationOnce(
+                () =>
+                    new Promise((_resolve, reject) => {
+                        rejectFirstSave = reject
+                    }) as any
+            )
+            .mockResolvedValueOnce({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId={walletUserId} />)
+        expect(await screen.findByText('Notifications')).toBeInTheDocument()
+
+        // Optimistic UI update: enable Email and enter an address
+        fireEvent.click(getEmailSwitch())
+        fireEvent.change(screen.getByLabelText('Email Address'), { target: { value: 'alerts@example.com' } })
+
+        expect(getEmailSwitch()).toHaveAttribute('aria-checked', 'true')
+        expect(screen.getByText(/1 of 3 notification channels enabled: Email only/i)).toBeInTheDocument()
+        expect(screen.getByText(/unsaved changes/i)).toBeInTheDocument()
+        expect(screen.getByText(/save at least one notification provider/i)).toBeInTheDocument()
+
+        // Rapid double-click while save is in flight must not submit twice
+        const saveBtn = screen.getByRole('button', { name: /save preferences/i })
+        fireEvent.click(saveBtn)
+        expect(await screen.findByText(/saving preferences\.\.\./i)).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /saving preferences/i })).toBeDisabled()
+        expect(getEmailSwitch()).toBeDisabled()
+        fireEvent.click(screen.getByRole('button', { name: /saving preferences/i }))
+        expect(postSpy).toHaveBeenCalledTimes(1)
+
+        // Fail the in-flight save and verify error recovery preserves edits without committing saved state
+        rejectFirstSave(new Error('Preference service unavailable'))
+
+        const alert = await screen.findByRole('alert')
+        expect(alert).toHaveTextContent(/preference service unavailable/i)
+        expect(getEmailSwitch()).toHaveAttribute('aria-checked', 'true')
+        expect(screen.getByLabelText('Email Address')).toHaveValue('alerts@example.com')
+        expect(screen.getByText(/unsaved changes/i)).toBeInTheDocument()
+        expect(screen.getByText(/save at least one notification provider/i)).toBeInTheDocument()
+
+        const retrySaveBtn = screen.getByRole('button', { name: /save preferences/i })
+        expect(retrySaveBtn).toBeEnabled()
+
+        // Retry succeeds, clears error, and activates the saved channel
+        fireEvent.click(retrySaveBtn)
+
+        await waitFor(() => {
+            expect(postSpy).toHaveBeenCalledTimes(2)
+            expect(postSpy).toHaveBeenLastCalledWith(
+                ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
+                expect.objectContaining({
+                    userId: walletUserId,
+                    emailEnabled: true,
+                    emailAddress: 'alerts@example.com',
+                    webhookEnabled: false,
+                    telegramEnabled: false,
+                })
+            )
+        })
+
+        expect(await screen.findByText(/preferences saved successfully/i)).toBeInTheDocument()
+        expect(screen.queryByRole('alert')).toBeNull()
+        expect(screen.queryByText(/unsaved changes/i)).toBeNull()
+        expect(screen.queryByText(/save at least one notification provider/i)).toBeNull()
+    })
 })
