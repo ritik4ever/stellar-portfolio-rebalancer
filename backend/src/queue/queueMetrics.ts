@@ -8,6 +8,7 @@ import {
 import { isRedisAvailable } from "./connection.js";
 import { logger } from "../utils/logger.js";
 
+
 export interface QueueStats {
   waiting: number;
   active: number;
