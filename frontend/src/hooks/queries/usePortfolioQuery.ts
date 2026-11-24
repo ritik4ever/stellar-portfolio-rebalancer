@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { api, ENDPOINTS } from '../../config/api'
+import { api, ApiClientError, ENDPOINTS } from '../../config/api'
 import type { PriceFeedClientMeta } from './usePricesQuery'
 
 export const portfolioKeys = {
@@ -29,7 +29,15 @@ export type RebalancePlanSnapshot = {
     totalValue: number
     maxSlippagePercent: number
     estimatedSlippageBps: number
-    priceFeedMeta?: PriceFeedClientMeta
+    estimatedFees: { xlm: number; usd: number; tradeCount: number }
+    boundary: {
+        reasonCode: 'WITHIN_EVERY_THRESHOLD' | 'DRIFT_EXCEEDS_THRESHOLD' | 'TRADES_REQUIRED'
+        trades: { asset: string; action: 'buy' | 'sell'; amount: number }[]
+        quoteSnapshot: {
+            prices?: Record<string, { timestamp: number }>
+            feedMeta: PriceFeedClientMeta
+        }
+    }
 }
 
 export type PortfolioCostSummary = {
@@ -166,13 +174,20 @@ export const useUserPortfolios = (address: string | null) => {
     })
 }
 
+export function isUnavailablePortfolio(error: unknown): boolean {
+    return error instanceof ApiClientError && [401, 403, 404, 410].includes(error.status)
+}
+
 export const usePortfolioDetails = (id: string | null) => {
     return useQuery({
         queryKey: portfolioKeys.detail(id || ''),
-        queryFn: () => api.get<any>(ENDPOINTS.PORTFOLIO_DETAIL(id!)),
+        queryFn: async () => {
+            const { portfolio } = await api.get<{ portfolio: any }>(ENDPOINTS.PORTFOLIO_DETAIL(id!))
+            return portfolio
+        },
         enabled: !!id && id !== 'demo',
         staleTime: 30000,
-
+        retry: (failureCount, error) => !isUnavailablePortfolio(error) && failureCount < 3,
     })
 }
 
@@ -194,7 +209,7 @@ export const useRebalancePlan = (id: string | null, enabled = true) => {
         queryFn: () => api.get<RebalancePlanSnapshot>(ENDPOINTS.PORTFOLIO_REBALANCE_PLAN(id!)),
         enabled: enabled && !!id && id !== 'demo',
         staleTime: 25000,
-        placeholderData: (previous) => previous,
+        refetchOnWindowFocus: false,
     })
 }
 

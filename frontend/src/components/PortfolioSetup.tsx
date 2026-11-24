@@ -538,7 +538,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
       await createPortfolioMutation.mutateAsync({
         userAddress: publicKey || 'demo-user',
         allocations: allocationsMap,
-        threshold: strategy === 'periodic' ? (threshold ?? 5) : threshold,
+        threshold: strategy === 'periodic' && getThresholdError(threshold) ? 5 : threshold,
         slippageTolerance,
         strategy: strategy || 'threshold',
         strategyConfig: finalStrategyConfig,
@@ -1370,9 +1370,12 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       type="number"
                       min="1"
                       max="50"
+                      step="any"
+                      aria-invalid={Boolean(thresholdError)}
+                      aria-describedby={thresholdError ? 'threshold-help threshold-error' : 'threshold-help'}
                       value={Number.isNaN(threshold) ? '' : (threshold ?? 5)}
                       onChange={(e) => {
-                        const val = e.target.value === '' ? NaN : parseInt(e.target.value);
+                        const val = e.target.value === '' ? NaN : e.target.valueAsNumber;
                         setThreshold(val);
                       }}
                       className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
@@ -1384,6 +1387,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     <AnimatePresence>
                       {thresholdError && (
                         <motion.p
+                          id="threshold-error"
                           role="alert"
                           initial={{ opacity: 0, height: 0, marginTop: 0 }}
                           animate={{
@@ -1400,8 +1404,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                         </motion.p>
                       )}
                     </AnimatePresence>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      Trigger rebalance when any asset drifts by this percentage
+                    <p id="threshold-help" className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      Enter 1% to 50%, including both endpoints. Rebalance triggers when an asset's drift exceeds this threshold.
                     </p>
                   </div>
                 )}

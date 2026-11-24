@@ -51,12 +51,12 @@ describe('PerformanceChart series boundaries', () => {
     it('explains an empty series for the selected range', () => {
         mocks.usePortfolioAnalytics.mockReturnValue(idle({ data: [] }))
         render(<PerformanceChart portfolioId="p1" />)
-        fireEvent.click(screen.getByRole('button', { name: 'Show 1W' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Show 1 week' }))
 
         expect(screen.getByRole('status').textContent).toContain('1W (last 7 days): 0 price points')
         expect(screen.getByRole('status').textContent).toContain('at least 2 price points')
         expect(screen.queryByTestId('line-chart')).toBeNull()
-        expect(screen.getByRole('button', { name: 'Show 1W' }).getAttribute('aria-pressed')).toBe('true')
+        expect(screen.getByRole('button', { name: 'Show 1 week' }).getAttribute('aria-pressed')).toBe('true')
     })
 
     it('draws a visible dot for a single price point', () => {
@@ -96,11 +96,11 @@ describe('PerformanceChart series boundaries', () => {
     it('keeps the range selector available while loading and after an error', () => {
         mocks.usePortfolioAnalytics.mockReturnValue({ data: undefined, isLoading: true, error: null })
         const { rerender } = render(<PerformanceChart portfolioId="p1" />)
-        expect(screen.getByRole('button', { name: 'Show 1M' })).toBeTruthy()
+        expect(screen.getByRole('button', { name: 'Show 1 month' })).toBeTruthy()
 
         mocks.usePortfolioAnalytics.mockReturnValue({ data: undefined, isLoading: false, error: new Error('down') })
         rerender(<PerformanceChart portfolioId="p1" />)
         expect(screen.getByRole('alert')).toBeTruthy()
-        expect(screen.getByRole('button', { name: 'Show 1M' })).toBeTruthy()
+        expect(screen.getByRole('button', { name: 'Show 1 month' })).toBeTruthy()
     })
 })

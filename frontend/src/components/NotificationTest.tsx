@@ -312,7 +312,7 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                                                                     <span className="font-medium">
                                                                         Webhook:
                                                                     </span>{' '}
-                                                                    {result.sentTo.webhook}
+                                                                    Saved webhook endpoint
                                                                 </p>
                                                             )}
                                                             {result.sentTo.telegram && (
