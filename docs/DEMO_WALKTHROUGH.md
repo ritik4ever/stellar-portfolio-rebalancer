@@ -144,9 +144,15 @@ This visual guide walks you through the main features of the Stellar Portfolio R
 
 **Validation Rules:**
 - Allocations must sum to 100%
-- Threshold must be between 1% and 50%
+- The drift threshold must be from 1% to 50% inclusive.
 - At least 2 assets required
 - Maximum 10 assets allowed
+
+**Dashboard and settings:**
+- Settings displays the saved threshold during editing. Empty and out-of-range changes cannot be saved. Imported changes follow the same bounds and take effect after saving.
+- When the selected portfolio is deleted or inaccessible, the dashboard focuses the unavailable heading and offers to reload the portfolio list or return to the landing page. If balance details fail, the dashboard announces the failure and leaves target allocations available with a balance retry.
+- Review rebalance shows all planned trades in a keyboard-scrollable list, the fee for the complete plan, and the age of its oldest required quote. An empty plan has no confirmation action. During submission, the confirm button reflects an `aria-busy` "Submitting rebalance…" state with a polite live status announcement and single-flight guards against repeated clicks. On wallet rejection or lost network acknowledgement, keyboard focus moves directly to the alert message, review acknowledgement resets to prevent accidental execution, and users can re-acknowledge to complete or cancel/escape to abandon.
+- Under Dashboard → Notifications, webhook delivery requires a complete callback URL beginning with `http://` or `https://`. Replace the masked URL and save to rotate it. Delivery and notification tests keep using the saved settings until the save succeeds.
 
 **Screenshot Locations:**
 - `docs/screenshots/04a-create-portfolio-assets.png`
@@ -238,8 +244,8 @@ Buy 50 USDC worth of BTC (increase from 23% to 25%)
 ### Confirmation Modal
 - Review all trades
 - Estimated completion time
-- "Confirm Rebalance" button
-- "Cancel" option
+- "Confirm Rebalance" button (transitions to "Submitting rebalance…" with `aria-busy` and live progress announcements; single-flight guards against repeated clicks)
+- "Cancel" option (or Escape key to abandon flow; failure alerts receive keyboard focus and reset acknowledgement before retry)
 
 **User Actions:**
 1. Review the rebalance plan carefully
@@ -299,6 +305,11 @@ Buy 50 USDC worth of BTC (increase from 23% to 25%)
 - Analyze rebalance effectiveness
 - Identify patterns and optimize strategy
 
+**If history fails to load:**
+- The history section shows a "Failed to load rebalance history" alert with **Retry** and **Dismiss** buttons. The rest of the dashboard keeps working.
+- Retry reloads only the history. The button shows "Retrying…" and is disabled while the request runs, so repeated clicks do not send duplicate requests. If a retry fails, the error stays visible and you can retry again.
+- The page you were on is kept after a successful retry. No rebalance is started or repeated by retrying.
+
 **Screenshot Location:** `docs/screenshots/07-rebalance-history.png`
 
 ---
@@ -353,10 +364,11 @@ Buy 50 USDC worth of BTC (increase from 23% to 25%)
 - Preference saved to browser localStorage
 - Accessible via theme switcher in navigation
 
-### Mobile Responsive
-- Fully responsive design works on all screen sizes
-- Touch-optimized controls for mobile devices
-- Simplified navigation on smaller screens
+### Mobile Responsive & Zoom Support
+- Fully responsive design operable down to narrow viewports (320px) and with 200% text zoom without horizontal clipping or scroll overflow
+- Flexible wrapping controls and adaptive action bars across mobile devices
+- Touch-optimized controls with distinct tap targets and accessible names
+- Persistent separation between simulated demo states and live wallet balances
 
 ### Accessibility
 - WCAG 2.1 AA compliant
@@ -371,7 +383,7 @@ Buy 50 USDC worth of BTC (increase from 23% to 25%)
 When using the platform without connecting a wallet:
 
 **What's Simulated:**
-- $10,000 starting portfolio value
+- $10,000 starting portfolio value (`Simulated $10,000`)
 - Real-time price data (actual market prices)
 - Rebalance calculations and plans
 - Transaction execution (no real blockchain transactions)
@@ -384,12 +396,13 @@ When using the platform without connecting a wallet:
 
 **Limitations:**
 - Cannot execute real blockchain transactions
-- Portfolio data not persisted (resets on page refresh)
+- Portfolio data not persisted (resets on page refresh or via Reset Demo button)
 - Some features disabled (e.g., real wallet integration)
 
-**Banner Indicator:**
-- "Demo Mode" banner visible at top of page
-- "Connect Wallet for Real Trading" call-to-action
+**Visual Separation & Narrow Width Support:**
+- Clear "Demo balance" and "Demo Mode Active (Simulated)" tags explicitly distinguish simulated demo data from real wallet balances.
+- Sticky mobile action bar and headers flex and wrap gracefully down to 320px viewports and with 200% text scaling.
+- Dedicated "Reset Demo" action (`aria-label="Reset demo portfolio"`) on header and mobile bar opens a responsive confirmation modal explaining real wallet balances and on-chain portfolios are unaffected.
 
 ---
 

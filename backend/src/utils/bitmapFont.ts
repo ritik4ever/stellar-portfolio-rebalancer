@@ -1,15 +1,3 @@
-/**
- * Minimal 5x7 bitmap font used by the social-share card renderer.
- *
- * Social crawlers only accept raster images for `og:image`, and rasterising SVG
- * needs a native dependency (sharp / resvg / canvas) that the Alpine-based
- * production image cannot install. Drawing glyphs from a bitmap table keeps the
- * share card dependency-free: `backend/src/utils/png.ts` scales the rows by
- * whole pixels, so the output stays crisp instead of blurred.
- *
- * Each glyph is seven rows of five columns. A row is stored as a binary literal
- * where the leftmost column is the most significant bit.
- */
 
 export const GLYPH_WIDTH = 5
 export const GLYPH_HEIGHT = 7

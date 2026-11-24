@@ -127,7 +127,15 @@ describe('metrics endpoint protection', () => {
             if (config.nodeEnv === 'development' || config.nodeEnv === 'test') return true
             const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip === 'localhost'
             if (isLocal) return true
-            return config.metricsAllowlist.some((entry) => ip.includes(entry))
+            return config.metricsAllowlist.some((entry) => {
+                if (entry.includes('/')) {
+                    const [net, mask] = entry.split('/')
+                    if (mask === '8') return ip.startsWith(net.split('.')[0] + '.')
+                    if (mask === '16') return ip.startsWith(net.split('.').slice(0, 2).join('.') + '.')
+                    if (mask === '24') return ip.startsWith(net.split('.').slice(0, 3).join('.') + '.')
+                }
+                return ip.includes(entry)
+            })
         }
 
         expect(isAllowed('10.0.0.1')).toBe(true)

@@ -56,6 +56,35 @@ describe("CircuitBreakers", () => {
       expect(result.reason).toBeUndefined();
     });
 
+    it("allows a move exactly at the configured threshold and reports the boundary observation when exceeded", async () => {
+      vi.stubEnv("CIRCUIT_BREAKER_VOLATILITY_THRESHOLD_PCT", "15");
+      const atBoundary = await CircuitBreakers.checkMarketConditions({
+        BTC: { change: 15, timestamp: Date.now() / 1000 },
+      });
+      expect(atBoundary).toMatchObject({
+        safe: true,
+        outcome: "allowed",
+        reasonCode: "MARKET_OK",
+        context: { asset: "BTC", observedChangePct: 15, thresholdPct: 15, comparison: ">" },
+      });
+
+      const beyondBoundary = await CircuitBreakers.checkMarketConditions({
+        BTC: { change: 15.01, timestamp: Date.now() / 1000 },
+      });
+      expect(beyondBoundary).toMatchObject({
+        safe: false,
+        outcome: "delayed",
+        reasonCode: "HIGH_VOLATILITY",
+        context: {
+          asset: "BTC",
+          observedChangePct: 15.01,
+          thresholdPct: 15,
+          comparison: ">",
+        },
+      });
+      vi.unstubAllEnvs();
+    });
+
     it("triggers for negative volatility exceeding threshold", async () => {
       const prices = {
         ETH: { change: -18.2, timestamp: Date.now() / 1000 },

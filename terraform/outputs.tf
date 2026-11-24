@@ -1,39 +1,24 @@
-resource "aws_sns_topic" "budget_alerts" {
-  tags = {
-    CostCenter = "platform"
-  }
+output "rollout_outcome" {
+  description = "Result signal for the Terraform rollout: success, transient_delay, or blocked."
+  value       = local.rollout_result.status
 }
 
-resource "aws_sns_topic_subscription" "email" {
-  topic_arn = aws_sns_topic.budget_alerts.arn
-  protocol = "email"
-  endpoint = "foo@example.com"
+output "rollout_affected_service" {
+  description = "Service affected by a partial apply, if any. Null on a clean success."
+  value       = local.rollout_result.service
 }
 
-resource "aws_budgets_budget" "monthly" {
-  budget_type = "COST"
-  limit_amount = "1000"
-  limit_unit = "USD"
-  time_unit = "MONTHLY"
-  time_period_start = "2024-01-01"
-
-  notification {
-    comparison_operator = "GREATER_THAN"
-    threshold = 80
-    threshold_type = "PERCENTAGE"
-    notification_type = "ACTUAL"
-    subscriber_sns_topic_arns = [aws_sns_topic.budget_alerts.arn]
-  }
-
-  tags = {
-    CostCenter = "platform"
-  }
+output "rollout_owner_action" {
+  description = "Owner action required to resolve a transient delay or blocked rollout. Null on a clean success."
+  value       = local.rollout_result.owner_action
 }
 
 output "budget_name" {
-  value = aws_budgets_budget.monthly.id
+  description = "Name of the monthly budget resource."
+  value       = aws_budgets_budget.monthly.id
 }
 
 output "budget_sns_topic_arn" {
-  value = aws_sns_topic.budget_alerts.arn
+  description = "ARN of the SNS topic receiving budget alerts."
+  value       = aws_sns_topic.budget_alerts.arn
 }
