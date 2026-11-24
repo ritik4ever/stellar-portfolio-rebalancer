@@ -221,24 +221,64 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         return () => clearTimeout(timer)
     }, [rebalanceNotice])
 
+    type DemoResetStep = 'portfolios' | 'prices'
     const [showDemoResetConfirm, setShowDemoResetConfirm] = useState(false)
     const [resettingDemo, setResettingDemo] = useState(false)
+    const [demoResetError, setDemoResetError] = useState<{
+        failedStep: DemoResetStep
+        completedSteps: DemoResetStep[]
+        message: string
+    } | null>(null)
+    const demoResetInFlightRef = React.useRef(false)
+
+    const closeDemoResetModal = useCallback(() => {
+        if (resettingDemo) return
+        setShowDemoResetConfirm(false)
+        setDemoResetError(null)
+    }, [resettingDemo])
 
     const resetDemoPortfolio = useCallback(async () => {
-        if (publicKey) return
+        if (publicKey || demoResetInFlightRef.current) return
+        demoResetInFlightRef.current = true
         setResettingDemo(true)
+
+        const completed: DemoResetStep[] = demoResetError ? [...demoResetError.completedSteps] : []
+        const steps: { id: DemoResetStep; run: () => Promise<void> }[] = [
+            {
+                id: 'portfolios',
+                run: () => queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
+            },
+            {
+                id: 'prices',
+                run: () => queryClient.invalidateQueries({ queryKey: priceKeys.all }),
+            },
+        ]
+
         try {
-            await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
-            await queryClient.invalidateQueries({ queryKey: priceKeys.all })
+            for (const step of steps) {
+                if (completed.includes(step.id)) continue
+                try {
+                    await step.run()
+                    completed.push(step.id)
+                } catch (error) {
+                    console.error(`Demo reset failed at step "${step.id}":`, error)
+                    const detail = error instanceof Error && error.message ? error.message : 'Unexpected error'
+                    setDemoResetError({
+                        failedStep: step.id,
+                        completedSteps: [...completed],
+                        message: detail,
+                    })
+                    return
+                }
+            }
+            setDemoResetError(null)
             await new Promise(resolve => setTimeout(resolve, 500))
             setShowDemoResetConfirm(false)
-        } catch (error) {
-            console.error('Demo reset failed:', error)
-            alert('Failed to reset demo portfolio. Please refresh the page.')
         } finally {
+            demoResetInFlightRef.current = false
             setResettingDemo(false)
         }
-    }, [publicKey, queryClient])
+    }, [demoResetError, publicKey, queryClient])
 
     const disconnectWallet = async () => {
         if (publicKey) {
@@ -749,13 +789,35 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         <p className="text-gray-600 dark:text-gray-400 text-sm mb-6 break-words">
                             This will reset the demo portfolio to its default state with $10,000 total value and 40% XLM / 60% USDC allocation. Real wallet balances and on-chain portfolios are not affected.
                         </p>
+                        {demoResetError && (
+                            <div
+                                role="alert"
+                                className="mb-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40 p-3 text-sm text-red-800 dark:text-red-200"
+                            >
+                                <p className="font-medium">
+                                    {demoResetError.completedSteps.length > 0
+                                        ? 'Demo reset stopped halfway while refreshing demo price data.'
+                                        : 'Demo reset failed while resetting demo portfolio data.'}
+                                </p>
+                                <p className="mt-1 text-xs text-red-700 dark:text-red-300">
+                                    {demoResetError.completedSteps.length > 0
+                                        ? 'Demo portfolio data was already reset and will not be duplicated if you retry. You can retry the remaining step or cancel without reloading the page.'
+                                        : 'You can retry resetting or cancel without reloading the page.'}
+                                </p>
+                                <p className="mt-1 text-xs text-red-600 dark:text-red-400 break-words">
+                                    Details: {demoResetError.message}
+                                </p>
+                            </div>
+                        )}
                         <div className="flex flex-wrap justify-end gap-2 sm:gap-3">
-                            <button type="button" onClick={() => setShowDemoResetConfirm(false)} disabled={resettingDemo}
+                            <button type="button" onClick={closeDemoResetModal} disabled={resettingDemo}
                                 className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 text-sm">Cancel</button>
                             <button type="button" onClick={resetDemoPortfolio} disabled={resettingDemo}
                                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2 text-sm">
                                 {resettingDemo ? (
                                     <><RefreshCw className="w-4 h-4 animate-spin flex-shrink-0" />Resetting...</>
+                                ) : demoResetError ? (
+                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" />{demoResetError.completedSteps.length > 0 ? 'Retry Remaining Steps' : 'Retry Reset'}</>
                                 ) : (
                                     <><RefreshCw className="w-4 h-4 flex-shrink-0" />Reset Demo</>
                                 )}
