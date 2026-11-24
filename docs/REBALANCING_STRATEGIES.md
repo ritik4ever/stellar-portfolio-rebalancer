@@ -23,6 +23,7 @@ The frontend **Review rebalance** dialog uses the same plan as the dry-run endpo
 - Drift up to and including `±thresholdPercent` is allowed. An allocation exactly at the threshold is still inside the boundary; only drift greater than the threshold is traded.
 - When every asset is inside the boundary, the dialog reports **0 planned trades — read-only preview**, shows no trade list, charges no network fee, and offers only **Close**. There is nothing to confirm or submit.
 - If drift exceeds the threshold but no executable trade is produced (for example, the trade is below the minimum value), the dialog uses the generic “no executable trades” message instead. It does not claim the portfolio is inside the threshold.
+- If the dry-run simulation request times out, the dialog surfaces an actionable timeout alert with no preview result or confirm button, disables automatic timeout retries, and lets the user **Retry simulation** (guarded against duplicate requests) or **Cancel** without losing unrelated edits.
 
 The threshold explanation is exposed as a live status and is linked with `aria-describedby` from the Close control, so keyboard and screen-reader users get the same boundary information as the visible text.
 

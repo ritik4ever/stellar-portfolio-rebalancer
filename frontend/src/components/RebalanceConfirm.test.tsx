@@ -23,6 +23,7 @@ vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
 }))
 
 import RebalanceConfirm from './RebalanceConfirm'
+import { ApiClientError } from '../config/api'
 
 const NOW = new Date('2026-04-01T12:00:00.000Z').getTime()
 
@@ -290,5 +291,201 @@ describe('RebalanceConfirm — duplicate submission guard', () => {
     })
 
     expect(mockMutateAsync).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('RebalanceConfirm — narrow widths (320px) and 200% text sizing', () => {
+  let originalInnerWidth: number
+  let originalFontSize: string
+
+  beforeEach(() => {
+    originalInnerWidth = window.innerWidth
+    originalFontSize = document.documentElement.style.fontSize
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 320,
+    })
+    document.documentElement.style.fontSize = '200%'
+  })
+
+  afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: originalInnerWidth,
+    })
+    document.documentElement.style.fontSize = originalFontSize
+  })
+
+  it('keeps predicted trade list, acknowledgement, and controls operable without horizontal clipping', async () => {
+    mockUseRebalancePlan.mockReturnValue(
+      planResult(
+        makePlan({
+          boundary: {
+            reasonCode: 'TRADES_REQUIRED',
+            trades: [
+              { asset: 'SUPERLONGASSETIDENTIFIER', action: 'buy' as const, amount: 1234567.8901234 },
+              { asset: 'USDC', action: 'sell' as const, amount: 50000 },
+            ],
+            quoteSnapshot: {
+              prices: {
+                SUPERLONGASSETIDENTIFIER: { timestamp: NOW / 1000 },
+                USDC: { timestamp: NOW / 1000 - 60 },
+              },
+              feedMeta: { degraded: false, staleOrLimited: false },
+            },
+          },
+        }),
+      ),
+    )
+
+    renderReview()
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.className).toContain('overflow-x-hidden')
+    expect(dialog.className).toContain('overflow-y-auto')
+    expect(dialog.className).toContain('min-w-0')
+
+    const tradeRegion = screen.getByRole('region', { name: /2 planned trades/i })
+    expect(tradeRegion.className).toContain('overflow-x-hidden')
+    expect(tradeRegion.className).toContain('overflow-y-auto')
+    expect(tradeRegion.className).toContain('min-w-0')
+    expect(tradeRegion).toHaveTextContent(/SUPERLONGASSETIDENTIFIER/)
+
+    const checkbox = screen.getByRole('checkbox', { name: /i reviewed the planned trades/i })
+    expect(checkbox.className).toContain('shrink-0')
+    await userEvent.click(checkbox)
+
+    const confirm = screen.getByRole('button', { name: /confirm rebalance/i })
+    const cancel = screen.getByRole('button', { name: /cancel/i })
+    expect(confirm).toBeEnabled()
+    expect(confirm.className).toContain('max-w-full')
+    expect(confirm.className).toContain('break-words')
+    expect(cancel.className).toContain('max-w-full')
+    expect(cancel.parentElement?.className).toContain('flex-wrap')
+  })
+
+  it('keeps read-only zero-trade status and close control visible and operable without horizontal clipping', async () => {
+    const onClose = vi.fn()
+    mockUseRebalancePlan.mockReturnValue(
+      planResult(
+        makePlan({
+          boundary: {
+            reasonCode: 'WITHIN_EVERY_THRESHOLD',
+            thresholdPercent: 5,
+            maxDriftPercent: 5,
+            trades: [],
+            quoteSnapshot: {
+              prices: {},
+              feedMeta: { degraded: false, staleOrLimited: false },
+            },
+          },
+        }),
+      ),
+    )
+
+    renderReview({ onClose })
+
+    const status = screen.getByRole('status')
+    expect(status).toHaveTextContent(/0 planned trades — read-only preview/i)
+    expect(status.className).toContain('overflow-x-hidden')
+    expect(status.className).toContain('overflow-y-auto')
+    expect(status.className).toContain('break-words')
+    expect(status.className).toContain('min-w-0')
+
+    const closeButton = screen.getByRole('button', { name: /close/i })
+    expect(closeButton).toBeEnabled()
+    expect(closeButton.className).toContain('max-w-full')
+    expect(screen.queryByRole('button', { name: /confirm rebalance/i })).not.toBeInTheDocument()
+
+    await userEvent.click(closeButton)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('RebalanceConfirm — dry-run simulation timeout recovery', () => {
+  it('shows an actionable timeout recovery path and recovers cleanly on retry without duplicating requests', async () => {
+    const onClose = vi.fn()
+    const onSuccess = vi.fn()
+    let resolveRefetch: (value: unknown) => void = () => {}
+    mockRefetch = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRefetch = resolve
+        }),
+    )
+
+    mockUseRebalancePlan.mockReturnValue(
+      planResult(undefined, {
+        isError: true,
+        error: new ApiClientError('Request timeout after 15000ms', 408, 'REQUEST_TIMEOUT'),
+      }),
+    )
+
+    const { rerender } = renderReview({ onClose, onSuccess })
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/simulation request timed out/i)
+    expect(alert).toHaveTextContent(/no preview result is shown/i)
+    expect(screen.queryByRole('button', { name: /confirm rebalance/i })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /^cancel$/i })).toHaveLength(1)
+
+    const retry = screen.getByRole('button', { name: /retry simulation/i })
+    fireEvent.click(retry)
+    fireEvent.click(retry)
+
+    expect(mockRefetch).toHaveBeenCalledTimes(1)
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(/retrying dry-run simulation/i)
+    })
+
+    await act(async () => {
+      resolveRefetch({ data: makePlan() })
+    })
+
+    mockUseRebalancePlan.mockReturnValue(planResult(makePlan()))
+    rerender(
+      <RebalanceConfirm portfolioId="p1" open onClose={onClose} onSuccess={onSuccess} />,
+    )
+
+    expect(screen.queryByText(/simulation request timed out/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/Buy 100/)).toHaveTextContent(/XLM/)
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /confirm rebalance/i }))
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledTimes(1)
+      expect(onSuccess).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('recognizes gateway timeout errors and lets the user cancel without submitting or losing unrelated edits', async () => {
+    const onClose = vi.fn()
+    mockUseRebalancePlan.mockReturnValue(
+      planResult(undefined, {
+        isError: true,
+        error: new ApiClientError('Gateway error', 504, 'GATEWAY_TIMEOUT'),
+      }),
+    )
+
+    render(
+      <div>
+        <label htmlFor="unrelated-note">Portfolio note</label>
+        <input id="unrelated-note" defaultValue="Keep 60/40 target" />
+        <RebalanceConfirm portfolioId="p1" open onClose={onClose} onSuccess={vi.fn()} />
+      </div>,
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/simulation request timed out/i)
+
+    await userEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(mockMutateAsync).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Portfolio note')).toHaveValue('Keep 60/40 target')
   })
 })

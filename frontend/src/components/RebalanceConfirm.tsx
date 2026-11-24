@@ -1,8 +1,23 @@
 import { useEffect, useState, useRef } from 'react'
+import { ApiClientError } from '../config/api'
+import { dashboardCopy } from '../content/uiCopy'
 import { usePortfolioDetails, useRebalancePlan } from '../hooks/queries/usePortfolioQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 import { Button } from './ui/Button'
 import { Modal } from './ui/Modal'
+
+function isSimulationTimeout(error: unknown): boolean {
+    if (!error) return false
+    if (error instanceof ApiClientError) {
+        if (error.status === 408 || error.status === 504) return true
+        if (/timeout|timed_out|etimedout/i.test(error.code)) return true
+    }
+    if (error instanceof Error) {
+        if (error.name === 'AbortError' || error.name === 'TimeoutError') return true
+        if (/timeout|timed out|aborted/i.test(error.message)) return true
+    }
+    return /timeout|timed out/i.test(String(error))
+}
 
 function readSlippageTolerance(details: any): number | null {
     if (!details) return null
@@ -39,8 +54,11 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
     const [executionError, setExecutionError] = useState<string | null>(null)
     const [statusAnnouncement, setStatusAnnouncement] = useState<string | null>(null)
     const [isSubmitting, setIsSubmitting] = useState(false)
+    const [isRetrying, setIsRetrying] = useState(false)
     const submittingRef = useRef(false)
+    const retryingRef = useRef(false)
     const errorAlertRef = useRef<HTMLDivElement>(null)
+    const planErrorAlertRef = useRef<HTMLDivElement>(null)
     const boundaryStatusRef = useRef<HTMLDivElement>(null)
     const [now, setNow] = useState(Date.now)
 
@@ -49,6 +67,12 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
             errorAlertRef.current?.focus()
         }
     }, [executionError])
+
+    useEffect(() => {
+        if (isError) {
+            planErrorAlertRef.current?.focus()
+        }
+    }, [isError, planError])
 
     useEffect(() => {
         if (plan && !isError && (plan.boundary?.trades ?? []).length === 0) {
@@ -96,19 +120,23 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
         ? `${boundary.maxDriftPercent.toFixed(2)} percentage points`
         : null
     const noTradeStatusId = plan && !hasTrades && !isError ? 'dry-run-boundary-status' : undefined
-    const isTimeout = isError && /timeout|timed out/i.test(String((planError as Error | undefined)?.message ?? planError ?? ''))
-    const timeoutCopy = isTimeout
-        ? 'The simulation request timed out. Retry loading the plan, or cancel to abandon.'
-        : 'The rebalance plan is unavailable.'
+    const isTimeout = isError && isSimulationTimeout(planError)
+    const retryingPlan = isFetching || isRetrying
 
     const refreshPlan = async () => {
-        if (isFetching || inFlight) return
+        if (retryingRef.current || isFetching || inFlight) return
+        retryingRef.current = true
+        setIsRetrying(true)
         setExecutionError(null)
         setReviewedPlan(undefined)
-        setStatusAnnouncement('Refreshing the rebalance plan…')
+        setStatusAnnouncement(
+            isTimeout ? 'Retrying dry-run simulation…' : 'Refreshing the rebalance plan…',
+        )
         try {
             await refetch()
         } finally {
+            retryingRef.current = false
+            setIsRetrying(false)
             setStatusAnnouncement(null)
         }
     }
@@ -144,7 +172,7 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
             title="Review rebalance"
             onClose={() => { if (!inFlight) onClose() }}
             footer={(
-                <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2">
                     <Button variant="secondary" onClick={onClose} disabled={inFlight} aria-describedby={noTradeStatusId}>
                         {plan && !hasTrades ? 'Close' : 'Cancel'}
                     </Button>
@@ -169,16 +197,35 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                 </div>
             )}
             {isLoading ? (
-                <p role="status">Loading rebalance plan…</p>
+                <p role="status" className="min-w-0 break-words">Loading rebalance plan…</p>
             ) : isError || !plan || !fees ? (
-                <div className="min-w-0 space-y-2 break-words">
-                    <p role="alert">{timeoutCopy}</p>
+                <div
+                    ref={planErrorAlertRef}
+                    role="alert"
+                    tabIndex={-1}
+                    className="min-w-0 space-y-2 break-words outline-none focus-visible:ring-2"
+                >
+                    {isTimeout ? (
+                        <>
+                            <p className="font-semibold">{dashboardCopy.simulationTimeoutTitle}</p>
+                            <p>{dashboardCopy.simulationTimeoutDetail}</p>
+                        </>
+                    ) : (
+                        <p>The rebalance plan is unavailable.</p>
+                    )}
                     <div className="flex min-w-0 flex-wrap gap-2">
-                        <Button variant="secondary" onClick={() => void refetch()} disabled={isFetching}>
-                            Retry loading plan
-                        </Button>
-                        <Button variant="secondary" onClick={onClose}>
-                            Cancel
+                        <Button
+                            variant="secondary"
+                            onClick={() => void refreshPlan()}
+                            disabled={retryingPlan || inFlight}
+                            loading={retryingPlan}
+                            aria-busy={retryingPlan}
+                        >
+                            {retryingPlan
+                                ? 'Retrying…'
+                                : isTimeout
+                                    ? dashboardCopy.retrySimulation
+                                    : 'Retry loading plan'}
                         </Button>
                     </div>
                 </div>
@@ -190,7 +237,7 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                     aria-live="polite"
                     aria-atomic="true"
                     tabIndex={-1}
-                    className="min-w-0 space-y-2 break-words outline-none focus-visible:ring-2"
+                    className="max-h-[65vh] min-w-0 space-y-2 overflow-x-hidden overflow-y-auto break-words outline-none focus-visible:ring-2"
                 >
                     <p className="font-semibold">0 planned trades — read-only preview</p>
                     {withinThreshold && thresholdCopy ? (
@@ -205,16 +252,16 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                     )}
                 </div>
             ) : (
-                <div className="max-h-[65vh] min-w-0 space-y-3 overflow-y-auto break-words text-sm">
+                <div className="max-h-[65vh] min-w-0 space-y-3 overflow-x-hidden overflow-y-auto break-words text-sm">
                     <h3 id="quoted-trades" className="font-semibold">
                         {trades.length} planned {trades.length === 1 ? 'trade' : 'trades'}
                     </h3>
                     {trades.length > 4 && <p>Scroll the trade list to review all planned trades.</p>}
                     <div role="region" tabIndex={0} aria-labelledby="quoted-trades"
-                        className="max-h-36 min-w-0 overflow-y-auto rounded bg-gray-50 p-2 focus-visible:ring-2 dark:bg-gray-900">
-                        <ol className="list-decimal space-y-1 pl-6 break-words">
+                        className="max-h-36 min-w-0 overflow-x-hidden overflow-y-auto rounded bg-gray-50 p-2 focus-visible:ring-2 dark:bg-gray-900">
+                        <ol className="list-decimal space-y-1 pl-6 break-words [overflow-wrap:anywhere]">
                             {trades.map(trade => (
-                                <li key={trade.asset} className="min-w-0 break-words">
+                                <li key={trade.asset} className="min-w-0 break-words [overflow-wrap:anywhere]">
                                     {trade.action === 'buy' ? 'Buy' : 'Sell'} {trade.amount.toLocaleString(undefined, { maximumFractionDigits: 7 })} {trade.asset}
                                 </li>
                             ))}
@@ -246,7 +293,7 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                     <p className="min-w-0 break-words">Maximum slippage: {plan.maxSlippagePercent}%</p>
                     <p className="min-w-0 break-words">The execution price and fees may change. Executed trades cannot be reversed from this app.</p>
                     <label className="flex min-w-0 items-start gap-2 break-words">
-                        <input type="checkbox" checked={confirmed} disabled={isFetching || inFlight}
+                        <input type="checkbox" className="mt-1 shrink-0" checked={confirmed} disabled={isFetching || inFlight}
                             aria-label="I reviewed the planned trades, fees, and prices."
                             onChange={event => setReviewedPlan(event.target.checked ? plan : undefined)} />
                         <span className="min-w-0 break-words">I reviewed the planned trades, fees, and prices.</span>
