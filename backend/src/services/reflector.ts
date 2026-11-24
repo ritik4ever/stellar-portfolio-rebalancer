@@ -435,6 +435,7 @@ export class ReflectorService {
         ageMs?: number
         quoteAgeSeconds?: number
         decimals?: number
+        units?: string
     }): void {
         const payload = { source: 'reflector' as const, ...fields }
         if (fields.outcome === 'success') {
@@ -485,9 +486,9 @@ export class ReflectorService {
 
             const decimals = row.decimals ?? 0
             const context = { source: 'reflector', asset, decimals: Number.isInteger(decimals) ? decimals : undefined }
-            let price: number
+            let normalized: ReturnType<typeof normalizeScaledQuote>
             try {
-                price = normalizeScaledQuote(row.price, decimals).price
+                normalized = normalizeScaledQuote(row.price, decimals)
             } catch (error) {
                 logger.warn('[ORACLE] quote_precision', {
                     ...context, outcome: 'blocked', reason: error instanceof RangeError ? 'integer_overflow' : 'invalid_quote'
@@ -501,6 +502,7 @@ export class ReflectorService {
                 })
                 return
             }
+            const price = normalized.price
 
             if (this.isPriceStale(row.timestamp)) {
                 staleCount += 1
@@ -511,7 +513,9 @@ export class ReflectorService {
                     outcome: 'delayed',
                     reasonCode: 'STALE_QUOTE',
                     observedLedger: row.ledger,
-                    quoteAgeSeconds: this.quoteAgeSeconds(row.timestamp)
+                    quoteAgeSeconds: this.quoteAgeSeconds(row.timestamp),
+                    decimals: normalized.decimals,
+                    units: normalized.units
                 })
                 return
             }
@@ -558,9 +562,14 @@ export class ReflectorService {
                 observedLedger: decision.observedLedger,
                 acceptedLedger: decision.acceptedLedger,
                 acceptedPrice: decision.acceptedPrice,
-                ageMs: decision.ageMs
+                ageMs: decision.ageMs,
+                decimals: normalized.decimals,
+                units: normalized.units
             })
-            logger.info('[ORACLE] quote_precision', { ...context, outcome: 'success', reason: 'normalized' })
+            logger.info('[ORACLE] quote_precision', {
+                ...context, outcome: 'success', reason: 'normalized',
+                units: normalized.units, decimals: normalized.decimals
+            })
 
             out[asset] = {
                 price,
@@ -599,26 +608,39 @@ export class ReflectorService {
     private async getFreshPrices(
         assets: string[], coinIds: Record<string, string>, staleReflectorPrices: Map<string, number>
     ): Promise<PricesMap> {
-        const logQuote = (asset: string, price: number, reason: 'cache_hit' | 'fetched') => {
+        // Returns the deviation in bps when a stale Reflector reference exists;
+        // undefined means the quote may be served.
+        const logQuote = (asset: string, price: number, reason: 'cache_hit'): number | undefined => {
             const reference = staleReflectorPrices.get(asset)
-            if (reference !== undefined) {
-                const deviation = (Math.abs(reference - price) / Math.max(reference, price)) * 10_000
-                const deviationBps = Number(deviation.toFixed(9))
-                if (deviationBps > ORACLE_DEVIATION_TOLERANCE_BPS) {
-                    this.logCoinGeckoFallback('success', 'price_disagreement', {
-                        asset, deviationBps, toleranceBps: ORACLE_DEVIATION_TOLERANCE_BPS
-                    })
-                    return
-                }
+            if (reference === undefined) {
+                this.logCoinGeckoFallback('success', reason, { asset })
+                return undefined
+            }
+            const deviation = (Math.abs(reference - price) / Math.max(reference, price)) * 10_000
+            const deviationBps = Number(deviation.toFixed(9))
+            if (deviationBps > ORACLE_DEVIATION_TOLERANCE_BPS) {
+                this.logCoinGeckoFallback('blocked', 'price_disagreement', {
+                    asset, deviationBps, toleranceBps: ORACLE_DEVIATION_TOLERANCE_BPS
+                })
+                return deviationBps
             }
             this.logCoinGeckoFallback('success', reason, { asset })
+            return undefined
         }
 
         const now = Date.now()
         const cachedFallback = this.coinGeckoFallbackCache.getAll(assets, now)
         if (cachedFallback) {
-            assets.forEach(asset => logQuote(asset, cachedFallback[asset].price, 'cache_hit'))
-            return cachedFallback
+            // Re-validate cached quotes against the latest Reflector reference;
+            // a disagreeing entry is dropped rather than served.
+            const accepted: PricesMap = {}
+            assets.forEach(asset => {
+                const deviationBps = logQuote(asset, cachedFallback[asset].price, 'cache_hit')
+                if (deviationBps === undefined) {
+                    accepted[asset] = cachedFallback[asset]
+                }
+            })
+            return accepted
         }
 
         if (now - this.lastRequestTime < this.MIN_REQUEST_INTERVAL) {
@@ -675,6 +697,30 @@ export class ReflectorService {
                     dataTier: 'primary'
                 }
 
+                // Explicit stop: a fallback quote that disagrees with the last
+                // Reflector reference beyond tolerance is never served or cached,
+                // so a later retry re-evaluates it instead of duplicating side effects.
+                const reference = staleReflectorPrices.get(asset)
+                if (reference !== undefined) {
+                    const deviationBps = Number(((Math.abs(reference - priceData.price) / Math.max(reference, priceData.price)) * 10_000).toFixed(9))
+                    if (deviationBps > ORACLE_DEVIATION_TOLERANCE_BPS) {
+                        this.logCoinGeckoFallback('blocked', 'price_disagreement', {
+                            asset, deviationBps, toleranceBps: ORACLE_DEVIATION_TOLERANCE_BPS
+                        })
+                        return
+                    }
+                }
+
+                // Persist freshness before the quote becomes visible so an
+                // interrupted write cannot leave caches serving an unrecorded price.
+                try {
+                    databaseService.setAssetFreshness(asset, new Date().toISOString(), false)
+                } catch {
+                    this.logCoinGeckoFallback('blocked', 'freshness_persist_failed', { asset })
+                    logger.error('[ASSET-REGISTRY] Failed to update freshness during CoinGecko fetch', { asset })
+                    return
+                }
+
                 prices[asset] = priceData
                 const cachedAtMs = Date.now()
                 this.priceCache.set(asset, {
@@ -689,14 +735,7 @@ export class ReflectorService {
                 })
                 this.coinGeckoFallbackCache.put(asset, { ...priceData, servedFromCache: true }, cachedAtMs)
                 recordCacheOperation('update', asset)
-
-                logQuote(asset, priceData.price, 'fetched')
-
-                try {
-                    databaseService.setAssetFreshness(asset, new Date().toISOString(), false)
-                } catch {
-                    logger.error('[ASSET-REGISTRY] Failed to update freshness during CoinGecko fetch', { asset })
-                }
+                this.logCoinGeckoFallback('success', 'fetched', { asset })
             })
 
             if (Object.keys(prices).length === 0) {

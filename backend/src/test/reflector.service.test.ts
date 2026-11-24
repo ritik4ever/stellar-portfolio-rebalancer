@@ -303,9 +303,9 @@ describe('ReflectorService quote precision and fallback outcomes', () => {
     )
 
     it.each([
-        { price: 0.096, deviationBps: 400, reason: 'price_disagreement' },
-        { price: 0.097, deviationBps: 300, reason: 'fetched' },
-    ])('reports CoinGecko fallback outcome $reason at $deviationBps bps', async ({ price, deviationBps, reason }) => {
+        { price: 0.097, deviationBps: 300, outcome: 'success', served: true },
+        { price: 0.096, deviationBps: 400, outcome: 'blocked', served: false },
+    ])('reports CoinGecko fallback outcome $outcome at $deviationBps bps', async ({ price, deviationBps, outcome, served }) => {
         const info = vi.spyOn(logger, 'info')
         const warn = vi.spyOn(logger, 'warn')
         const fetchMock = vi.fn()
@@ -316,23 +316,28 @@ describe('ReflectorService quote precision and fallback outcomes', () => {
         vi.stubGlobal('fetch', fetchMock)
         service = new ReflectorService()
 
-        const prices = await service.getCurrentPrices()
-
-        expect(prices.XLM).toMatchObject({ price, source: 'coingecko_free' })
-        expect(fetchMock).toHaveBeenCalledTimes(2)
-        if (reason === 'price_disagreement') {
-            expect(warn).toHaveBeenCalledWith('[ORACLE] coingecko_fallback', expect.objectContaining({
-                source: 'coingecko_free', outcome: 'success', reason,
-                asset: 'XLM', deviationBps, toleranceBps: 300,
-            }))
-        } else {
+        if (served) {
+            const prices = await service.getCurrentPrices()
+            expect(prices.XLM).toMatchObject({ price, source: 'coingecko_free' })
             expect(info).toHaveBeenCalledWith('[ORACLE] coingecko_fallback', expect.objectContaining({
-                source: 'coingecko_free', outcome: 'success', reason, asset: 'XLM',
+                source: 'coingecko_free', outcome: 'success', reason: 'fetched', asset: 'XLM',
             }))
             expect(warn).not.toHaveBeenCalledWith('[ORACLE] coingecko_fallback', expect.objectContaining({
                 reason: 'price_disagreement',
             }))
+        } else {
+            // Beyond tolerance the disagreeing quote is explicitly stopped:
+            // it is neither served nor cached.
+            await expect(service.getCurrentPrices()).rejects.toThrow()
+            expect(warn).toHaveBeenCalledWith('[ORACLE] coingecko_fallback', expect.objectContaining({
+                source: 'coingecko_free', outcome: 'blocked', reason: 'price_disagreement',
+                asset: 'XLM', deviationBps, toleranceBps: 300,
+            }))
+            expect(info).not.toHaveBeenCalledWith('[ORACLE] coingecko_fallback', expect.objectContaining({
+                reason: 'fetched', asset: 'XLM',
+            }))
         }
+        expect(fetchMock).toHaveBeenCalledTimes(2)
     })
 
     it('releases concurrent callers to fallback when the Reflector body stalls', async () => {
