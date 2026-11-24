@@ -570,21 +570,21 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-6 sm:py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6">
+      <div className="max-w-4xl mx-auto px-3 sm:px-6">
         {/* ── Page header with back navigation ── */}
-        <div className="flex items-center justify-between mb-6 sm:mb-8">
-          <div className="flex items-center">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6 sm:mb-8 min-w-0">
+          <div className="flex items-center min-w-0">
             <button
               onClick={() => onNavigate('dashboard')}
-              className="mr-3 sm:mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+              className="mr-2 sm:mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors flex-shrink-0"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-3xl font-bold text-gray-900 dark:text-white break-words">
                 Create Portfolio
               </h1>
-              <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mt-1">
+              <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mt-1 break-words">
                 Set up your automated rebalancing strategy
               </p>
             </div>
@@ -593,23 +593,39 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
         </div>
 
         {/* ── Wallet connection status ── */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-            Wallet Status
-          </h3>
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 sm:p-6 shadow-sm mb-6 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Wallet Status
+            </h3>
+            {publicKey ? (
+              <span className="px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wide bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                Live Wallet
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                Demo Mode Active (Simulated)
+              </span>
+            )}
+          </div>
           {publicKey ? (
             /* Connected: show a truncated public key for confirmation */
-            <div className="flex items-center text-green-600">
-              <CheckCircle className="w-5 h-5 mr-2" />
+            <div className="flex items-center text-green-600 break-all">
+              <CheckCircle className="w-5 h-5 mr-2 flex-shrink-0" />
               <span>
                 Connected: {publicKey.slice(0, 8)}...{publicKey.slice(-8)}
               </span>
             </div>
           ) : (
             /* Not connected: indicate that demo mode is active instead */
-            <div className="flex items-center text-yellow-600">
-              <AlertCircle className="w-5 h-5 mr-2" />
-              <span>Demo Mode Active</span>
+            <div className="flex flex-wrap items-center text-yellow-600 dark:text-yellow-400 gap-2">
+              <div className="flex items-center">
+                <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0" />
+                <span className="font-medium">Demo Mode Active</span>
+              </div>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                (Real wallet balances not affected)
+              </span>
             </div>
           )}
         </div>
@@ -641,16 +657,16 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
         {/* ── Demo mode information banner ── */}
         {isDemoMode && (
-          <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-6">
-            <div className="flex items-center">
-              <div className="text-blue-600 mr-2">ℹ️</div>
-              <div>
-                <h4 className="text-blue-800 dark:text-blue-300 font-medium">
+          <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 sm:p-4 mb-6 min-w-0">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <div className="text-blue-600 dark:text-blue-400 flex-shrink-0 text-base">ℹ️</div>
+              <div className="min-w-0">
+                <h4 className="text-blue-800 dark:text-blue-300 font-medium break-words">
                   Demo Mode
                 </h4>
-                <p className="text-blue-700 dark:text-blue-400 text-sm">
+                <p className="text-blue-700 dark:text-blue-400 text-sm break-words">
                   Using simulated $10,000 portfolio with real price data.
-                  Perfect for testing and demonstrations.
+                  Perfect for testing and demonstrations. Real funds are never traded.
                 </p>
               </div>
             </div>
@@ -1508,12 +1524,12 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   {slippageTolerance}%
                 </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex flex-wrap justify-between gap-1 min-w-0">
                 <span className="text-sm text-gray-600 dark:text-gray-400">
                   Portfolio Value:
                 </span>
-                <span className="text-sm font-medium dark:text-gray-200">
-                  $10,000 (Demo)
+                <span className="text-sm font-medium dark:text-gray-200 break-words">
+                  {isDemoMode ? '$10,000 (Simulated Demo)' : '$10,000 (Demo)'}
                 </span>
               </div>
             </div>

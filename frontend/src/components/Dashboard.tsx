@@ -474,21 +474,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             )}
 
             {/* Header */}
-            <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center">
+            <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-3 sm:px-6 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 min-w-0">
+                    <div className="flex items-center min-w-0">
                         <button
                             type="button"
                             onClick={() => onNavigate('landing')}
-                            className="mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                            className="mr-3 sm:mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors flex-shrink-0"
                             aria-label={dashboardCopy.goToLanding}
                         >
                             <ArrowLeft className="w-5 h-5" aria-hidden />
                         </button>
-                        <div>
-                            <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold text-gray-900 dark:text-white">{dashboardCopy.title}</h1>
+                        <div className="min-w-0">
+                            <h1 ref={headingRef} tabIndex={-1} className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white break-words">{dashboardCopy.title}</h1>
                             {publicKey ? (
-                                <div className="flex items-center space-x-4 mt-1">
+                                <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-1">
                                     <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
                                         <span className="capitalize font-medium">{walletType} Wallet</span>
                                         <span>{publicKey.slice(0, 4)}...{publicKey.slice(-4)}</span>
@@ -514,7 +514,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </div>
                     </div>
 
-                    <div className="flex items-center space-x-4">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-4 min-w-0">
                         <button
                             type="button"
                             onClick={() => onNavigate('analytics')}
@@ -542,7 +542,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </button>
                         <ThemeToggle />
                         <LanguageSelector />
-                        <div className="flex items-center space-x-2">
+                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
                             {publicKey && portfolioData?.id && portfolioData.id !== 'demo' ? (
                                 <>
                                     <button onClick={() => exportFromApi('json')}
@@ -616,19 +616,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             </>
                         ) : (
                             <>
-                                <button onClick={() => onNavigate('landing')}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
+                                <button type="button" onClick={() => onNavigate('landing')}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap min-w-0">
                                     Connect Wallet
                                 </button>
-                                <button onClick={() => setShowDemoResetConfirm(true)}
-                                    className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1">
-                                    <RefreshCw className="w-4 h-4" />
-                                    Reset Demo
+                                <button type="button" onClick={() => setShowDemoResetConfirm(true)}
+                                    aria-label="Reset demo portfolio"
+                                    className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1 whitespace-nowrap min-w-0">
+                                    <RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />
+                                    <span>Reset Demo</span>
                                 </button>
                             </>
                         )}
                         <button onClick={refreshData} disabled={loading}
-                            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50">
+                            aria-label="Refresh data"
+                            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50 flex-shrink-0">
                             <RefreshCw className={`w-5 h-5 ${loading ? 'motion-safe:animate-spin' : ''}`} aria-hidden />
                         </button>
                     </div>
@@ -737,24 +739,24 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
             {/* Demo reset confirmation modal */}
             {showDemoResetConfirm && (
-                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
-                        <div className="flex items-center gap-2 mb-4">
+                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-3 sm:p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-4 sm:p-6 min-w-0 max-h-[90vh] overflow-y-auto">
+                        <div className="flex items-center gap-2 mb-4 min-w-0">
                             <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0" />
-                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Reset Demo Portfolio</h2>
+                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white break-words">Reset Demo Portfolio</h2>
                         </div>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
-                            This will reset the demo portfolio to its default state with $10,000 total value and 40% XLM / 60% USDC allocation.
+                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6 break-words">
+                            This will reset the demo portfolio to its default state with $10,000 total value and 40% XLM / 60% USDC allocation. Real wallet balances and on-chain portfolios are not affected.
                         </p>
-                        <div className="flex justify-end gap-3">
-                            <button onClick={() => setShowDemoResetConfirm(false)} disabled={resettingDemo}
-                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50">Cancel</button>
-                            <button onClick={resetDemoPortfolio} disabled={resettingDemo}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2">
+                        <div className="flex flex-wrap justify-end gap-2 sm:gap-3">
+                            <button type="button" onClick={() => setShowDemoResetConfirm(false)} disabled={resettingDemo}
+                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 text-sm">Cancel</button>
+                            <button type="button" onClick={resetDemoPortfolio} disabled={resettingDemo}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2 text-sm">
                                 {resettingDemo ? (
-                                    <><RefreshCw className="w-4 h-4 animate-spin" />Resetting...</>
+                                    <><RefreshCw className="w-4 h-4 animate-spin flex-shrink-0" />Resetting...</>
                                 ) : (
-                                    <><RefreshCw className="w-4 h-4" />Reset Demo</>
+                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" />Reset Demo</>
                                 )}
                             </button>
                         </div>
@@ -844,11 +846,22 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     <div className="h-64 bg-gray-200 dark:bg-gray-700 rounded" />
                                 </div>
                             ) : (
-                                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-                                    <div className="flex items-center justify-between mb-6">
-                                        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Portfolio Value</h2>
-                                        <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
-                                            <span>Last updated: just now</span>
+                                <div className="bg-white dark:bg-gray-800 rounded-xl p-4 sm:p-6 shadow-sm min-w-0">
+                                    <div className="flex flex-wrap items-center justify-between gap-2 mb-6 min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2 min-w-0">
+                                            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Portfolio Value</h2>
+                                            {!publicKey || portfolioData?.id === 'demo' ? (
+                                                <span className="px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                                    Demo balance
+                                                </span>
+                                            ) : (
+                                                <span className="px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wide bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                                    Wallet balance
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500 dark:text-gray-400 min-w-0">
+                                            <span className="whitespace-nowrap">Last updated: just now</span>
                                             <span className={`px-2 py-1 rounded text-xs ${feedMeta?.degraded || hasPartialPriceData
                                                 ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200'
                                                 : feedMeta?.staleOrLimited
@@ -868,18 +881,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                                     : 'Price feed may be stale or rate-limited; confirm against an exchange if trading.'}
                                         </p>
                                     )}
-                                    <div className="mb-4">
-                                        <div className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
-                                            ${portfolioData?.totalValue?.toLocaleString() || '0'}
+                                    <div className="mb-4 min-w-0">
+                                        <div className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white flex flex-wrap items-center gap-2 min-w-0 break-words">
+                                            <span>${portfolioData?.totalValue?.toLocaleString() || '0'}</span>
+                                            {(!publicKey || portfolioData?.id === 'demo') && (
+                                                <span className="text-xs font-normal text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded">
+                                                    Simulated $10,000
+                                                </span>
+                                            )}
                                             {liveFeedState === 'connected' && (
-                                                <span className="ml-3 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400">
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400">
                                                     <span className="w-1.5 h-1.5 mr-1.5 bg-red-500 rounded-full animate-pulse"></span>
                                                     LIVE
                                                 </span>
                                             )}
                                         </div>
-                                        <div className="flex items-center mt-1">
-                                            <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
+                                        <div className="flex flex-wrap items-center mt-1 text-sm">
+                                            <TrendingUp className="w-4 h-4 text-green-500 mr-1 flex-shrink-0" />
                                             <span className="text-green-600 dark:text-green-400 font-medium">+{portfolioData?.dayChange || 0}%</span>
                                             <span className="text-gray-500 dark:text-gray-400 ml-2">Today</span>
                                         </div>
@@ -1106,53 +1124,62 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             </div>
 
             {/* Sticky Mobile Action Bar */}
-            <div className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 md:hidden z-40">
-                <div className="flex items-center justify-between max-w-sm mx-auto">
-                    <div className="text-center">
-                        <div className="text-xs text-gray-500 dark:text-gray-400">Total Value</div>
-                        <div className="text-lg font-bold text-gray-900 dark:text-white">
+            <div className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-3 py-2 sm:p-4 md:hidden z-40">
+                <div className="flex flex-wrap items-center justify-between gap-2 max-w-sm mx-auto min-w-0">
+                    <div className="text-left min-w-0">
+                        <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                            <span>Total Value</span>
+                            {(!publicKey || portfolioData?.id === 'demo') && (
+                                <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold uppercase bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                    Demo
+                                </span>
+                            )}
+                        </div>
+                        <div className="text-base sm:text-lg font-bold text-gray-900 dark:text-white break-words">
                             {balancesUnavailable ? 'Balance unavailable' : `$${portfolioData?.totalValue?.toLocaleString() ?? '0'}`}
                         </div>
-                        <div className={`text-xs flex items-center justify-center gap-1 ${(portfolioData?.dayChange || 0) >= 0
+                        <div className={`text-xs flex items-center gap-1 ${(portfolioData?.dayChange || 0) >= 0
                             ? 'text-green-600 dark:text-green-400'
                             : 'text-red-600 dark:text-red-400'
                         }`}>
-                            {(portfolioData?.dayChange || 0) >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingUp className="w-3 h-3 rotate-180" />}
-                            {Math.abs(portfolioData?.dayChange || 0.85).toFixed(2)}%
+                            {(portfolioData?.dayChange || 0) >= 0 ? <TrendingUp className="w-3 h-3 flex-shrink-0" /> : <TrendingUp className="w-3 h-3 rotate-180 flex-shrink-0" />}
+                            <span>{Math.abs(portfolioData?.dayChange || 0.85).toFixed(2)}%</span>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                         {latestPortfolioId ? (
                             <button type="button" onClick={() => setReviewPortfolioId(latestPortfolioId)}
                                 aria-label="Review rebalance on mobile"
                                 disabled={balancesUnavailable}
-                                className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1">
+                                className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1">
                                 Review rebalance
                             </button>
                         ) : (
                             <div className="flex items-center gap-1 text-green-600 dark:text-green-400 text-sm">
-                                <CheckCircle className="w-4 h-4" />
+                                <CheckCircle className="w-4 h-4 flex-shrink-0" />
                                 <span className="hidden sm:inline">Balanced</span>
                             </div>
                         )}
 
                         {publicKey ? (
-                            <button onClick={() => onNavigate('setup')}
+                            <button type="button" onClick={() => onNavigate('setup')}
                                 className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1">
-                                <Plus className="w-4 h-4" />
+                                <Plus className="w-4 h-4 flex-shrink-0" />
                                 <span className="hidden sm:inline">New</span>
                             </button>
                         ) : (
-                            <button onClick={() => setShowDemoResetConfirm(true)}
-                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors">
-                                <RefreshCw className="w-4 h-4" />
-                                <span className="hidden sm:inline">Reset</span>
+                            <button type="button" onClick={() => setShowDemoResetConfirm(true)}
+                                aria-label="Reset demo portfolio"
+                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-2.5 sm:px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1">
+                                <RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />
+                                <span>Reset</span>
                             </button>
                         )}
 
-                        <button onClick={refreshData} disabled={loading}
-                            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50">
+                        <button type="button" onClick={refreshData} disabled={loading}
+                            aria-label="Refresh data"
+                            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50 flex-shrink-0">
                             <RefreshCw className={`w-5 h-5 ${loading ? 'motion-safe:animate-spin' : ''}`} aria-hidden />
                         </button>
                     </div>
