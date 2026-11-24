@@ -45,13 +45,18 @@ interface CompletedRun {
 interface RunFailure {
     title: string
     detail: string
+    isInsufficientHistory?: boolean
 }
 
 type RunStatus = 'idle' | 'running' | 'completed' | 'failed'
-type FocusTarget = 'cancel' | 'run' | 'result' | 'error'
+type FocusTarget = 'cancel' | 'run' | 'result' | 'error' | 'start'
 
 const PRESET_DAYS = [SIMULATOR_MIN_DAYS, 30, 90, SIMULATOR_MAX_DAYS]
 const DEFAULT_DAYS = 30
+const ADJUST_DATES_LABEL = 'Adjust dates'
+const useShorterRangeLabel = (days: number) => `Try last ${days} days`
+const shorterRangeSelectedMessage = (days: number) =>
+    `Switched to the last ${days} closed days. Review the range and run the simulation.`
 
 const controlFocus = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
 const secondaryButton = `min-h-11 px-3 py-2 text-sm rounded-lg font-medium border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed ${controlFocus}`
@@ -59,7 +64,11 @@ const secondaryButton = `min-h-11 px-3 py-2 text-sm rounded-lg font-medium borde
 function describeFailure(error: unknown): RunFailure {
     if (error instanceof ApiClientError) {
         if (error.code === 'HISTORICAL_DATA_UNAVAILABLE') {
-            return { title: copy.insufficientTitle, detail: `${error.message}. ${copy.insufficientDetail}` }
+            return {
+                title: copy.insufficientTitle,
+                detail: `${error.message}. ${copy.insufficientDetail}`,
+                isInsufficientHistory: true,
+            }
         }
         if (error.code === 'CONFLICT') return { title: copy.failedTitle, detail: copy.conflictDetail }
         if (error.code === 'REQUEST_TIMEOUT') return { title: copy.failedTitle, detail: copy.timeoutDetail }
@@ -82,6 +91,7 @@ const HistoricalSimulator: React.FC<HistoricalSimulatorProps> = ({ portfolioId }
     const [announcement, setAnnouncement] = useState('')
 
     const activeRun = useRef(0)
+    const isRunningRef = useRef(false)
     const pendingFocus = useRef<FocusTarget | null>(null)
     const startRef = useRef<HTMLInputElement>(null)
     const endRef = useRef<HTMLInputElement>(null)
@@ -103,6 +113,7 @@ const HistoricalSimulator: React.FC<HistoricalSimulatorProps> = ({ portfolioId }
 
     useEffect(() => () => {
         activeRun.current += 1
+        isRunningRef.current = false
     }, [])
 
     useEffect(() => {
@@ -114,6 +125,7 @@ const HistoricalSimulator: React.FC<HistoricalSimulatorProps> = ({ portfolioId }
             run: runRef,
             result: resultRef,
             error: errorRef,
+            start: startRef,
         }
         elements[target].current?.focus()
     })
@@ -132,6 +144,7 @@ const HistoricalSimulator: React.FC<HistoricalSimulatorProps> = ({ portfolioId }
     }
 
     const runSimulation = async () => {
+        if (isRunningRef.current) return
         const current = validateSimulatorRange(range.start, range.end, Date.now())
         if (!current.valid || current.days === null) {
             setShowErrors(true)
@@ -141,6 +154,7 @@ const HistoricalSimulator: React.FC<HistoricalSimulatorProps> = ({ portfolioId }
             return
         }
 
+        isRunningRef.current = true
         const id = activeRun.current + 1
         activeRun.current = id
         const requested = { requestedStart: range.start, requestedEnd: range.end, requestedDays: current.days }
@@ -157,6 +171,7 @@ const HistoricalSimulator: React.FC<HistoricalSimulatorProps> = ({ portfolioId }
             })
             if (activeRun.current !== id) return
             if (!isBacktestResponse(result)) throw new Error('Unexpected backtest response')
+            isRunningRef.current = false
             setRun({ ...requested, result })
             setStatus('completed')
             setAnnouncement(
@@ -165,6 +180,7 @@ const HistoricalSimulator: React.FC<HistoricalSimulatorProps> = ({ portfolioId }
             pendingFocus.current = 'result'
         } catch (error) {
             if (activeRun.current !== id) return
+            isRunningRef.current = false
             setFailure(describeFailure(error))
             setStatus('failed')
             setAnnouncement('')
@@ -174,6 +190,7 @@ const HistoricalSimulator: React.FC<HistoricalSimulatorProps> = ({ portfolioId }
 
     const cancelRun = () => {
         activeRun.current += 1
+        isRunningRef.current = false
         setStatus('idle')
         setAnnouncement(copy.cancelled)
         pendingFocus.current = 'run'
@@ -184,6 +201,20 @@ const HistoricalSimulator: React.FC<HistoricalSimulatorProps> = ({ portfolioId }
         setFailure(null)
         setStatus('idle')
         setAnnouncement(copy.dismissed)
+        pendingFocus.current = 'run'
+    }
+
+    const adjustDates = () => {
+        startRef.current?.focus()
+    }
+
+    const applyShorterRange = () => {
+        setRange(getPresetRange(SIMULATOR_MIN_DAYS, Date.now()))
+        setShowErrors(false)
+        setRun(null)
+        setFailure(null)
+        setStatus('idle')
+        setAnnouncement(shorterRangeSelectedMessage(SIMULATOR_MIN_DAYS))
         pendingFocus.current = 'run'
     }
 
@@ -336,9 +367,23 @@ const HistoricalSimulator: React.FC<HistoricalSimulatorProps> = ({ portfolioId }
                             <p className="mt-1">{failure.detail}</p>
                         </div>
                     </div>
-                    <button type="button" onClick={dismissResult} className={`mt-3 ${secondaryButton}`}>
-                        {copy.dismiss}
-                    </button>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        {failure.isInsufficientHistory && (
+                            <>
+                                <button type="button" onClick={adjustDates} className={secondaryButton}>
+                                    {ADJUST_DATES_LABEL}
+                                </button>
+                                {(validation.days === null || validation.days > SIMULATOR_MIN_DAYS) && (
+                                    <button type="button" onClick={applyShorterRange} className={secondaryButton}>
+                                        {useShorterRangeLabel(SIMULATOR_MIN_DAYS)}
+                                    </button>
+                                )}
+                            </>
+                        )}
+                        <button type="button" onClick={dismissResult} className={secondaryButton}>
+                            {copy.dismiss}
+                        </button>
+                    </div>
                 </div>
             )}
 
