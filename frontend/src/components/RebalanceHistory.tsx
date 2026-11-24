@@ -55,6 +55,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
     const [triggerFilter] = React.useState('')
     const [dateFilter] = React.useState('')
     const [errorDismissed, setErrorDismissed] = React.useState(false)
+    const retryInFlight = React.useRef(false)
     const [announcement, setAnnouncement] = React.useState('')
 
     // Query for rebalance history
@@ -162,9 +163,15 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
     }
 
     const handleRetry = () => {
+        if (retryInFlight.current || isFetching) return
+        retryInFlight.current = true
         setErrorDismissed(false)
         setAnnouncement(rebalanceHistoryCopy.retryAnnounce)
-        void refetch?.()
+        void Promise.resolve(refetch?.())
+            .catch(() => undefined)
+            .finally(() => {
+                retryInFlight.current = false
+            })
     }
 
     const handleDismissError = () => {
@@ -351,6 +358,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                                     type="button"
                                     onClick={handleRetry}
                                     disabled={Boolean(isFetching)}
+                                    aria-busy={Boolean(isFetching)}
                                     aria-label={rebalanceHistoryCopy.retryHistory}
                                     className="font-medium underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded px-1 disabled:opacity-50"
                                 >
