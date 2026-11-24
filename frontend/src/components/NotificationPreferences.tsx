@@ -400,15 +400,15 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     }
 
     return (
-        <div className="bg-white rounded-xl p-6 shadow-sm">
+        <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm min-w-0">
             {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center">
-                    <Bell className="w-6 h-6 text-blue-600 mr-2" />
-                    <h2 className="text-xl font-semibold text-gray-900">Notifications</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
+                <div className="flex items-center min-w-0">
+                    <Bell className="w-6 h-6 text-blue-600 mr-2 flex-shrink-0" />
+                    <h2 className="text-xl font-semibold text-gray-900 break-words min-w-0">Notifications</h2>
                 </div>
                 {hasUnsavedChanges() && (
-                    <span className="text-sm text-orange-600 font-medium">Unsaved changes</span>
+                    <span className="text-sm text-orange-600 font-medium break-words">Unsaved changes</span>
                 )}
             </div>
 
@@ -417,11 +417,11 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                 <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center text-red-800"
+                    className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-red-800 min-w-0"
                     role="alert"
                 >
-                    <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0" />
-                    <span className="text-sm">{displayedError}</span>
+                    <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    <span className="text-sm break-words min-w-0">{displayedError}</span>
                 </motion.div>
             )}
 
@@ -430,23 +430,23 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                 <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center text-green-800"
+                    className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-start gap-2 text-green-800 min-w-0"
                     role="status"
                     aria-live="polite"
                 >
-                    <CheckCircle className="w-5 h-5 mr-2 flex-shrink-0" />
-                    <span className="text-sm">{successMessage}</span>
+                    <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    <span className="text-sm break-words min-w-0">{successMessage}</span>
                 </motion.div>
             )}
 
             {actionStatus && (
                 <div
-                    className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 flex items-center"
+                    className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 flex items-start gap-2 min-w-0"
                     role="status"
                     aria-live="polite"
                 >
-                    <Loader className="w-4 h-4 mr-2 animate-spin flex-shrink-0" />
-                    {actionStatus}
+                    <Loader className="w-4 h-4 animate-spin flex-shrink-0 mt-0.5" />
+                    <span className="break-words min-w-0">{actionStatus}</span>
                 </div>
             )}
 
@@ -575,11 +575,11 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                 </div>
 
                 {/* Webhook Provider */}
-                <div className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center">
-                            <Webhook className="w-5 h-5 text-gray-600 mr-2" />
-                            <span className="font-medium text-gray-900">Webhook Notifications</span>
+                <div className="border border-gray-200 rounded-lg p-3 sm:p-4 min-w-0">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div className="flex items-center min-w-0">
+                            <Webhook className="w-5 h-5 text-gray-600 mr-2 flex-shrink-0" />
+                            <span className="font-medium text-gray-900 break-words min-w-0">Webhook Notifications</span>
                         </div>
                         <button
                             type="button"
@@ -588,7 +588,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             aria-label="Webhook notifications"
                             onClick={() => setPreferences(prev => ({ ...prev, webhookEnabled: !prev.webhookEnabled }))}
                             disabled={actionPending}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
                                 preferences.webhookEnabled ? 'bg-blue-600' : 'bg-gray-300'
                             } disabled:opacity-50 disabled:cursor-not-allowed`}
                         >
@@ -599,11 +599,11 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             />
                         </button>
                     </div>
-                    <p className="text-sm text-gray-600 mb-3">
+                    <p className="text-sm text-gray-600 mb-3 break-words">
                         Send notifications to your webhook endpoint via HTTP POST
                     </p>
                     <p
-                        className={`mb-3 text-xs ${
+                        className={`mb-3 text-xs break-words ${
                             savePending && webhookHasUnsavedChanges
                                 ? 'text-blue-600'
                                 : webhookHasUnsavedChanges
@@ -627,8 +627,8 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                     </p>
 
                     {preferences.webhookEnabled && (
-                        <div>
-                            <label htmlFor="notification-webhook-url" className="block text-sm font-medium text-gray-700 mb-1">
+                        <div className="min-w-0">
+                            <label htmlFor="notification-webhook-url" className="block text-sm font-medium text-gray-700 mb-1 break-words">
                                 Callback URL
                             </label>
                             <input
@@ -644,14 +644,14 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                                 aria-describedby={webhookError ? 'webhook-url-help webhook-url-error' : 'webhook-url-help'}
                                 onChange={(e) => setPreferences(prev => ({ ...prev, webhookUrl: e.target.value }))}
                                 placeholder="https://your-domain.com/webhook"
-                                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                className={`w-full min-w-0 max-w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                                     webhookError ? 'border-red-300' : 'border-gray-300'
                                 }`}
                             />
                             {webhookError && (
-                                <p id="webhook-url-error" role="alert" className="mt-1 text-sm text-red-600">{webhookError}</p>
+                                <p id="webhook-url-error" role="alert" className="mt-1 text-sm text-red-600 break-words">{webhookError}</p>
                             )}
-                            <p id="webhook-url-help" className="mt-1 text-xs text-gray-500">
+                            <p id="webhook-url-help" className="mt-1 text-xs text-gray-500 break-words">
                                 Enter a complete URL starting with http:// or https://. To rotate the endpoint, replace the URL and save.
                             </p>
                         </div>
@@ -1031,13 +1031,13 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                 </div>
             )}
 
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-200">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-200 min-w-0">
                 <button
                     type="button"
                     ref={unsubscribeTriggerRef}
                     onClick={handleUnsubscribeClick}
                     disabled={actionPending || showUnsubscribeReason || (!preferences.emailEnabled && !preferences.webhookEnabled && !preferences.telegramEnabled)}
-                    className="text-sm text-red-600 hover:text-red-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+                    className="text-sm text-left sm:text-center break-words text-red-600 hover:text-red-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
                 >
                     Unsubscribe from all
                 </button>
@@ -1045,17 +1045,17 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                 <button
                     onClick={handleSave}
                     disabled={actionPending || !hasUnsavedChanges() || (preferences.webhookEnabled && !!webhookError) || (preferences.emailEnabled && !!emailError) || (preferences.telegramEnabled && !!telegramError)}
-                    className="flex items-center px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+                    className="w-full sm:w-auto flex flex-wrap items-center justify-center gap-2 px-4 sm:px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors text-center break-words"
                 >
                     {savePending ? (
                         <>
-                            <Loader className="w-4 h-4 mr-2 animate-spin" />
-                            Saving preferences...
+                            <Loader className="w-4 h-4 animate-spin flex-shrink-0" />
+                            <span>Saving preferences...</span>
                         </>
                     ) : (
                         <>
-                            <Save className="w-4 h-4 mr-2" />
-                            Save Preferences
+                            <Save className="w-4 h-4 flex-shrink-0" />
+                            <span>Save Preferences</span>
                         </>
                     )}
                 </button>
