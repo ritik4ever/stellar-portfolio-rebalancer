@@ -15,13 +15,22 @@ vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
 const quoteDate = '2026-10-10T12:00:00Z'
 const quoteTimestamp = Date.parse(quoteDate) / 1000
 
-function showPlan(tradeCount: number) {
+type BoundaryOverrides = Partial<{
+    reasonCode: 'WITHIN_EVERY_THRESHOLD' | 'DRIFT_EXCEEDS_THRESHOLD' | 'TRADES_REQUIRED'
+    thresholdPercent: number
+    maxDriftPercent: number
+}>
+
+function showPlan(tradeCount: number, boundaryOverrides: BoundaryOverrides = {}) {
     mocks.useRebalancePlan.mockReturnValue({
         data: {
             maxSlippagePercent: 2,
             estimatedFees: { xlm: tradeCount * 0.001, usd: tradeCount * 0.01, tradeCount },
             boundary: {
                 reasonCode: tradeCount ? 'TRADES_REQUIRED' : 'WITHIN_EVERY_THRESHOLD',
+                thresholdPercent: 5,
+                maxDriftPercent: tradeCount ? 7 : 2,
+                ...boundaryOverrides,
                 trades: Array.from({ length: tradeCount }, (_, index) => ({ asset: `Asset ${index + 1}`, action: 'buy', amount: 123 })),
                 quoteSnapshot: {
                     prices: {
@@ -54,6 +63,42 @@ describe('RebalanceConfirm', () => {
         expect(mocks.mutateAsync).not.toHaveBeenCalled()
     })
 
+    it('explains the inclusive drift boundary and read-only no-trade preview', () => {
+        showPlan(0, { thresholdPercent: 5, maxDriftPercent: 2 })
+        render(<RebalanceConfirm portfolioId="p1" open onClose={vi.fn()} />)
+
+        const status = screen.getByRole('status')
+        expect(status).toHaveTextContent('0 planned trades — read-only preview')
+        expect(status).toHaveTextContent('Largest observed drift is 2.00 percentage points')
+        expect(status).toHaveTextContent('Allowed drift is ±5.00 percentage points or less from target (inclusive)')
+        expect(status).toHaveTextContent('exactly at ±5.00 percentage points is still inside the threshold')
+        expect(status).toHaveTextContent('only absolute drift above 5.00 percentage points is traded')
+        expect(screen.queryByRole('region', { name: /planned trades/i })).toBeNull()
+        expect(screen.queryByRole('checkbox')).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Confirm rebalance' })).toBeNull()
+        expect(screen.getByRole('button', { name: 'Close' })).toHaveAttribute('aria-describedby', 'dry-run-boundary-status')
+    })
+
+    it('treats drift exactly at the threshold as inside the boundary', () => {
+        showPlan(0, { thresholdPercent: 5, maxDriftPercent: 5 })
+        render(<RebalanceConfirm portfolioId="p1" open onClose={vi.fn()} />)
+
+        const status = screen.getByRole('status')
+        expect(status).toHaveTextContent('Largest observed drift is 5.00 percentage points')
+        expect(status).toHaveTextContent('exactly at ±5.00 percentage points is still inside the threshold')
+        expect(status).toHaveTextContent('No trades are required and there is no network fee')
+    })
+
+    it('does not describe a no-trade plan as within threshold when drift exceeded it', () => {
+        showPlan(0, { reasonCode: 'DRIFT_EXCEEDS_THRESHOLD', thresholdPercent: 5, maxDriftPercent: 6 })
+        render(<RebalanceConfirm portfolioId="p1" open onClose={vi.fn()} />)
+
+        const status = screen.getByRole('status')
+        expect(status).toHaveTextContent('no executable trades')
+        expect(status).not.toHaveTextContent('inside the threshold')
+        expect(screen.queryByRole('button', { name: 'Confirm rebalance' })).toBeNull()
+    })
+
     it('shows every trade, total fees and the oldest quote from the same plan', async () => {
         showPlan(12)
         const close = vi.fn()
@@ -66,6 +111,7 @@ describe('RebalanceConfirm', () => {
         expect(screen.getByText(/0.0120000 XLM/)).toHaveTextContent('~$0.120')
         expect(container.querySelector('time')).toHaveAttribute('datetime', '2026-10-10T12:00:00.000Z')
         expect(screen.getByText('Some quoted prices may be stale.')).toBeInTheDocument()
+        expect(screen.queryByText(/read-only preview/i)).toBeNull()
         const confirm = screen.getByRole('button', { name: 'Confirm rebalance' })
         expect(confirm).toBeDisabled()
         fireEvent.click(screen.getByRole('checkbox'))
