@@ -373,4 +373,52 @@ describe('Dashboard', () => {
         expect(await screen.findByText(/dashboard failed to load/i)).toBeTruthy()
         consoleError.mockRestore()
     })
+
+    it('displays distinct demo mode indicators, simulated values, and operable reset modal at narrow widths', async () => {
+        queryMocks.useUserPortfolios.mockReturnValue({ data: [], isLoading: false })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            data: { id: 'demo', totalValue: 10000, dayChange: 0, assets: [] },
+            isLoading: false,
+        })
+        queryMocks.usePrices.mockReturnValue({ data: { prices: {}, feedMeta: null }, isLoading: false })
+
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey={null} />)
+
+        // Clear separation of demo mode
+        expect(await screen.findByText('Demo balance')).toBeInTheDocument()
+        expect(screen.getByText('Simulated $10,000')).toBeInTheDocument()
+
+        // Demo controls visible and operable
+        const resetButtons = screen.getAllByRole('button', { name: /reset demo portfolio/i })
+        expect(resetButtons.length).toBeGreaterThanOrEqual(1)
+
+        // Open demo reset modal
+        fireEvent.click(resetButtons[0])
+        expect(screen.getByRole('heading', { name: 'Reset Demo Portfolio' })).toBeInTheDocument()
+        expect(screen.getByText(/Real wallet balances and on-chain portfolios are not affected\./i)).toBeInTheDocument()
+
+        // Cancel modal
+        const cancelBtn = screen.getByRole('button', { name: 'Cancel' })
+        fireEvent.click(cancelBtn)
+        expect(screen.queryByRole('heading', { name: 'Reset Demo Portfolio' })).not.toBeInTheDocument()
+    })
+
+    it('displays distinct wallet balance badge and address when wallet is connected', async () => {
+        queryMocks.useUserPortfolios.mockReturnValue({ data: [{ id: 'live-1', name: 'Main' }], isLoading: false })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            data: { id: 'live-1', totalValue: 25000, dayChange: 1.5, assets: [] },
+            isLoading: false,
+        })
+        queryMocks.usePrices.mockReturnValue({ data: { prices: {}, feedMeta: null }, isLoading: false })
+
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABCD1234567890TEST" />)
+
+        // Live wallet balance badge is displayed
+        expect(await screen.findByText('Wallet balance')).toBeInTheDocument()
+        expect(screen.queryByText('Demo balance')).not.toBeInTheDocument()
+        expect(screen.queryByText('Simulated $10,000')).not.toBeInTheDocument()
+
+        // Shows connected wallet header details
+        expect(screen.getByText(/GABC\.\.\.TEST/)).toBeInTheDocument()
+    })
 })

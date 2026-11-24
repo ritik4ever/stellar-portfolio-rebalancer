@@ -359,10 +359,11 @@ Buy 50 USDC worth of BTC (increase from 23% to 25%)
 - Preference saved to browser localStorage
 - Accessible via theme switcher in navigation
 
-### Mobile Responsive
-- Fully responsive design works on all screen sizes
-- Touch-optimized controls for mobile devices
-- Simplified navigation on smaller screens
+### Mobile Responsive & Zoom Support
+- Fully responsive design operable down to narrow viewports (320px) and with 200% text zoom without horizontal clipping or scroll overflow
+- Flexible wrapping controls and adaptive action bars across mobile devices
+- Touch-optimized controls with distinct tap targets and accessible names
+- Persistent separation between simulated demo states and live wallet balances
 
 ### Accessibility
 - WCAG 2.1 AA compliant
@@ -377,7 +378,7 @@ Buy 50 USDC worth of BTC (increase from 23% to 25%)
 When using the platform without connecting a wallet:
 
 **What's Simulated:**
-- $10,000 starting portfolio value
+- $10,000 starting portfolio value (`Simulated $10,000`)
 - Real-time price data (actual market prices)
 - Rebalance calculations and plans
 - Transaction execution (no real blockchain transactions)
@@ -390,12 +391,13 @@ When using the platform without connecting a wallet:
 
 **Limitations:**
 - Cannot execute real blockchain transactions
-- Portfolio data not persisted (resets on page refresh)
+- Portfolio data not persisted (resets on page refresh or via Reset Demo button)
 - Some features disabled (e.g., real wallet integration)
 
-**Banner Indicator:**
-- "Demo Mode" banner visible at top of page
-- "Connect Wallet for Real Trading" call-to-action
+**Visual Separation & Narrow Width Support:**
+- Clear "Demo balance" and "Demo Mode Active (Simulated)" tags explicitly distinguish simulated demo data from real wallet balances.
+- Sticky mobile action bar and headers flex and wrap gracefully down to 320px viewports and with 200% text scaling.
+- Dedicated "Reset Demo" action (`aria-label="Reset demo portfolio"`) on header and mobile bar opens a responsive confirmation modal explaining real wallet balances and on-chain portfolios are unaffected.
 
 ---
 
