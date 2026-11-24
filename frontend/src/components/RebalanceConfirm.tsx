@@ -51,6 +51,9 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
     const quoteAgeMinutes = oldestQuoteMs === null ? null : Math.max(0, Math.floor((now - oldestQuoteMs) / 60000))
     const hasTrades = trades.length > 0
     const confirmed = !!plan && reviewedPlan === plan
+    useEffect(() => {
+        if (reviewedPlan && reviewedPlan !== plan) setReviewedPlan(undefined)
+    }, [plan, reviewedPlan])
     const inFlight = isSubmitting || execute.isPending
     const canConfirm = hasTrades && confirmed && !isFetching && !isError && !inFlight
     const withinThreshold = boundary?.reasonCode === 'WITHIN_EVERY_THRESHOLD'
@@ -169,6 +172,7 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                     <p>The execution price and fees may change. Executed trades cannot be reversed from this app.</p>
                     <label className="flex items-start gap-2">
                         <input type="checkbox" checked={confirmed} disabled={isFetching || inFlight}
+                            aria-label="I reviewed the planned trades, fees, and prices."
                             onChange={event => setReviewedPlan(event.target.checked ? plan : undefined)} />
                         I reviewed the planned trades, fees, and prices.
                     </label>
