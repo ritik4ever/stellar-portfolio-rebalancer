@@ -62,6 +62,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const unsubscribeDialogRef = useRef<HTMLDivElement>(null)
     const unsubscribeTriggerRef = useRef<HTMLButtonElement>(null)
+    const saveInFlightRef = useRef(false)
 
     const savePending = saveMutation.microstate.phase === 'pending'
     const unsubscribePending = unsubscribeMutation.microstate.phase === 'pending'
@@ -69,17 +70,14 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
     useEffect(() => {
         if (!prefData) return
-        if (prefData.preferences) {
-            setPreferences(prefData.preferences)
-            setOriginalPreferences(prefData.preferences)
-            setSavedProviderActive(
-                prefData.preferences.emailEnabled || prefData.preferences.webhookEnabled || prefData.preferences.telegramEnabled
-            )
-        } else {
-            setPreferences(defaultPreferences)
-            setOriginalPreferences(defaultPreferences)
-            setSavedProviderActive(false)
-        }
+        if (originalPreferences && JSON.stringify(preferences) !== JSON.stringify(originalPreferences)) return
+
+        const nextPreferences = prefData.preferences ?? defaultPreferences
+        setPreferences(nextPreferences)
+        setOriginalPreferences(nextPreferences)
+        setSavedProviderActive(
+            nextPreferences.emailEnabled || nextPreferences.webhookEnabled || nextPreferences.telegramEnabled
+        )
     }, [prefData])
 
     useEffect(() => {
@@ -147,6 +145,8 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     }
 
     const handleSave = async () => {
+        if (saveInFlightRef.current || actionPending) return
+
         // Validate email address if email is enabled
         if (preferences.emailEnabled && !preferences.emailAddress.trim()) {
             setEmailError('Email address is required when email notifications are enabled')
@@ -170,6 +170,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             return
         }
 
+        saveInFlightRef.current = true
         setError(null)
         clearSuccessMessage()
 
@@ -187,6 +188,8 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             setError(webhookHasUnsavedChanges
                 ? WEBHOOK_SAVE_ERROR
                 : err instanceof Error ? err.message : 'Failed to save preferences')
+        } finally {
+            saveInFlightRef.current = false
         }
     }
 
@@ -422,6 +425,22 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                 >
                     <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
                     <span className="text-sm break-words min-w-0">{displayedError}</span>
+                    {saveMutation.microstate.phase === 'error' && (
+                        <button
+                            type="button"
+                            onClick={handleSave}
+                            disabled={
+                                actionPending ||
+                                !hasUnsavedChanges() ||
+                                (preferences.webhookEnabled && !!webhookError) ||
+                                (preferences.emailEnabled && !!emailError) ||
+                                (preferences.telegramEnabled && !!telegramError)
+                            }
+                            className="ml-auto flex-shrink-0 text-sm font-medium underline disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            Retry save
+                        </button>
+                    )}
                 </motion.div>
             )}
 

@@ -1,5 +1,5 @@
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -228,6 +228,47 @@ describe('NotificationPreferences', () => {
 
         await waitFor(() => expect(postSpy).toHaveBeenCalled())
         expect(await screen.findByText(/Preferences saved successfully/i)).toBeTruthy()
+    })
+
+    it('retries a failed save with the current draft without submitting twice', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
+        let resolveRetry!: (value: any) => void
+        const postSpy = vi.spyOn(api, 'post')
+            .mockRejectedValueOnce(new Error('Network unavailable'))
+            .mockImplementationOnce(() => new Promise(resolve => {
+                resolveRetry = resolve
+            }) as any)
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        expect(await screen.findByText('Notifications')).toBeTruthy()
+
+        fireEvent.click(getEmailSwitch())
+        fireEvent.change(await screen.findByPlaceholderText(/your-email@example.com/i), {
+            target: { value: 'user@example.com' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: /save preferences/i }))
+
+        await screen.findByRole('button', { name: 'Retry save' })
+        fireEvent.click(screen.getByRole('switch', { name: /risk level change alerts/i }))
+        const retryButton = screen.getByRole('button', { name: 'Retry save' })
+        expect(retryButton).toBeEnabled()
+        fireEvent.click(retryButton)
+        fireEvent.click(retryButton)
+        expect(await screen.findByText(/Saving notification preferences/i)).toBeInTheDocument()
+
+        expect(postSpy).toHaveBeenCalledTimes(2)
+        expect(postSpy).toHaveBeenLastCalledWith(
+            ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
+            expect.objectContaining({
+                emailEnabled: true,
+                emailAddress: 'user@example.com',
+                events: expect.objectContaining({ riskChange: false }),
+            })
+        )
+
+        resolveRetry({ success: true })
+        expect(await screen.findByText(/Preferences saved successfully/i)).toBeTruthy()
+        expect(postSpy).toHaveBeenCalledTimes(2)
     })
 
     it('calls mutation with correct payload when email preference is toggled', async () => {
