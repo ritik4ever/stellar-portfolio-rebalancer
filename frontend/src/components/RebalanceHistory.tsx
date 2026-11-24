@@ -54,9 +54,21 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
     const [statusFilter] = React.useState('')
     const [triggerFilter] = React.useState('')
     const [dateFilter] = React.useState('')
+    const [errorDismissed, setErrorDismissed] = React.useState(false)
+    const [announcement, setAnnouncement] = React.useState('')
 
     // Query for rebalance history
-    const { data, isLoading, error: queryError } = useRebalanceHistory(portfolioId, page, limit, search, statusFilter, triggerFilter, dateFilter)
+    const {
+        data,
+        isLoading,
+        error: queryError,
+        refetch,
+        isFetching,
+    } = useRebalanceHistory(portfolioId, page, limit, search, statusFilter, triggerFilter, dateFilter)
+
+    React.useEffect(() => {
+        setErrorDismissed(false)
+    }, [queryError, page, portfolioId])
 
     // Demo history generator
     const getDemoHistory = (): RebalanceEvent[] => {
@@ -141,8 +153,24 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
     let filtered = data?.history || (portfolioId === 'demo' || !portfolioId ? getDemoHistory() : []); if(search) filtered = filtered.filter((e:any) => e.trigger.toLowerCase().includes(search.toLowerCase()) || e.details?.reason?.toLowerCase().includes(search.toLowerCase())); if(statusFilter) filtered = filtered.filter((e:any) => e.status === statusFilter); if(triggerFilter) filtered = filtered.filter((e:any) => e.trigger.includes(triggerFilter)); if(dateFilter) filtered = filtered.filter((e:any) => e.timestamp.startsWith(dateFilter)); const history: RebalanceEvent[] = filtered
     const totalCount = data?.total || (portfolioId === 'demo' || !portfolioId ? 2 : 0)
     const totalPages = Math.ceil(totalCount / limit)
-    const error = queryError ? 'Failed to load rebalance history' : null
+    const error = queryError ? rebalanceHistoryCopy.loadError : null
     const loading = forcedLoading || (isLoading && !data)
+
+    const handlePageChange = (nextPage: number) => {
+        setPage(nextPage)
+        setAnnouncement(rebalanceHistoryCopy.pageChangedAnnounce(nextPage, totalPages))
+    }
+
+    const handleRetry = () => {
+        setErrorDismissed(false)
+        setAnnouncement(rebalanceHistoryCopy.retryAnnounce)
+        void refetch?.()
+    }
+
+    const handleDismissError = () => {
+        setErrorDismissed(true)
+        setAnnouncement(rebalanceHistoryCopy.dismissedAnnounce)
+    }
 
     const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => ({
         dateFormatted: formatShortDate(timestamp),
@@ -174,13 +202,13 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
     const getStatusIcon = (status: string) => {
         switch (status) {
             case 'completed':
-                return <CheckCircle className="w-5 h-5 text-green-600" />
+                return <CheckCircle className="w-5 h-5 text-green-600" aria-hidden="true" />
             case 'failed':
-                return <AlertTriangle className="w-5 h-5 text-red-600" />
+                return <AlertTriangle className="w-5 h-5 text-red-600" aria-hidden="true" />
             case 'pending':
-                return <Clock className="w-5 h-5 text-yellow-600 motion-safe:animate-pulse" />
+                return <Clock className="w-5 h-5 text-yellow-600 motion-safe:animate-pulse" aria-hidden="true" />
             default:
-                return <CheckCircle className="w-5 h-5 text-green-600" />
+                return <CheckCircle className="w-5 h-5 text-green-600" aria-hidden="true" />
         }
     }
 
@@ -269,7 +297,13 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
 
     if (loading) {
         return (
-            <div data-testid="rebalance-history-skeleton" aria-busy="true" className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
+            <div
+                data-testid="rebalance-history-skeleton"
+                role="status"
+                aria-busy="true"
+                aria-label={rebalanceHistoryCopy.loading}
+                className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6"
+            >
                 <div className="animate-pulse">
 
                     <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-4"></div>
@@ -285,6 +319,9 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
 
     return (
         <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm" aria-labelledby="rebalance-history-heading">
+            <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+                {announcement}
+            </div>
             <header className="p-6 border-b border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between">
                     <div>
@@ -297,14 +334,36 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                             type="button"
                             onClick={exportHistoryCSV}
                             disabled={history.length === 0}
-                            className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                            className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                         >
                             {rebalanceHistoryCopy.exportCsv}
                         </button>
 
-                        {error && (
-                            <div className="text-sm text-red-600 bg-red-50 dark:bg-red-900/30 px-3 py-1 rounded">
-                                {error}
+                        {error && !errorDismissed && (
+                            <div
+                                role="alert"
+                                aria-live="assertive"
+                                aria-atomic="true"
+                                className="flex items-center gap-2 text-sm text-red-600 bg-red-50 dark:bg-red-900/30 px-3 py-1.5 rounded"
+                            >
+                                <span>{error}</span>
+                                <button
+                                    type="button"
+                                    onClick={handleRetry}
+                                    disabled={Boolean(isFetching)}
+                                    aria-label={rebalanceHistoryCopy.retryHistory}
+                                    className="font-medium underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded px-1 disabled:opacity-50"
+                                >
+                                    {isFetching ? rebalanceHistoryCopy.retrying : rebalanceHistoryCopy.retry}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleDismissError}
+                                    aria-label={rebalanceHistoryCopy.dismissError}
+                                    className="font-medium underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded px-1"
+                                >
+                                    {rebalanceHistoryCopy.dismiss}
+                                </button>
                             </div>
                         )}
                     </div>
@@ -312,18 +371,34 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
 
                 {history.length === 0 ? (
                     <div className="p-6 text-center text-gray-500 dark:text-gray-400" role="status">
-                        <Clock className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" aria-hidden />
+                        <Clock className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" aria-hidden="true" />
                         <p>{rebalanceHistoryCopy.emptyTitle}</p>
                         <p className="text-sm mt-1">{rebalanceHistoryCopy.emptyDetail}</p>
                     </div>
                 ) : (
-                    history.map((event) => {
+                    <div role="list" aria-label={rebalanceHistoryCopy.listLabel}>
+                    {history.map((event, index) => {
                         const { dateFormatted, timeFormatted } = event.dateFormatted && event.timeFormatted
                             ? { dateFormatted: event.dateFormatted, timeFormatted: event.timeFormatted }
                             : formatDateTime(event.timestamp)
+                        const eventLabel = rebalanceHistoryCopy.eventItemLabel(
+                            index + 1,
+                            history.length,
+                            event.trigger,
+                            event.status,
+                            event.trades,
+                            dateFormatted,
+                            timeFormatted,
+                        )
 
                         return (
-                            <div key={event.id} className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors" role="listitem">
+                            <div
+                                key={event.id}
+                                role="listitem"
+                                tabIndex={0}
+                                aria-label={eventLabel}
+                                className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset rounded-lg"
+                            >
                                 <div className="flex items-start justify-between">
                                     <div className="flex items-start space-x-4">
                                         <div className="flex-shrink-0">
@@ -471,11 +546,12 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                                             )}
                                         </div>
                                     </div>
-                                    <ArrowRight className="w-4 h-4 text-gray-400 mt-2" />
+                                    <ArrowRight className="w-4 h-4 text-gray-400 mt-2" aria-hidden="true" />
                                 </div>
                             </div>
                         )
-                    })
+                    })}
+                    </div>
                 )}
             </header>
 
@@ -486,31 +562,35 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                             <span>{rebalanceHistoryCopy.showing(history.length, totalCount)}</span>
                             <div className="hidden md:flex items-center space-x-4">
                                 <div className="flex items-center">
-                                    <div className="w-2 h-2 bg-green-500 rounded-full mr-1" aria-hidden />
+                                    <div className="w-2 h-2 bg-green-500 rounded-full mr-1" aria-hidden="true" />
                                     <span>{rebalanceHistoryCopy.legendAutomated}</span>
                                 </div>
                                 <div className="flex items-center">
-                                    <div className="w-2 h-2 bg-orange-500 rounded-full mr-1" aria-hidden />
+                                    <div className="w-2 h-2 bg-orange-500 rounded-full mr-1" aria-hidden="true" />
                                     <span>{rebalanceHistoryCopy.legendRisk}</span>
                                 </div>
                             </div>
                         </div>
 
                         {totalPages > 1 && (
-                            <div className="flex items-center space-x-2">
+                            <nav aria-label={rebalanceHistoryCopy.paginationLabel} className="flex items-center space-x-2">
                                 <button
-                                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                                    type="button"
+                                    onClick={() => handlePageChange(Math.max(1, page - 1))}
                                     disabled={page === 1}
-                                    className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                    aria-label={rebalanceHistoryCopy.previousPage}
+                                    className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                                 >
-                                    <ArrowRight className="w-4 h-4 rotate-180" />
+                                    <ArrowRight className="w-4 h-4 rotate-180" aria-hidden="true" />
                                 </button>
                                 <div className="flex items-center space-x-1">
                                     {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
                                         <button
                                             key={p}
-                                            onClick={() => setPage(p)}
-                                            className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${page === p
+                                            type="button"
+                                            onClick={() => handlePageChange(p)}
+                                            aria-current={page === p ? 'page' : undefined}
+                                            className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${page === p
                                                 ? 'bg-blue-600 text-white'
                                                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                                                 }`}
@@ -520,13 +600,15 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                                     ))}
                                 </div>
                                 <button
-                                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                    type="button"
+                                    onClick={() => handlePageChange(Math.min(totalPages, page + 1))}
                                     disabled={page === totalPages}
-                                    className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                    aria-label={rebalanceHistoryCopy.nextPage}
+                                    className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                                 >
-                                    <ArrowRight className="w-4 h-4" />
+                                    <ArrowRight className="w-4 h-4" aria-hidden="true" />
                                 </button>
-                            </div>
+                            </nav>
                         )}
                     </div>
                 </div>
