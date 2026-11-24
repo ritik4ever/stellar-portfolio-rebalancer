@@ -22,6 +22,15 @@ Email, webhook, and Telegram channels are enabled independently. You may save pr
 
 Test delivery requires at least one saved channel. Unsaved channel changes do not affect test delivery until they are saved.
 
+### Accessibility of the notification settings form
+
+The notification settings form (including webhook settings) is fully usable with a keyboard and a screen reader:
+
+- Every field has a programmatic label. The callback URL, email address, and Telegram chat ID fields expose validation errors through `aria-describedby` together with `aria-invalid`, and the errors are announced assertively (`role="alert"`).
+- State changes are announced through live regions. Replacing the callback URL (rotating the endpoint) is announced as a pending replacement that keeps delivery on the saved endpoint until you save, and as the active endpoint after a successful save; a failed save is announced as an alert and delivery keeps using the previously saved settings.
+- Test delivery outcomes are announced per event type: successes through a polite status region (`role="status"`) and failures — for example a webhook endpoint answering with a non-2xx response — through an alert (`role="alert"`).
+- The unsubscribe confirmation dialog moves focus into itself when opened, keeps Tab navigation inside while it is open, can be abandoned with Escape or its Cancel button, and returns focus to the "Unsubscribe from all" button when closed.
+
 ## Delivery backoff configuration
 
 Retry behavior is loaded at startup from environment variables (validated in `startupConfig`) and applied in `notificationService` via `deliverWithBackoff`.
