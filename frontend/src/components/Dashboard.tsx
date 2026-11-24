@@ -1051,7 +1051,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         {allocationData.length > 0 && (
                                             <>
                                                 {(portfolioData as any)?.slippageTolerancePercent != null && (
-                                                    <p className="text-xs text-orange-600 dark:text-orange-400 mb-4">
+                                                    <p className="text-xs text-orange-600 dark:text-orange-400 mb-4 break-words min-w-0">
                                                         Max slippage: {(portfolioData as any).slippageTolerancePercent}% — trades beyond this will be rejected
                                                     </p>
                                                 )}
@@ -1061,7 +1061,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                                     Review rebalance
                                                 </button>
                                                 {(portfolioData as any)?.slippageTolerance != null && (
-                                                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center">
+                                                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center break-words min-w-0">
                                                         Max slippage: {(portfolioData as any).slippageTolerance}% — trades above this will be rejected
                                                     </p>
                                                 )}
