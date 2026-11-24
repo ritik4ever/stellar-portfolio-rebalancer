@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useRebalancePlan } from '../hooks/queries/usePortfolioQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 import { Button } from './ui/Button'
@@ -20,7 +20,18 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
     const execute = useExecuteRebalanceMutation(portfolioId)
     const [reviewedPlan, setReviewedPlan] = useState<typeof plan>()
     const [executionError, setExecutionError] = useState<string | null>(null)
+    const [statusAnnouncement, setStatusAnnouncement] = useState<string | null>(null)
+    const [isSubmitting, setIsSubmitting] = useState(false)
+    const submittingRef = useRef(false)
+    const errorAlertRef = useRef<HTMLDivElement>(null)
     const [now, setNow] = useState(Date.now)
+
+    useEffect(() => {
+        if (executionError) {
+            errorAlertRef.current?.focus()
+        }
+    }, [executionError])
+
     useEffect(() => {
         const timer = setInterval(() => setNow(Date.now()), 15000)
         return () => clearInterval(timer)
@@ -39,17 +50,30 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
     const quoteAgeMinutes = oldestQuoteMs === null ? null : Math.max(0, Math.floor((now - oldestQuoteMs) / 60000))
     const hasTrades = trades.length > 0
     const confirmed = !!plan && reviewedPlan === plan
-    const canConfirm = hasTrades && confirmed && !isFetching && !isError && !execute.isPending
+    const inFlight = isSubmitting || execute.isPending
+    const canConfirm = hasTrades && confirmed && !isFetching && !isError && !inFlight
 
     const handleConfirm = async () => {
+        if (submittingRef.current || inFlight) {
+            setStatusAnnouncement('Rebalance submission is already in progress.')
+            return
+        }
         if (!canConfirm) return
+        submittingRef.current = true
+        setIsSubmitting(true)
         setExecutionError(null)
+        setStatusAnnouncement('Submitting rebalance…')
         try {
             const result = await execute.mutateAsync()
+            submittingRef.current = false
+            setIsSubmitting(false)
             onSuccess?.(result)
             onClose()
         } catch (error) {
+            submittingRef.current = false
+            setIsSubmitting(false)
             setReviewedPlan(undefined)
+            setStatusAnnouncement(null)
             setExecutionError(error instanceof Error ? error.message : 'Rebalance failed. Please try again.')
         }
     }
@@ -58,20 +82,32 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
         <Modal
             open
             title="Review rebalance"
-            onClose={() => { if (!execute.isPending) onClose() }}
+            onClose={() => { if (!inFlight) onClose() }}
             footer={(
                 <>
-                    <Button variant="secondary" onClick={onClose} disabled={execute.isPending}>
+                    <Button variant="secondary" onClick={onClose} disabled={inFlight}>
                         {plan && !hasTrades ? 'Close' : 'Cancel'}
                     </Button>
                     {hasTrades && !isError && (
-                        <Button variant="primary" onClick={handleConfirm} disabled={!canConfirm} loading={execute.isPending}>
-                            Confirm rebalance
+                        <Button
+                            variant="primary"
+                            onClick={handleConfirm}
+                            disabled={!canConfirm}
+                            loading={inFlight}
+                            aria-busy={inFlight}
+                            aria-label={inFlight ? 'Submitting rebalance…' : 'Confirm rebalance'}
+                        >
+                            {inFlight ? 'Submitting rebalance…' : 'Confirm rebalance'}
                         </Button>
                     )}
                 </>
             )}
         >
+            {statusAnnouncement && (
+                <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+                    {statusAnnouncement}
+                </div>
+            )}
             {isLoading ? (
                 <p role="status">Loading rebalance plan…</p>
             ) : isError || !plan || !fees ? (
@@ -114,13 +150,26 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                     <p>Maximum slippage: {plan.maxSlippagePercent}%</p>
                     <p>The execution price and fees may change. Executed trades cannot be reversed from this app.</p>
                     <label className="flex items-start gap-2">
-                        <input type="checkbox" checked={confirmed} disabled={isFetching || execute.isPending}
+                        <input type="checkbox" checked={confirmed} disabled={isFetching || inFlight}
                             onChange={event => setReviewedPlan(event.target.checked ? plan : undefined)} />
                         I reviewed the planned trades, fees, and prices.
                     </label>
                 </div>
             )}
-            {executionError && <p role="alert" className="mt-3 text-red-700 dark:text-red-300">{executionError}</p>}
+            {executionError && (
+                <div
+                    ref={errorAlertRef}
+                    role="alert"
+                    tabIndex={-1}
+                    className="mt-3 rounded border border-red-200 bg-red-50 p-2.5 text-sm text-red-700 outline-none focus:ring-2 focus:ring-red-500 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
+                >
+                    <p className="font-semibold">Rebalance submission failed</p>
+                    <p>{executionError}</p>
+                    <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        Review and re-acknowledge the planned trades to retry, or cancel to abandon.
+                    </p>
+                </div>
+            )}
         </Modal>
     )
 }

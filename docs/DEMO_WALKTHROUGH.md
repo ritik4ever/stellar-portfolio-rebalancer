@@ -151,7 +151,7 @@ This visual guide walks you through the main features of the Stellar Portfolio R
 **Dashboard and settings:**
 - Settings displays the saved threshold during editing. Empty and out-of-range changes cannot be saved. Imported changes follow the same bounds and take effect after saving.
 - When the selected portfolio is deleted or inaccessible, the dashboard focuses the unavailable heading and offers to reload the portfolio list or return to the landing page. If balance details fail, the dashboard announces the failure and leaves target allocations available with a balance retry.
-- Review rebalance shows all planned trades in a keyboard-scrollable list, the fee for the complete plan, and the age of its oldest required quote. An empty plan has no confirmation action.
+- Review rebalance shows all planned trades in a keyboard-scrollable list, the fee for the complete plan, and the age of its oldest required quote. An empty plan has no confirmation action. During submission, the confirm button reflects an `aria-busy` "Submitting rebalance…" state with a polite live status announcement and single-flight guards against repeated clicks. On wallet rejection or lost network acknowledgement, keyboard focus moves directly to the alert message, review acknowledgement resets to prevent accidental execution, and users can re-acknowledge to complete or cancel/escape to abandon.
 - Under Dashboard → Notifications, webhook delivery requires a complete callback URL beginning with `http://` or `https://`. Replace the masked URL and save to rotate it. Delivery and notification tests keep using the saved settings until the save succeeds.
 
 **Screenshot Locations:**
@@ -244,8 +244,8 @@ Buy 50 USDC worth of BTC (increase from 23% to 25%)
 ### Confirmation Modal
 - Review all trades
 - Estimated completion time
-- "Confirm Rebalance" button
-- "Cancel" option
+- "Confirm Rebalance" button (transitions to "Submitting rebalance…" with `aria-busy` and live progress announcements; single-flight guards against repeated clicks)
+- "Cancel" option (or Escape key to abandon flow; failure alerts receive keyboard focus and reset acknowledgement before retry)
 
 **User Actions:**
 1. Review the rebalance plan carefully

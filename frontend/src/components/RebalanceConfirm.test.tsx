@@ -84,4 +84,97 @@ describe('RebalanceConfirm', () => {
         expect(screen.getByRole('checkbox')).not.toBeChecked()
         expect(screen.getByRole('button', { name: 'Confirm rebalance' })).toBeDisabled()
     })
+
+    it('guards against repeated clicks on submit, updates button name, and announces submission progress', async () => {
+        showPlan(2)
+        let resolveMutation!: () => void
+        mocks.mutateAsync.mockImplementation(() => new Promise<void>(resolve => { resolveMutation = resolve }))
+
+        render(<RebalanceConfirm portfolioId="p1" open onClose={vi.fn()} />)
+        fireEvent.click(screen.getByRole('checkbox'))
+
+        const confirm = screen.getByRole('button', { name: 'Confirm rebalance' })
+        fireEvent.click(confirm)
+
+        const submittingButton = screen.getByRole('button', { name: 'Submitting rebalance…' })
+        expect(submittingButton).toBeDisabled()
+        expect(submittingButton).toHaveAttribute('aria-busy', 'true')
+        expect(screen.getByRole('status')).toHaveTextContent('Submitting rebalance…')
+        expect(mocks.mutateAsync).toHaveBeenCalledTimes(1)
+
+        // Repeated click while in flight is guarded and does not duplicate submission
+        fireEvent.click(submittingButton)
+        expect(mocks.mutateAsync).toHaveBeenCalledTimes(1)
+
+        resolveMutation()
+        await waitFor(() => expect(screen.queryByRole('button', { name: 'Submitting rebalance…' })).toBeNull())
+    })
+
+    it('handles wallet rejection by focusing alert, resetting acknowledgement, and allowing user to abandon', async () => {
+        showPlan(2)
+        mocks.mutateAsync.mockRejectedValueOnce(new Error('User rejected transaction in wallet'))
+        const close = vi.fn()
+
+        render(<RebalanceConfirm portfolioId="p1" open onClose={close} />)
+        const checkbox = screen.getByRole('checkbox')
+        fireEvent.click(checkbox)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm rebalance' }))
+
+        const alert = await screen.findByRole('alert')
+        expect(alert).toHaveFocus()
+        expect(alert).toHaveTextContent('Rebalance submission failed')
+        expect(alert).toHaveTextContent('User rejected transaction in wallet')
+        expect(alert).toHaveTextContent('Review and re-acknowledge the planned trades to retry, or cancel to abandon.')
+
+        expect(checkbox).not.toBeChecked()
+        expect(screen.getByRole('button', { name: 'Confirm rebalance' })).toBeDisabled()
+
+        const cancel = screen.getByRole('button', { name: 'Cancel' })
+        expect(cancel).toBeEnabled()
+        fireEvent.click(cancel)
+        expect(close).toHaveBeenCalledOnce()
+    })
+
+    it('handles lost network acknowledgement and enables completing the flow after re-acknowledgement', async () => {
+        showPlan(2)
+        mocks.mutateAsync.mockRejectedValueOnce(new Error('Network error: lost connection acknowledgement'))
+        mocks.mutateAsync.mockResolvedValueOnce({ txId: 'tx-rebalance-456' })
+        const close = vi.fn()
+        const onSuccess = vi.fn()
+
+        render(<RebalanceConfirm portfolioId="p1" open onClose={close} onSuccess={onSuccess} />)
+        const checkbox = screen.getByRole('checkbox')
+        fireEvent.click(checkbox)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm rebalance' }))
+
+        const alert = await screen.findByRole('alert')
+        expect(alert).toHaveFocus()
+        expect(alert).toHaveTextContent('Network error: lost connection acknowledgement')
+        expect(checkbox).not.toBeChecked()
+
+        // Re-acknowledge and complete the flow
+        fireEvent.click(checkbox)
+        const confirmBtn = screen.getByRole('button', { name: 'Confirm rebalance' })
+        expect(confirmBtn).toBeEnabled()
+        fireEvent.click(confirmBtn)
+
+        await waitFor(() => expect(onSuccess).toHaveBeenCalledWith({ txId: 'tx-rebalance-456' }))
+        expect(close).toHaveBeenCalledOnce()
+    })
+
+    it('allows abandoning flow via Escape key after a rejection', async () => {
+        showPlan(2)
+        mocks.mutateAsync.mockRejectedValueOnce(new Error('Transaction rejected'))
+        const close = vi.fn()
+
+        render(<RebalanceConfirm portfolioId="p1" open onClose={close} />)
+        fireEvent.click(screen.getByRole('checkbox'))
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm rebalance' }))
+
+        await screen.findByRole('alert')
+        fireEvent.keyDown(document, { key: 'Escape' })
+        expect(close).toHaveBeenCalledOnce()
+    })
 })
