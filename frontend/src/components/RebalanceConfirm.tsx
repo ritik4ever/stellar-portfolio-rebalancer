@@ -1,8 +1,24 @@
 import { useEffect, useState, useRef } from 'react'
-import { useRebalancePlan } from '../hooks/queries/usePortfolioQuery'
+import { usePortfolioDetails, useRebalancePlan } from '../hooks/queries/usePortfolioQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 import { Button } from './ui/Button'
 import { Modal } from './ui/Modal'
+
+function readSlippageTolerance(details: any): number | null {
+    if (!details) return null
+    const raw = details.slippageTolerancePercent ?? details.slippageTolerance
+    const value = typeof raw === 'string' ? Number(raw) : raw
+    return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function isSlippageFailure(message: string | null): boolean {
+    if (!message) return false
+    return /slippage|tolerance|price (?:moved|changed|deviated)|quote (?:expired|stale)/i.test(message)
+}
+
+function formatPercent(value: number): string {
+    return Number.isInteger(value) ? String(value) : value.toFixed(2)
+}
 
 interface RebalanceConfirmProps {
     portfolioId: string | null
@@ -16,7 +32,8 @@ export default function RebalanceConfirm({ open, ...props }: RebalanceConfirmPro
 }
 
 function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConfirmProps, 'open'>) {
-    const { data: plan, isLoading, isFetching, isError, refetch } = useRebalancePlan(portfolioId)
+    const { data: plan, isLoading, isFetching, isError, error: planError, refetch } = useRebalancePlan(portfolioId)
+    const { data: portfolioDetails } = usePortfolioDetails(portfolioId)
     const execute = useExecuteRebalanceMutation(portfolioId)
     const [reviewedPlan, setReviewedPlan] = useState<typeof plan>()
     const [executionError, setExecutionError] = useState<string | null>(null)
@@ -38,7 +55,6 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
             boundaryStatusRef.current?.focus()
         }
     }, [plan, isError])
-=======
 
     useEffect(() => {
         const timer = setInterval(() => setNow(Date.now()), 15000)
@@ -63,7 +79,14 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
         if (reviewedPlan && reviewedPlan !== plan) setReviewedPlan(undefined)
     }, [plan, reviewedPlan])
     const inFlight = isSubmitting || execute.isPending
-    const canConfirm = hasTrades && confirmed && !isFetching && !isError && !inFlight
+    const activeTolerance = readSlippageTolerance(portfolioDetails)
+    const planTolerance = plan?.maxSlippagePercent
+    const toleranceChanged = plan != null
+        && activeTolerance != null
+        && planTolerance != null
+        && Number.isFinite(planTolerance)
+        && Math.abs(activeTolerance - planTolerance) > 1e-9
+    const canConfirm = hasTrades && confirmed && !isFetching && !isError && !inFlight && !toleranceChanged
     const withinThreshold = boundary?.reasonCode === 'WITHIN_EVERY_THRESHOLD'
     const thresholdAmountCopy = boundary?.thresholdPercent != null && Number.isFinite(boundary.thresholdPercent)
         ? `${boundary.thresholdPercent.toFixed(2)} percentage points`
@@ -73,10 +96,22 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
         ? `${boundary.maxDriftPercent.toFixed(2)} percentage points`
         : null
     const noTradeStatusId = plan && !hasTrades && !isError ? 'dry-run-boundary-status' : undefined
-    const isTimeout = isError && /timeout|timed out/i.test(String((plan as any)?.error ?? ''))
+    const isTimeout = isError && /timeout|timed out/i.test(String((planError as Error | undefined)?.message ?? planError ?? ''))
     const timeoutCopy = isTimeout
         ? 'The simulation request timed out. Retry loading the plan, or cancel to abandon.'
         : 'The rebalance plan is unavailable.'
+
+    const refreshPlan = async () => {
+        if (isFetching || inFlight) return
+        setExecutionError(null)
+        setReviewedPlan(undefined)
+        setStatusAnnouncement('Refreshing the rebalance plan…')
+        try {
+            await refetch()
+        } finally {
+            setStatusAnnouncement(null)
+        }
+    }
 
     const handleConfirm = async () => {
         if (submittingRef.current || inFlight) {
@@ -193,6 +228,21 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                     </p>
                     {quote?.feedMeta.degraded && <p className="min-w-0 break-words">Some prices use a fallback feed.</p>}
                     {quote?.feedMeta.staleOrLimited && <p className="min-w-0 break-words">Some quoted prices may be stale.</p>}
+                    {toleranceChanged && (
+                        <div
+                            role="alert"
+                            className="min-w-0 space-y-2 break-words rounded border border-amber-300 bg-amber-50 p-2.5 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+                        >
+                            <p className="font-semibold">Slippage tolerance changed after this plan was quoted</p>
+                            <p>
+                                These trades were quoted with a {formatPercent(planTolerance)}% maximum slippage, but the portfolio now uses {formatPercent(activeTolerance!)}%.
+                                Refresh the plan to re-price the trades before confirming.
+                            </p>
+                            <Button variant="secondary" size="sm" onClick={() => void refreshPlan()} disabled={isFetching || inFlight}>
+                                {isFetching ? 'Refreshing…' : 'Refresh plan'}
+                            </Button>
+                        </div>
+                    )}
                     <p className="min-w-0 break-words">Maximum slippage: {plan.maxSlippagePercent}%</p>
                     <p className="min-w-0 break-words">The execution price and fees may change. Executed trades cannot be reversed from this app.</p>
                     <label className="flex min-w-0 items-start gap-2 break-words">
@@ -212,9 +262,27 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                 >
                     <p className="font-semibold">Rebalance submission failed</p>
                     <p className="min-w-0 break-words">{executionError}</p>
-                    <p className="mt-1 min-w-0 break-words text-xs text-red-600 dark:text-red-400">
-                        Review and re-acknowledge the planned trades to retry, or cancel to abandon.
-                    </p>
+                    {isSlippageFailure(executionError) ? (
+                        <>
+                            <p className="mt-1 min-w-0 break-words text-xs text-red-600 dark:text-red-400">
+                                Prices moved beyond your slippage limit before the rebalance was accepted, so nothing was executed.
+                                Refresh the plan for fresh prices, re-acknowledge, and try again.
+                            </p>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                className="mt-2"
+                                onClick={() => void refreshPlan()}
+                                disabled={isFetching || inFlight}
+                            >
+                                {isFetching ? 'Refreshing…' : 'Refresh quote and retry'}
+                            </Button>
+                        </>
+                    ) : (
+                        <p className="mt-1 min-w-0 break-words text-xs text-red-600 dark:text-red-400">
+                            Review and re-acknowledge the planned trades to retry, or cancel to abandon.
+                        </p>
+                    )}
                 </div>
             )}
         </Modal>
