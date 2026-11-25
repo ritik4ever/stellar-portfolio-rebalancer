@@ -6,10 +6,18 @@ If the language changes while you are editing a DCA amount in the portfolio wiza
 the wizard keeps the entered amount and the rest of the schedule. Check the amount,
 then either correct it or select **Confirm amount** before continuing to review and sign.
 Confirming the amount does not create or submit a portfolio.
+The schedule editor and review controls reflow at narrow viewport widths and
+larger text sizes; the review displays the numeric amount used by the schedule.
+
+The DCA amount is in funding token units, from 0.0000001 to 200000000,
+with at most seven fractional digits. Enter the decimal separator shown beside
+the field (for example, `0,0000001` in German); do not enter grouping separators.
+The wizard validates the value without rounding and sends the corresponding
+canonical numeric token amount, e.g. `0.0000001`.
 
 ## Keyboard and screen-reader accessibility for localized amount display
 
-The DCA schedule editor in the portfolio wizard provides comprehensive keyboard navigation and screen-reader support (WCAG 2.1 AA):
+The DCA schedule editor in the portfolio wizard includes keyboard and screen-reader support:
 - **Accessible names and descriptions**: The DCA amount input is associated with an accessible label, input helper guidance, and live formatted representation via `aria-describedby`.
 - **Decimal comma and high-precision token amounts**: High-precision token values (up to 7 decimal places / stroop precision) are formatted with locale-sensitive decimal and grouping separators (such as decimal comma in German `de`).
 - **Locale change announcements and focus management**: When language changes while editing the amount, an assertive alert and polite live-region announcement notify screen-reader users, and the field signals `aria-invalid="true"`. Keyboard users can review the amount, correct it, or activate **Confirm amount** to confirm and restore focus to the input.

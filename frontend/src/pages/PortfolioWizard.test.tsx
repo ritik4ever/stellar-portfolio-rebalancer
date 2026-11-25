@@ -12,6 +12,7 @@ import PortfolioWizard from './PortfolioWizard';
 import { api } from '../config/api';
 import { clearWizardDraft, saveWizardDraft, loadWizardDraft } from '../utils/wizardDraft';
 import i18n from '../i18n';
+import userEvent from '@testing-library/user-event';
 
 // Mock framer-motion to simplify DOM structure
 vi.mock('framer-motion', () => ({
@@ -161,7 +162,7 @@ describe('PortfolioWizard Page', () => {
     expect(screen.getByText('Step 4: Configure DCA Schedule')).toBeInTheDocument();
     const amountInput = screen.getByLabelText('DCA Amount');
     fireEvent.change(amountInput, { target: { value: '0' } });
-    expect(screen.getByRole('alert')).toHaveTextContent(/positive amount/i);
+    expect(screen.getByRole('alert')).toHaveTextContent(/stated range/i);
     expect(screen.getByRole('button', { name: /next/i })).toBeDisabled();
 
     fireEvent.change(amountInput, { target: { value: '250' } });
@@ -197,7 +198,7 @@ describe('PortfolioWizard Page', () => {
     expect(await screen.findByText(/language changed while editing/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /next/i })).toBeDisabled();
     expect(screen.getByLabelText(/interval \(days\)/i)).toHaveValue(14);
-    expect(amount).toHaveValue(250.5);
+    expect(amount).toHaveValue('250.5');
     fireEvent.click(screen.getByRole('button', { name: /confirm amount/i }));
     fireEvent.click(screen.getByRole('button', { name: /next/i }));
     fireEvent.click(screen.getByRole('button', { name: /sign with freighter/i }));
@@ -231,20 +232,18 @@ describe('PortfolioWizard Page', () => {
     for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: /next/i }));
 
     const amountInput = screen.getByLabelText('DCA Amount');
-    expect(amountInput).toHaveAttribute('type', 'number');
-    expect(amountInput).toHaveAttribute('step', 'any');
-    expect(amountInput).toHaveAttribute('min', '0.0000001');
+    expect(amountInput).toHaveAttribute('inputmode', 'decimal');
 
     // Switch to German (decimal comma locale)
     await i18n.changeLanguage('de');
 
     // Enter high-precision amount (7 decimal places / stroop)
-    fireEvent.change(amountInput, { target: { value: '0.0000001' } });
+    fireEvent.change(amountInput, { target: { value: '0,0000001' } });
     expect(screen.getByText(/formatted \(de\): 0,0000001/i)).toBeInTheDocument();
     expect(screen.getByLabelText('Localized amount: 0,0000001')).toBeInTheDocument();
 
     // Enter large amount with decimals
-    fireEvent.change(amountInput, { target: { value: '1234.5678' } });
+    fireEvent.change(amountInput, { target: { value: '1234,5678' } });
     expect(screen.getByText(/formatted \(de\): 1\.234,5678/i)).toBeInTheDocument();
 
     // Verify accessible description includes helper and formatted display
@@ -289,7 +288,8 @@ describe('PortfolioWizard Page', () => {
     // Confirm amount button is keyboard operable and restores focus
     const confirmBtn = screen.getByRole('button', { name: /confirm amount/i });
     expect(confirmBtn).toBeInTheDocument();
-    fireEvent.click(confirmBtn);
+    confirmBtn.focus();
+    await userEvent.keyboard('{Enter}');
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent(/dca amount confirmed/i);
@@ -313,6 +313,30 @@ describe('PortfolioWizard Page', () => {
     expect(cancelBtn).toBeInTheDocument();
     fireEvent.click(cancelBtn);
     expect(onNavigate).toHaveBeenCalledTimes(2);
+  });
+
+  it('explains decimal-comma boundaries and submits the canonical seven-place amount', async () => {
+    await i18n.changeLanguage('de');
+    mockMutateAsync.mockResolvedValue({ id: 'dca-portfolio' });
+    mockPost.mockResolvedValue({ hash: 'dca-share' });
+    renderWizard();
+    fireEvent.change(screen.getByLabelText(/rebalancing strategy/i), { target: { value: 'dca' } });
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    const amount = screen.getByLabelText('DCA Amount');
+    expect(amount).toHaveAccessibleDescription(/0,0000001 to 200000000.*7 decimal places.*“,”/i);
+    for (const invalid of ['0', '0,00000001', '200000001', '1.5', '1,2,3']) {
+      fireEvent.change(amount, { target: { value: invalid } });
+      expect(amount).toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getByRole('button', { name: /next/i })).toBeDisabled();
+    }
+    fireEvent.change(amount, { target: { value: '0,0000001' } });
+    expect(amount).toHaveAttribute('aria-invalid', 'false');
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /sign with freighter/i }));
+    await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledWith(expect.objectContaining({
+      strategyConfig: expect.objectContaining({ dcaAmount: 0.0000001 }),
+    })));
+    await i18n.changeLanguage('en');
   });
 
   it('shows summary and signs using Freighter in Step 4 and shows success in Step 5', async () => {

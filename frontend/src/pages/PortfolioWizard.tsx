@@ -23,6 +23,7 @@ import AssetSelector from '../components/AssetSelector';
 import ThemeToggle from '../components/ThemeToggle';
 import { walletManager } from '../utils/walletManager';
 import { saveWizardDraft, loadWizardDraft, clearWizardDraft } from '../utils/wizardDraft';
+import { decimalSeparator, formatDcaAmount, MAX_DCA_AMOUNT, parseDcaAmount } from '../utils/dcaAmount';
 
 interface PortfolioWizardProps {
   onNavigate: (view: string) => void;
@@ -99,6 +100,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   const [cooldown, setCooldown] = useState<number>(24);
   const [autoRebalance, setAutoRebalance] = useState<boolean>(true);
   const [dcaAmount, setDcaAmount] = useState<number>(100);
+  const [dcaAmountInput, setDcaAmountInput] = useState('100');
   const [amountEditLanguage, setAmountEditLanguage] = useState<string | null>(null);
   const [dcaIntervalDays, setDcaIntervalDays] = useState<number>(7);
   const [dcaStartDate, setDcaStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
@@ -159,11 +161,12 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     setCooldown(pendingDraft.cooldown);
     setAutoRebalance(pendingDraft.autoRebalance);
     setDcaAmount(pendingDraft.dcaAmount ?? 100);
+    setDcaAmountInput(formatDcaAmount(pendingDraft.dcaAmount ?? 100, language));
     setDcaIntervalDays(pendingDraft.dcaIntervalDays ?? 7);
     setDcaStartDate(pendingDraft.dcaStartDate ?? new Date().toISOString().slice(0, 10));
     setShowResumePrompt(false);
     setPendingDraft(null);
-  }, [pendingDraft]);
+  }, [pendingDraft, language]);
 
   const handleDiscardDraft = useCallback(() => {
     clearWizardDraft();
@@ -176,7 +179,8 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   const remaining = remainingAllocation(allocations);
   const isAllocationValid = Math.abs(totalPercentage - 100) < 0.01 && allocations.every(item => item.percentage > 0);
   const amountNeedsReview = step === 4 && strategy === 'dca' && amountEditLanguage !== null && amountEditLanguage !== language;
-  const isDcaScheduleValid = !amountNeedsReview && Number.isFinite(dcaAmount) && dcaAmount > 0
+  const parsedDcaAmount = parseDcaAmount(dcaAmountInput, amountEditLanguage ?? language);
+  const isDcaScheduleValid = !amountNeedsReview && parsedDcaAmount !== null
     && Number.isInteger(dcaIntervalDays) && dcaIntervalDays >= 1 && dcaIntervalDays <= 365
     && Boolean(dcaStartDate) && !Number.isNaN(new Date(`${dcaStartDate}T00:00:00`).getTime());
 
@@ -187,6 +191,8 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   }, [amountNeedsReview, language]);
 
   const handleConfirmAmount = () => {
+    if (parsedDcaAmount === null) return;
+    setDcaAmountInput(formatDcaAmount(parsedDcaAmount, language));
     setAmountEditLanguage(language);
     setAnnouncement('DCA amount confirmed.');
     dcaAmountInputRef.current?.focus();
@@ -194,16 +200,17 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
 
   const handleDcaAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
-    const num = val === '' ? 0 : Number(val);
-    setDcaAmount(num);
+    setDcaAmountInput(val);
+    const num = parseDcaAmount(val, language);
+    if (num !== null) setDcaAmount(num);
     setAmountEditLanguage(language);
     if (amountNeedsReview) {
       setAnnouncement('DCA amount updated.');
     }
   };
 
-  const localizedDcaAmount = Number.isFinite(dcaAmount) && dcaAmount > 0
-    ? dcaAmount.toLocaleString(language || undefined, { maximumFractionDigits: 7, useGrouping: true })
+  const localizedDcaAmount = parsedDcaAmount !== null
+    ? parsedDcaAmount.toLocaleString(language || undefined, { maximumFractionDigits: 7, useGrouping: true })
     : '';
 
   
@@ -366,16 +373,16 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors">
       {/* Navbar header */}
       <header className="border-b border-gray-200 dark:border-gray-800 bg-white/70 dark:bg-gray-900/70 backdrop-blur-md sticky top-0 z-30">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="max-w-4xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-3">
             <button 
               onClick={() => onNavigate('dashboard')}
               aria-label="Abandon wizard and return to dashboard"
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="shrink-0 p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <ArrowLeft className="w-5 h-5" aria-hidden="true" />
             </button>
-            <div>
+            <div className="min-w-0 [overflow-wrap:anywhere]">
               <span className="text-xs font-semibold tracking-wider text-blue-600 dark:text-blue-400 uppercase">
                 Portfolio Builder
               </span>
@@ -398,8 +405,8 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
               const isActive = step === stepNum;
               return (
                 <React.Fragment key={title}>
-                  <div className="flex flex-col items-center flex-1 position-relative">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${
+                  <div className="flex min-w-0 flex-col items-center flex-1 position-relative">
+                    <div className={`w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${
                       isCompleted 
                         ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' 
                         : isActive 
@@ -415,7 +422,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                     </span>
                   </div>
                   {i < stepTitles.length - 1 && (
-                    <div className={`h-[2px] w-full flex-1 mx-2 transition-colors duration-300 ${
+                    <div className={`h-[2px] min-w-0 flex-1 mx-1 sm:mx-2 transition-colors duration-300 ${
                       step > stepNum ? 'bg-emerald-500' : 'bg-gray-200 dark:bg-gray-800'
                     }`} />
                   )}
@@ -434,12 +441,8 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
         )}
 
         {/* Wizard Panel */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800/80 p-6 md:p-8 transition-all">
-          {announcement && (
-            <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-              {announcement}
-            </div>
-          )}
+        <div className="min-w-0 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800/80 p-4 sm:p-6 md:p-8 transition-all">
+          <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</div>
           
           {/* Resume Draft Prompt */}
           {showResumePrompt && pendingDraft && (
@@ -706,10 +709,9 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                   <input
                     ref={dcaAmountInputRef}
                     id="dca-amount"
-                    type="number"
-                    min="0.0000001"
-                    step="any"
-                    value={dcaAmount || ''}
+                    type="text"
+                    inputMode="decimal"
+                    value={dcaAmountInput}
                     onFocus={() => setAmountEditLanguage((previous) => previous ?? language)}
                     onChange={handleDcaAmountChange}
                     aria-describedby={
@@ -719,24 +721,25 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                           ? 'dca-amount-help dca-amount-localized-display'
                           : 'dca-amount-help'
                     }
-                    aria-invalid={amountNeedsReview || !isDcaScheduleValid}
+                    aria-invalid={amountNeedsReview || parsedDcaAmount === null}
                     aria-label="DCA Amount"
                     className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <div className="flex flex-wrap justify-between items-center gap-1 mt-1">
                     <p id="dca-amount-help" className="text-xs text-gray-500 dark:text-gray-400">
-                      Enter a positive amount in your portfolio's funding currency. High-precision token amounts (up to 7 decimals) are supported.
+                      Enter {formatDcaAmount(0.0000001, language)} to {formatDcaAmount(MAX_DCA_AMOUNT, language)} in funding token units, with at most 7 decimal places. Use “{decimalSeparator(language)}” as the decimal separator; do not use grouping separators.
                     </p>
                     {localizedDcaAmount ? (
                       <span
                         id="dca-amount-localized-display"
-                        className="text-xs font-mono text-gray-600 dark:text-gray-300"
+                        className="max-w-full [overflow-wrap:anywhere] text-xs font-mono text-gray-600 dark:text-gray-300"
                         aria-label={`Localized amount: ${localizedDcaAmount}`}
                       >
                         Formatted ({language}): {localizedDcaAmount}
                       </span>
                     ) : null}
                   </div>
+                  {parsedDcaAmount === null && <p role="alert" className="mt-1 text-sm text-red-600">Enter an amount within the stated range using at most 7 decimal places and no grouping separators.</p>}
                   {amountNeedsReview && (
                     <div
                       id="dca-amount-locale-review"
@@ -749,6 +752,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                       <button
                         ref={confirmAmountButtonRef}
                         type="button"
+                        disabled={parsedDcaAmount === null}
                         onClick={handleConfirmAmount}
                         aria-label="Confirm amount"
                         className="mt-1 underline focus:outline-none focus:ring-2 focus:ring-amber-500 rounded px-1"
@@ -770,7 +774,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                     onChange={(e) => setDcaStartDate(e.target.value)}
                     className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
-                {!isDcaScheduleValid && !amountNeedsReview && (
+                {!isDcaScheduleValid && !amountNeedsReview && parsedDcaAmount !== null && (
                   <p role="alert" className="text-sm font-semibold text-red-600 dark:text-red-400">Enter a positive amount, an interval from 1 to 365 days, and a valid start date to continue.</p>
                 )}
               </div>
@@ -804,7 +808,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                   <div className="bg-gray-50 dark:bg-gray-900/40 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 space-y-2">
                     <h3 className="font-bold text-md border-b border-gray-200 dark:border-gray-800 pb-2">DCA Schedule</h3>
                     <p
-                      className="text-sm"
+                      className="text-sm break-words [overflow-wrap:anywhere]"
                       aria-label={`DCA Schedule: ${dcaAmount} every ${dcaIntervalDays} days starting ${dcaStartDate}`}
                     >
                       {dcaAmount} every {dcaIntervalDays} days starting {dcaStartDate}
@@ -839,9 +843,9 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                 {publicKey ? (
                   <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-400 flex items-center gap-3 text-sm">
                     <Check className="w-5 h-5 shrink-0" />
-                    <div>
+                    <div className="min-w-0">
                       <span className="font-bold block">Wallet Connected</span>
-                      <span className="font-mono text-xs opacity-90">{publicKey}</span>
+                      <span className="font-mono text-xs opacity-90 break-all">{publicKey}</span>
                     </div>
                   </div>
                 ) : (
@@ -910,8 +914,8 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
 
           {/* Footer Controls */}
           {step < successStep && (
-            <div className="flex justify-between items-center gap-4 mt-8 pt-6 border-t border-gray-100 dark:border-gray-800">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap justify-between items-center gap-3 mt-8 pt-6 border-t border-gray-100 dark:border-gray-800">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={handleBack}
@@ -937,7 +941,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                   disabled={!canGoForward() || isSigning}
                   aria-busy={isSigning}
                   aria-label={isSigning ? 'Signing transaction with Freighter' : 'Sign with Freighter'}
-                  className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-300 dark:disabled:bg-blue-800/50 disabled:cursor-not-allowed font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/10 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="inline-flex max-w-full flex-wrap items-center justify-center gap-1.5 px-3 sm:px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-300 dark:disabled:bg-blue-800/50 disabled:cursor-not-allowed font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/10 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {isSigning ? (
                     <>
@@ -953,7 +957,6 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                 <button
                   onClick={handleNext}
                   disabled={!canGoForward()}
-                  aria-label="Go to next step"
                   className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-300 dark:disabled:bg-blue-800/50 disabled:cursor-not-allowed font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/10 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   Next <ChevronRight className="w-4 h-4" aria-hidden="true" />
