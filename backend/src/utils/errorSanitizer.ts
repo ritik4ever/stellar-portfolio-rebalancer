@@ -105,24 +105,39 @@ export function sanitizeErrorMessage(message: string): string {
  * objects and arrays are rebuilt with sanitized members, and fields whose
  * name denotes a secret (`apiKey`, `smtp_pass`, …) are masked entirely.
  */
-export function sanitizeErrorDetails(details: unknown): unknown {
+export function sanitizeErrorDetails(details: unknown, seen = new WeakSet<object>(), depth = 0): unknown {
     if (details === null || details === undefined) return details
 
+    // Error causes and arbitrary details can be cyclic or deeply nested. Keep
+    // serialization bounded and replace repeated references with a safe marker.
+    if (depth >= 8) return '[Truncated]'
+    if (typeof details === 'object') {
+        if (seen.has(details)) return '[Circular]'
+        seen.add(details)
+    }
+
     if (details instanceof Error) {
-        return { name: details.name, message: sanitizeErrorMessage(details.message) }
+        const result: Record<string, unknown> = {
+            name: details.name,
+            message: sanitizeErrorMessage(details.message),
+        }
+        if ('cause' in details && details.cause !== undefined) {
+            result.cause = sanitizeErrorDetails(details.cause, seen, depth + 1)
+        }
+        return result
     }
 
     if (typeof details === 'string') return sanitizeErrorMessage(details)
 
     if (Array.isArray(details)) {
-        return details.map(entry => sanitizeErrorDetails(entry))
+        return details.map(entry => sanitizeErrorDetails(entry, seen, depth + 1))
     }
 
     if (typeof details === 'object') {
         const sanitized: Record<string, unknown> = {}
         for (const [key, value] of Object.entries(details as Record<string, unknown>)) {
             if (key === 'stack') continue
-            sanitized[key] = isSensitiveKey(key) ? REDACTED_HINT : sanitizeErrorDetails(value)
+            sanitized[key] = isSensitiveKey(key) ? REDACTED_HINT : sanitizeErrorDetails(value, seen, depth + 1)
         }
         return sanitized
     }
