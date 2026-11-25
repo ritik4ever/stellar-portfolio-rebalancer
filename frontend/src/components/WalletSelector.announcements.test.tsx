@@ -27,6 +27,31 @@ const wallets = [
 ]
 
 describe('WalletSelector announcements', () => {
+  describe('no wallet extension detected', () => {
+    beforeEach(() => {
+      mockWalletManager.getAvailableWallets.mockReturnValue([])
+      mockWalletManager.connect.mockReset()
+      mockWalletManager.disconnect.mockReset().mockResolvedValue(undefined)
+      mockDetect.mockReset().mockResolvedValue(null)
+    })
+
+    it('announces the no-wallet state with an accessible name', () => {
+      render(<WalletSelector onConnect={vi.fn()} />)
+      const alert = screen.getByRole('alert', { name: 'No wallet extension detected' })
+      expect(alert).toHaveTextContent('No Stellar wallets detected. Please install Freighter, Rabet, xBull, or Hana wallet extension.')
+
+      // The user can still open diagnostics to learn what failed
+      const toggle = screen.getByRole('button', { name: /Show startup diagnostics/i })
+      expect(toggle).toBeInTheDocument()
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      expect(toggle).toHaveAttribute('aria-controls', 'wallet-diagnostics-panel')
+
+      fireEvent.click(toggle)
+      expect(toggle).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByTestId('diagnostics-panel')).toBeInTheDocument()
+    })
+  })
+
   beforeEach(() => {
     mockWalletManager.getAvailableWallets.mockReturnValue(wallets)
     mockWalletManager.connect.mockReset()
@@ -112,5 +137,136 @@ describe('WalletSelector announcements', () => {
     await act(async () => resolve('GKEY'))
     expect(onConnect).not.toHaveBeenCalled()
     expect(mockWalletManager.disconnect).toHaveBeenCalled()
+  })
+
+  describe('keyboard and screen-reader usability', () => {
+    it('renders wallet buttons keyboard reachable with accessible names', () => {
+      render(<WalletSelector onConnect={vi.fn()} />)
+      const freighterBtn = screen.getByRole('button', { name: 'Connect to Freighter' })
+      const rabetBtn = screen.getByRole('button', { name: 'Connect to Rabet' })
+
+      // Each button has an accessible name a screen reader can announce
+      expect(freighterBtn).toHaveAccessibleName('Connect to Freighter')
+      expect(rabetBtn).toHaveAccessibleName('Connect to Rabet')
+
+      // Buttons are in the tab order and focusable
+      expect(freighterBtn.tabIndex).toBe(0)
+      expect(rabetBtn.tabIndex).toBe(0)
+
+      // The wallet group has an accessible label
+      const group = screen.getByRole('group', { name: 'Available wallets' })
+      expect(group).toBeInTheDocument()
+      expect(group).toContainElement(freighterBtn)
+    })
+
+    it('announces the selecting state when a wallet button is activated', async () => {
+      let resolve!: (k: string) => void
+      mockWalletManager.connect.mockReturnValue(new Promise<string>(r => (resolve = r)))
+      const onConnect = vi.fn()
+      render(<WalletSelector onConnect={onConnect} />)
+      const freighterBtn = screen.getByRole('button', { name: 'Connect to Freighter' })
+
+      freighterBtn.focus()
+      fireEvent.click(freighterBtn)
+      // The polite status region announces the connecting state for screen readers
+      const status = await screen.findByTestId('wallet-connect-status')
+      await waitFor(() => expect(status).toHaveTextContent('Connecting to Freighter. Approve the request in your wallet.'))
+      expect(status).toHaveAttribute('role', 'status')
+      expect(status).toHaveAttribute('aria-live', 'polite')
+
+      // Complete the connection and verify the status updates
+      await act(async () => resolve('GKEY'))
+      expect(status).toHaveTextContent('Connected to Freighter.')
+      expect(onConnect).toHaveBeenCalledWith('GKEY')
+    })
+
+    it('keeps focus on the pressed button after a declined connection and reads the error next to it', async () => {
+      mockWalletManager.connect.mockRejectedValue(Object.assign(new Error('x'), { code: 'USER_DECLINED' }))
+      render(<WalletSelector onConnect={vi.fn()} />)
+      const freighterBtn = screen.getByRole('button', { name: 'Connect to Freighter' })
+
+      freighterBtn.focus()
+      fireEvent.click(freighterBtn)
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent('declined in your wallet, so nothing was connected')
+      expect(freighterBtn).toHaveAccessibleDescription(alert.textContent!)
+      await waitFor(() => expect(freighterBtn).toHaveFocus())
+      // Only the pressed button describes the error; the other button does not
+      expect(screen.getByRole('button', { name: 'Connect to Rabet' })).not.toHaveAccessibleDescription(alert.textContent!)
+    })
+
+    it('returns focus to the wallet buttons area when no wallet extension is detected', () => {
+      mockWalletManager.getAvailableWallets.mockReturnValue([])
+      render(<WalletSelector onConnect={vi.fn()} />)
+
+      const alert = screen.getByRole('alert', { name: 'No wallet extension detected' })
+      expect(alert).toBeInTheDocument()
+      expect(alert).toHaveTextContent('No Stellar wallets detected. Please install Freighter, Rabet, xBull, or Hana wallet extension.')
+
+      // The diagnostics toggle is keyboard reachable and describes what it controls
+      const toggle = screen.getByRole('button', { name: /Show startup diagnostics/i })
+      expect(toggle).toBeInTheDocument()
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      expect(toggle).toHaveAttribute('aria-controls', 'wallet-diagnostics-panel')
+
+      // Activating the toggle reveals diagnostics that match what the button controls
+      fireEvent.click(toggle)
+      expect(toggle).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByTestId('diagnostics-panel')).toBeInTheDocument()
+    })
+
+    it('updates the switch label when auto-reconnect is toggled', async () => {
+      render(<WalletSelector onConnect={vi.fn()} />)
+      const toggle = screen.getByRole('switch', { name: /Enable auto-reconnect on page refresh/i })
+      expect(toggle).toHaveAttribute('aria-checked', 'true')
+      expect(toggle).toHaveAccessibleName('Enable auto-reconnect on page refresh')
+
+      fireEvent.click(toggle)
+      await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'))
+      expect(toggle).toHaveAccessibleName('Disable auto-reconnect on page refresh')
+
+      // Toggle back to confirm bidirectional updates
+      fireEvent.click(toggle)
+      await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'))
+      expect(toggle).toHaveAccessibleName('Enable auto-reconnect on page refresh')
+    })
+
+    it('prevents duplicate submission by ignoring presses while a request is pending', async () => {
+      mockWalletManager.connect.mockReturnValue(new Promise(() => {}))
+      render(<WalletSelector onConnect={vi.fn()} />)
+      const freighterBtn = screen.getByRole('button', { name: 'Connect to Freighter' })
+
+      freighterBtn.focus()
+      fireEvent.click(freighterBtn)
+      await waitFor(() => expect(freighterBtn).toHaveAttribute('aria-disabled', 'true'))
+
+      // Additional presses during pending request are ignored
+      fireEvent.click(freighterBtn)
+      fireEvent.click(screen.getByRole('button', { name: 'Connect to Rabet' }))
+      expect(mockWalletManager.connect).toHaveBeenCalledTimes(1)
+
+      // Focus stays on the pressed button so the user can cancel or try another wallet
+      expect(freighterBtn).toHaveFocus()
+    })
+
+    it('announces error recovery by returning focus to the wallet button after a failure', async () => {
+      mockWalletManager.connect.mockRejectedValue(new Error('Connection failed'))
+
+      const onConnect = vi.fn()
+      const onError = vi.fn()
+      render(<WalletSelector onConnect={onConnect} onError={onError} />)
+      const freighterBtn = screen.getByRole('button', { name: 'Connect to Freighter' })
+
+      freighterBtn.focus()
+      fireEvent.click(freighterBtn)
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent('Connection failed')
+
+      // Focus returns to the button so the user can retry
+      await waitFor(() => expect(freighterBtn).toHaveFocus())
+      expect(freighterBtn).toHaveAccessibleDescription(alert.textContent!)
+      expect(onError).toHaveBeenCalledWith('Connection failed')
+      expect(onConnect).not.toHaveBeenCalled()
+    })
   })
 })

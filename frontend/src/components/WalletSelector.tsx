@@ -164,7 +164,11 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
     if (availableWallets.length === 0) {
         return (
             <div>
-                <div className="p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800" role="alert">
+                <div
+                    className="p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800"
+                    role="alert"
+                    aria-label="No wallet extension detected"
+                >
                     <p className="text-yellow-800 dark:text-yellow-300 text-sm">
                         No Stellar wallets detected. Please install Freighter, Rabet, xBull, or Hana wallet extension.
                     </p>
@@ -173,12 +177,15 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
                     <button
                         type="button"
                         onClick={() => setShowDiagnostics(!showDiagnostics)}
+                        aria-expanded={showDiagnostics}
+                        aria-controls="wallet-diagnostics-panel"
                         className="flex w-full items-center justify-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
                     >
                         {showDiagnostics ? 'Hide' : 'Show'} startup diagnostics
                     </button>
                     {showDiagnostics ? (
                         <BootDiagnosticsPanel
+                            id="wallet-diagnostics-panel"
                             checks={bootChecks}
                             onRetry={runChecks}
                             className="mt-2"
@@ -251,7 +258,7 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
                     type="button"
                     role="switch"
                     aria-checked={autoReconnect}
-                    aria-label="Auto-reconnect on page refresh"
+                    aria-label={autoReconnect ? 'Enable auto-reconnect on page refresh' : 'Disable auto-reconnect on page refresh'}
                     onClick={toggleAutoReconnect}
                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${autoReconnect ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}
                 >
@@ -259,9 +266,12 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
                         className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${autoReconnect ? 'translate-x-[18px]' : 'translate-x-[3px]'}`}
                     />
                 </button>
-                <label className="text-xs text-gray-500 dark:text-gray-400 select-none">
-                    Auto-reconnect on page refresh
-                </label>
+                <span className="text-xs text-gray-500 dark:text-gray-400 select-none">
+                    {' '}
+                </span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                    Auto-reconnect on page refresh: {autoReconnect ? 'On' : 'Off'}
+                </span>
             </div>
             <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
                 <button

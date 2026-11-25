@@ -34,6 +34,7 @@ export default function BootDiagnosticsPanel({ checks, onRetry, className = '' }
 
     return (
         <div
+            data-testid="diagnostics-panel"
             className={`rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60 ${className}`}
             role="status"
             aria-live="polite"

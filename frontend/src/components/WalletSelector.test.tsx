@@ -603,23 +603,25 @@ describe("WalletSelector", () => {
         <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
       );
 
-      expect(
-        screen.getByLabelText("Auto-reconnect on page refresh"),
-      ).toBeTruthy();
+      const toggle = screen.getByRole("switch", { name: /Enable auto-reconnect on page refresh/i });
+      expect(toggle).toBeInTheDocument();
+      expect(toggle).toHaveAttribute("aria-checked", "true");
     });
 
-    it("should toggle auto-reconnect off and on", () => {
+    it("should toggle auto-reconnect off and on", async () => {
       render(
         <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
       );
 
-      const toggle = screen.getByLabelText("Auto-reconnect on page refresh");
+      const toggle = screen.getByRole("switch", { name: /Enable auto-reconnect on page refresh/i });
       expect(toggle).toHaveAttribute("aria-checked", "true");
 
       fireEvent.click(toggle);
+      await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
       expect(mockWalletManager.setAutoReconnect).toHaveBeenCalledWith(false);
 
       fireEvent.click(toggle);
+      await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
       expect(mockWalletManager.setAutoReconnect).toHaveBeenCalledWith(true);
     });
   });
