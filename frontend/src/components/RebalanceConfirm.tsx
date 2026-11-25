@@ -125,6 +125,12 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
         setStatusAnnouncement('Submitting rebalance…')
         try {
             const result = await execute.mutateAsync()
+            const finalStatus = result?.result?.status ?? result?.status
+            if (finalStatus === 'failed') {
+                const reason = result?.result?.failureReason ?? result?.result?.error ?? result?.failureReason
+                const txRef = result?.txId ?? result?.result?.txId ?? result?.result?.txHash
+                throw new Error(`${reason || 'Rebalance execution failed.'}${txRef ? ` (TX: ${txRef})` : ''}`)
+            }
             submittingRef.current = false
             setIsSubmitting(false)
             onSuccess?.(result)
@@ -149,7 +155,21 @@ function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConf
                         {plan && !hasTrades ? 'Close' : 'Cancel'}
                     </Button>
                     {hasTrades && !isError && (
+                        <p id="rebalance-submit-hint" className="w-full min-w-0 break-words text-right text-xs text-gray-600 dark:text-gray-400">
+                            {inFlight
+                                ? 'Submission in progress. Extra clicks are ignored, so only one rebalance is sent.'
+                                : toleranceChanged
+                                    ? 'Refresh the plan to re-price trades before confirming.'
+                                    : isFetching
+                                        ? 'Refreshing the plan. Confirm becomes available when it finishes.'
+                                        : !confirmed
+                                            ? 'Check the review box to enable Confirm. Click it once: repeated clicks are ignored.'
+                                            : 'Click Confirm once. Repeated clicks are ignored while it submits.'}
+                        </p>
+                    )}
+                    {hasTrades && !isError && (
                         <Button
+                            aria-describedby="rebalance-submit-hint"
                             variant="primary"
                             onClick={handleConfirm}
                             disabled={!canConfirm}
