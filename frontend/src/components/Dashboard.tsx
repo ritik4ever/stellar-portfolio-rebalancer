@@ -552,6 +552,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     {dashboardCopy.demoMode}
                                 </span>
                             )}
+                            <div
+                                role="status"
+                                aria-live="polite"
+                                aria-atomic="true"
+                                className="sr-only"
+                            >
+                                {demoAnnouncement}
+                            </div>
                         </div>
                     </div>
 
@@ -661,9 +669,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     className="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap min-w-0">
                                     Connect Wallet
                                 </button>
-                                <button type="button" onClick={() => setShowDemoResetConfirm(true)}
+                                <button type="button" onClick={event => openDemoResetConfirm(event.currentTarget)}
                                     aria-label="Reset demo portfolio"
-                                    className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1 whitespace-nowrap min-w-0">
+                                    className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1 whitespace-nowrap min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
                                     <RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />
                                     <span>Reset Demo</span>
                                 </button>
@@ -781,12 +789,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             {/* Demo reset confirmation modal */}
             {showDemoResetConfirm && (
                 <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-3 sm:p-4">
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-4 sm:p-6 min-w-0 max-h-[90vh] overflow-y-auto">
+                    <div
+                        ref={demoResetDialogRef}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="demo-reset-dialog-title"
+                        aria-describedby="demo-reset-dialog-description"
+                        aria-busy={resettingDemo}
+                        tabIndex={-1}
+                        className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-4 sm:p-6 min-w-0 max-h-[90vh] overflow-y-auto focus:outline-none"
+                    >
                         <div className="flex items-center gap-2 mb-4 min-w-0">
-                            <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0" />
-                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white break-words">Reset Demo Portfolio</h2>
+                            <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0" aria-hidden="true" />
+                            <h2 id="demo-reset-dialog-title" className="text-xl font-semibold text-gray-900 dark:text-white break-words">Reset Demo Portfolio</h2>
                         </div>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6 break-words">
+                        <p id="demo-reset-dialog-description" className="text-gray-600 dark:text-gray-400 text-sm mb-4 break-words">
                             This will reset the demo portfolio to its default state with $10,000 total value and 40% XLM / 60% USDC allocation. Real wallet balances and on-chain portfolios are not affected.
                         </p>
                         {demoResetError && (
@@ -819,7 +836,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 ) : demoResetError ? (
                                     <><RefreshCw className="w-4 h-4 flex-shrink-0" />{demoResetError.completedSteps.length > 0 ? 'Retry Remaining Steps' : 'Retry Reset'}</>
                                 ) : (
-                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" />Reset Demo</>
+                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden="true" />Reset Demo</>
                                 )}
                             </button>
                         </div>
@@ -1232,9 +1249,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 <span className="hidden sm:inline">New</span>
                             </button>
                         ) : (
-                            <button type="button" onClick={() => setShowDemoResetConfirm(true)}
+                            <button type="button" onClick={event => openDemoResetConfirm(event.currentTarget)}
                                 aria-label="Reset demo portfolio"
-                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-2.5 sm:px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1">
+                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-2.5 sm:px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
                                 <RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />
                                 <span>Reset</span>
                             </button>
