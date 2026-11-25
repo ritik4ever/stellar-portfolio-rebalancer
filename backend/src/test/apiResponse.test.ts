@@ -52,3 +52,57 @@ describe('apiResponse helpers', () => {
         })
     })
 })
+
+describe('fail() error serialization', () => {
+    it('redacts credential values in the message but keeps the wording', () => {
+        const { res, state } = mockRes()
+        fail(res, 500, 'INTERNAL_ERROR', "Failed to get asset 'XLM': connection failed password=hunter2secret")
+
+        const error = (state.body as any).error
+        expect(error.message).toContain("Failed to get asset 'XLM'")
+        expect(error.message).toContain('connection failed')
+        expect(error.message).toContain('password=[REDACTED]')
+        expect(error.message).not.toContain('hunter2secret')
+    })
+
+    it('keeps authored operator hints untouched', () => {
+        const { res, state } = mockRes()
+        fail(res, 503, 'SERVICE_UNAVAILABLE', 'ALLOW_FALLBACK_PRICES is disabled')
+
+        expect((state.body as any).error.message).toBe('ALLOW_FALLBACK_PRICES is disabled')
+    })
+
+    it('drops the details payload of a server error', () => {
+        const { res, state } = mockRes()
+        fail(res, 500, 'INTERNAL_ERROR', 'Boom', { upstream: 'postgres://user:pw@db/app' })
+
+        expect((state.body as any).error.details).toBeUndefined()
+        expect(JSON.stringify(state.body)).not.toContain('postgres://')
+    })
+
+    it('keeps and sanitizes the details payload of a client error', () => {
+        const { res, state } = mockRes()
+        fail(res, 400, 'VALIDATION_ERROR', 'Invalid payload', { field: 'api_key', token: 'abc123' })
+
+        expect((state.body as any).error.details).toEqual({ field: 'api_key', token: '[REDACTED]' })
+    })
+
+    it('reduces an Error instance in details to name and message', () => {
+        const { res, state } = mockRes()
+        const cause = new Error('upstream failed password=hunter2secret')
+        fail(res, 422, 'UNPROCESSABLE', 'Invalid state', { cause })
+
+        const details = (state.body as any).error.details
+        expect(details.cause.name).toBe('Error')
+        expect(details.cause.message).toContain('password=[REDACTED]')
+        expect(details.cause.message).not.toContain('hunter2secret')
+        expect(details.cause.stack).toBeUndefined()
+    })
+
+    it('never serializes stack frames', () => {
+        const { res, state } = mockRes()
+        fail(res, 500, 'INTERNAL_ERROR', 'Boom\n    at Object.<anonymous> (/srv/app/src/routes.ts:12:5)')
+
+        expect((state.body as any).error.message).toBe('Boom')
+    })
+})

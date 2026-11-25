@@ -27,10 +27,18 @@ It helps users maintain optimal asset allocation through automated rebalancing t
 ## Features
 
 * **Smart Rebalancing** – Automatic maintenance of target allocations based on threshold triggers.
+* **Target-Weight Invariants & Bounds** – Portfolio allocations are strictly bounded (1..=10,000 bps per asset) and verified to sum to exactly 100% (10,000 bps) in integer units; under-allocation, over-allocation, or unauthorized submissions are rejected atomically, preserving stored weights, current balances, and contract funds unchanged while emitting events only for committed state transitions to allow unambiguous off-chain state reconstruction.
+* **Bounded Drift Thresholds** – Portfolio thresholds are constrained to 1%–50%; an out-of-range threshold is rejected atomically, so no portfolio, balance or configuration is changed.
+* **Admin-Gated Price Source** – Only the contract admin can change the oracle price source or its deviation bound; a rejected caller leaves the authorized oracle, balances and last accepted price unchanged.
+* **Bounded Quote Freshness** – Oracle quotes are accepted up to 1 hour old; an older quote is stale, its asset is skipped, and the rebalance is blocked with `StaleOraclePrice`.
 * **Multi-Wallet Support** – Compatible with Freighter, Rabet, xBull, and other Stellar wallets.
 * **Real-Time Price Feeds** – Powered by Reflector oracles with API fallbacks.
 * **Risk Management** – Circuit breakers, concentration limits, and volatility detection.
 * **Professional UI** – Responsive interface with real-time portfolio visualization.
+* **Portfolio Drift Chart UX Contract** – Signed zero/negative drift, the chart scale, and an as-of timestamp stay visible across time ranges.
+  A late price update after a range change must expose retry or correction without duplicate actions or losing unrelated edits.
+  Keyboard and screen-reader users must get named controls, retained focus, and state announcements.
+  Controls and chart details must remain operable at 320px and 200% text size without horizontal clipping.
 * **Demo Mode** – $10,000 simulated portfolio for testing.
 * **Trust & Transparency** – Landing page summarizes architecture, risk controls, and observability; legal documents show a fixed version and effective date.
 
@@ -86,7 +94,7 @@ Frontend: React + TypeScript + Tailwind CSS
 
 Backend: Node.js + Express + TypeScript
 
-Price Data: Reflector + CoinGecko API
+Price Data: Reflector + CoinGecko API. See [backend oracle quotes](backend/docs/oracle-quotes.md) for precision and fallback diagnostics.
 
 
 Rust + Cargo
@@ -294,8 +302,8 @@ cd frontend && npm test
 # Backend tests
 cd backend && npm test
 
-# Smart contract tests
-cd contracts && cargo test
+# Smart contract tests (unit + property suites, incl. threshold-bounds, oracle-authorization, stale-quote, and target-weight event/regression suites)
+cd contracts && cargo test --features testutils
 
 # Smart contract gas benchmarks
 cd contracts && make bench

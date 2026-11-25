@@ -7,8 +7,8 @@ import {
 import { logger } from '../utils/logger.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 
-const STALE_POLICY_MS = 5 * 60 * 1000
-const QUARANTINE_POLICY_MS = 30 * 60 * 1000
+const STALE_POLICY_MS = 24 * 60 * 60 * 1000 // 24 hours
+const QUARANTINE_POLICY_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 export type AssetVerificationStatus = 'pending' | 'verified' | 'rejected'
 
@@ -18,6 +18,7 @@ export interface AssetRecord {
     contractAddress?: string
     issuerAccount?: string
     coingeckoId?: string
+    issuerMetadata?: any
     enabled: boolean
     lastRefreshedAt?: string
     isQuarantined: boolean
@@ -28,6 +29,26 @@ export interface AssetRecord {
     submittedBy?: string
     reviewedBy?: string
     reviewedAt?: string
+}
+
+export const DEFAULT_PAGE_SIZE = 20
+export const MAX_PAGE_SIZE = 100
+
+export interface AssetQueryOptions {
+    enabledOnly?: boolean
+    search?: string
+    issuer?: string
+    sortBy?: 'symbol' | 'name' | 'enabled'
+    order?: 'asc' | 'desc'
+    page?: number
+    limit?: number
+}
+
+export interface AssetQueryResult {
+    assets: AssetRecord[]
+    page: number
+    limit: number
+    total: number
 }
 
 
@@ -69,6 +90,7 @@ export const assetRegistryService = {
             contractAddress: asset.contractAddress,
             issuerAccount: asset.issuerAccount,
             coingeckoId: asset.coingeckoId,
+            issuerMetadata: asset.issuerMetadata,
             enabled: asset.enabled,
             lastRefreshedAt: asset.lastRefreshedAt,
             isQuarantined,
@@ -103,7 +125,7 @@ export const assetRegistryService = {
             limit = DEFAULT_PAGE_SIZE
         } = options
 
-        let assets = databaseService.listAssets(enabledOnly)
+        let assets = this.list(enabledOnly)
 
         const term = search?.trim().toUpperCase()
         if (term) {
