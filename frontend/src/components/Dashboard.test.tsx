@@ -477,7 +477,7 @@ describe('Dashboard', () => {
         renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey={null} />)
 
         // Switch to Analytics tab as unrelated user state
-        fireEvent.click(await screen.findByRole('button', { name: /analytics/i }))
+        fireEvent.click(await screen.findByRole('button', { name: /^analytics section$/i }))
         expect(await screen.findByText('Performance Chart')).toBeInTheDocument()
 
         const resetButtons = screen.getAllByRole('button', { name: /reset demo portfolio/i })

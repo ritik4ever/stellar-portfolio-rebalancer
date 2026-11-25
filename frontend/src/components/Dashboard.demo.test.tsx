@@ -184,7 +184,8 @@ describe('Dashboard demo mode and wallet switching (SPR-2026-085)', () => {
         view.rerender(<Dashboard onNavigate={onNavigate} publicKey={connectedKey} />)
 
         expect(await screen.findByText('Wallet balance')).toBeInTheDocument()
-        expect(screen.getByText('$42,500')).toBeInTheDocument()
+        // The total shows in the header summary and again in the mobile action bar.
+        expect(screen.getAllByText('$42,500').length).toBeGreaterThan(0)
         expect(screen.getByText(/GABC\.\.\.TEST/)).toBeInTheDocument()
         expect(screen.getByText('Asset Card BTC')).toBeInTheDocument()
         expect(screen.getByText('Asset Card ETH')).toBeInTheDocument()
@@ -282,7 +283,8 @@ describe('Dashboard demo mode and wallet switching (SPR-2026-085)', () => {
         fireEvent.click(confirmButton)
         fireEvent.click(confirmButton)
 
-        expect(confirmButton).toBeDisabled()
+        // aria-disabled (not `disabled`) so keyboard focus is not dropped mid-reset.
+        expect(confirmButton).toHaveAttribute('aria-disabled', 'true')
         expect(confirmButton).toHaveTextContent(/resetting/i)
         expect(testDoubles.invalidateQueries).toHaveBeenCalledTimes(1)
 
