@@ -305,6 +305,11 @@ Buy 50 USDC worth of BTC (increase from 23% to 25%)
 - Analyze rebalance effectiveness
 - Identify patterns and optimize strategy
 
+**If history fails to load:**
+- The history section shows a "Failed to load rebalance history" alert with **Retry** and **Dismiss** buttons. The rest of the dashboard keeps working.
+- Retry reloads only the history. The button shows "Retrying…" and is disabled while the request runs, so repeated clicks do not send duplicate requests. If a retry fails, the error stays visible and you can retry again.
+- The page you were on is kept after a successful retry. No rebalance is started or repeated by retrying.
+
 **Screenshot Location:** `docs/screenshots/07-rebalance-history.png`
 
 ---

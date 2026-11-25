@@ -96,7 +96,10 @@ describe('RebalanceHistory', () => {
         fireEvent.click(button)
 
         expect(toCsvMock).toHaveBeenCalled()
-        expect(downloadCsvMock).toHaveBeenCalledWith(expect.stringMatching(/^rebalance_history_p1_/), 'csv-content')
+        expect(downloadCsvMock).toHaveBeenCalledWith(
+            expect.stringMatching(/^rebalance_history_\d{4}-\d{2}-\d{2}\.csv$/),
+            'csv-content',
+        )
     })
 
     it('renders empty state message when history is empty', async () => {

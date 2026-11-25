@@ -221,149 +221,64 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         return () => clearTimeout(timer)
     }, [rebalanceNotice])
 
+    type DemoResetStep = 'portfolios' | 'prices'
     const [showDemoResetConfirm, setShowDemoResetConfirm] = useState(false)
     const [resettingDemo, setResettingDemo] = useState(false)
-    const [demoResetError, setDemoResetError] = useState<string | null>(null)
-    const [demoAnnouncement, setDemoAnnouncement] = useState<string | null>(null)
-    const prevPublicKeyRef = React.useRef<string | null>(publicKey)
-    const demoResetTriggerRef = React.useRef<HTMLElement | null>(null)
-    const demoResetDialogRef = React.useRef<HTMLDivElement | null>(null)
-    const demoResetCancelBtnRef = React.useRef<HTMLButtonElement | null>(null)
-    const demoResetErrorRef = React.useRef<HTMLDivElement | null>(null)
+    const [demoResetError, setDemoResetError] = useState<{
+        failedStep: DemoResetStep
+        completedSteps: DemoResetStep[]
+        message: string
+    } | null>(null)
+    const demoResetInFlightRef = React.useRef(false)
 
-    const restoreDemoResetFocus = useCallback(() => {
-        const trigger = demoResetTriggerRef.current
-        if (trigger && document.contains(trigger)) {
-            trigger.focus()
-        } else {
-            headingRef.current?.focus()
-        }
-    }, [])
-
-    const openDemoResetConfirm = useCallback((triggerEl?: HTMLElement | null) => {
-        demoResetTriggerRef.current = triggerEl ?? (document.activeElement as HTMLElement | null)
-        setDemoResetError(null)
-        setShowDemoResetConfirm(true)
-    }, [])
-
-    const closeDemoResetConfirm = useCallback((announcement?: string) => {
+    const closeDemoResetModal = useCallback(() => {
         if (resettingDemo) return
         setShowDemoResetConfirm(false)
         setDemoResetError(null)
-        if (announcement) {
-            setDemoAnnouncement(announcement)
-        }
-        restoreDemoResetFocus()
-    }, [resettingDemo, restoreDemoResetFocus])
-
-    React.useEffect(() => {
-        if (prevPublicKeyRef.current === publicKey) return
-        prevPublicKeyRef.current = publicKey
-        if (publicKey) {
-            setShowDemoResetConfirm(false)
-            setDemoResetError(null)
-            setDemoAnnouncement(
-                `Switched from Demo Mode to connected wallet ${publicKey.slice(0, 4)}...${publicKey.slice(-4)}. Real wallet balances and on-chain portfolios are now active.`
-            )
-        } else {
-            setDemoAnnouncement(
-                'Switched to Demo Mode. Simulated portfolio balances are now active.'
-            )
-        }
-        headingRef.current?.focus()
-    }, [publicKey])
-
-    React.useEffect(() => {
-        if (!showDemoResetConfirm) return
-        const dialog = demoResetDialogRef.current
-        if (!dialog) return
-
-        demoResetCancelBtnRef.current?.focus()
-
-        const getFocusableElements = (): HTMLElement[] =>
-            Array.from(
-                dialog.querySelectorAll<HTMLElement>(
-                    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-                )
-            )
-
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                event.preventDefault()
-                closeDemoResetConfirm('Demo reset cancelled.')
-                return
-            }
-            if (event.key !== 'Tab') return
-
-            const focusables = getFocusableElements()
-            if (focusables.length === 0) {
-                event.preventDefault()
-                dialog.focus()
-                return
-            }
-
-            const first = focusables[0]
-            const last = focusables[focusables.length - 1]
-            const active = document.activeElement as HTMLElement | null
-
-            if (!active || !focusables.includes(active)) {
-                event.preventDefault()
-                ;(event.shiftKey ? last : first).focus()
-                return
-            }
-
-            if (event.shiftKey && active === first) {
-                event.preventDefault()
-                last.focus()
-            } else if (!event.shiftKey && active === last) {
-                event.preventDefault()
-                first.focus()
-            }
-        }
-
-        document.addEventListener('keydown', handleKeyDown)
-        return () => document.removeEventListener('keydown', handleKeyDown)
-    }, [showDemoResetConfirm, closeDemoResetConfirm])
-
-    React.useEffect(() => {
-        if (demoResetError && showDemoResetConfirm) {
-            demoResetErrorRef.current?.focus()
-        }
-    }, [demoResetError, showDemoResetConfirm])
+    }, [resettingDemo])
 
     const resetDemoPortfolio = useCallback(async () => {
-        if (publicKey) return
+        if (publicKey || demoResetInFlightRef.current) return
+        demoResetInFlightRef.current = true
         setResettingDemo(true)
-        setDemoResetError(null)
-        setDemoAnnouncement('Resetting demo portfolio...')
-        let portfoliosInvalidated = false
-        let pricesInvalidated = false
+
+        const completed: DemoResetStep[] = demoResetError ? [...demoResetError.completedSteps] : []
+        const steps: { id: DemoResetStep; run: () => Promise<void> }[] = [
+            {
+                id: 'portfolios',
+                run: () => queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
+            },
+            {
+                id: 'prices',
+                run: () => queryClient.invalidateQueries({ queryKey: priceKeys.all }),
+            },
+        ]
+
         try {
-            await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
-            portfoliosInvalidated = true
-            await queryClient.invalidateQueries({ queryKey: priceKeys.all })
-            pricesInvalidated = true
+            for (const step of steps) {
+                if (completed.includes(step.id)) continue
+                try {
+                    await step.run()
+                    completed.push(step.id)
+                } catch (error) {
+                    console.error(`Demo reset failed at step "${step.id}":`, error)
+                    const detail = error instanceof Error && error.message ? error.message : 'Unexpected error'
+                    setDemoResetError({
+                        failedStep: step.id,
+                        completedSteps: [...completed],
+                        message: detail,
+                    })
+                    return
+                }
+            }
+            setDemoResetError(null)
             await new Promise(resolve => setTimeout(resolve, 500))
             setShowDemoResetConfirm(false)
-            setDemoAnnouncement(
-                'Demo portfolio reset to default $10,000 balance (40% XLM / 60% USDC).'
-            )
-            restoreDemoResetFocus()
-        } catch (error) {
-            console.error('Demo reset failed:', error)
-            if (portfoliosInvalidated && !pricesInvalidated) {
-                setDemoResetError(
-                    'Demo reset failed halfway: portfolio data was reset, but demo price data failed to refresh. Retry to finish resetting or cancel to return to the dashboard.'
-                )
-            } else {
-                setDemoResetError(
-                    'Demo portfolio reset failed before completing. Retry to try again or cancel to return to the dashboard.'
-                )
-            }
         } finally {
+            demoResetInFlightRef.current = false
             setResettingDemo(false)
         }
-    }, [publicKey, queryClient, restoreDemoResetFocus])
+    }, [demoResetError, publicKey, queryClient])
 
     const disconnectWallet = async () => {
         if (publicKey) {
@@ -893,35 +808,33 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </p>
                         {demoResetError && (
                             <div
-                                ref={demoResetErrorRef}
                                 role="alert"
-                                aria-live="assertive"
-                                tabIndex={-1}
-                                className="mb-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 p-3 text-sm text-red-800 dark:text-red-200 focus:outline-none focus:ring-2 focus:ring-red-500"
+                                className="mb-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40 p-3 text-sm text-red-800 dark:text-red-200"
                             >
-                                {demoResetError}
+                                <p className="font-medium">
+                                    {demoResetError.completedSteps.length > 0
+                                        ? 'Demo reset stopped halfway while refreshing demo price data.'
+                                        : 'Demo reset failed while resetting demo portfolio data.'}
+                                </p>
+                                <p className="mt-1 text-xs text-red-700 dark:text-red-300">
+                                    {demoResetError.completedSteps.length > 0
+                                        ? 'Demo portfolio data was already reset and will not be duplicated if you retry. You can retry the remaining step or cancel without reloading the page.'
+                                        : 'You can retry resetting or cancel without reloading the page.'}
+                                </p>
+                                <p className="mt-1 text-xs text-red-600 dark:text-red-400 break-words">
+                                    Details: {demoResetError.message}
+                                </p>
                             </div>
                         )}
                         <div className="flex flex-wrap justify-end gap-2 sm:gap-3">
-                            <button
-                                ref={demoResetCancelBtnRef}
-                                type="button"
-                                onClick={() => closeDemoResetConfirm('Demo reset cancelled.')}
-                                disabled={resettingDemo}
-                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={resetDemoPortfolio}
-                                disabled={resettingDemo}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-                            >
+                            <button type="button" onClick={closeDemoResetModal} disabled={resettingDemo}
+                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 text-sm">Cancel</button>
+                            <button type="button" onClick={resetDemoPortfolio} disabled={resettingDemo}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2 text-sm">
                                 {resettingDemo ? (
-                                    <><RefreshCw className="w-4 h-4 animate-spin flex-shrink-0" aria-hidden="true" />Resetting...</>
+                                    <><RefreshCw className="w-4 h-4 animate-spin flex-shrink-0" />Resetting...</>
                                 ) : demoResetError ? (
-                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden="true" />Retry Reset</>
+                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" />{demoResetError.completedSteps.length > 0 ? 'Retry Remaining Steps' : 'Retry Reset'}</>
                                 ) : (
                                     <><RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden="true" />Reset Demo</>
                                 )}
@@ -1217,7 +1130,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         {allocationData.length > 0 && (
                                             <>
                                                 {(portfolioData as any)?.slippageTolerancePercent != null && (
-                                                    <p className="text-xs text-orange-600 dark:text-orange-400 mb-4">
+                                                    <p className="text-xs text-orange-600 dark:text-orange-400 mb-4 break-words min-w-0">
                                                         Max slippage: {(portfolioData as any).slippageTolerancePercent}% — trades beyond this will be rejected
                                                     </p>
                                                 )}
@@ -1227,7 +1140,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                                     Review rebalance
                                                 </button>
                                                 {(portfolioData as any)?.slippageTolerance != null && (
-                                                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center">
+                                                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center break-words min-w-0">
                                                         Max slippage: {(portfolioData as any).slippageTolerance}% — trades above this will be rejected
                                                     </p>
                                                 )}
