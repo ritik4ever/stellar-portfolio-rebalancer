@@ -402,6 +402,7 @@ When using the platform without connecting a wallet:
 **Visual Separation & Narrow Width Support:**
 - Clear "Demo balance" and "Demo Mode Active (Simulated)" tags explicitly distinguish simulated demo data from real wallet balances.
 - Sticky mobile action bar and headers flex and wrap gracefully down to 320px viewports and with 200% text scaling.
+- The Overview / Analytics / Notifications tabs wrap onto extra lines instead of clipping, and the active tab is exposed with `aria-current="page"`. The mobile action bar (Dashboard and Portfolio Setup) is `sticky` and stays in the page flow rather than `fixed` over it, so it can grow with enlarged text without covering content. Its buttons keep a 44px minimum touch height.
 - Dedicated "Reset Demo" action (`aria-label="Reset demo portfolio"`) on header and mobile bar opens a responsive confirmation modal explaining real wallet balances and on-chain portfolios are unaffected.
 
 ---

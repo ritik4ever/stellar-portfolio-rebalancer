@@ -9,7 +9,7 @@
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Dashboard from './Dashboard'
 import Landing from './Landing'
@@ -126,6 +126,18 @@ function renderWithQueryClient(ui: React.ReactElement) {
     })
 }
 
+/**
+ * The same label can exist in the header, the section tabs and the sticky mobile
+ * action bar (jsdom ignores `md:hidden`), so pick the header's control.
+ */
+function getHeaderButton(name: RegExp): HTMLElement {
+    const match = screen
+        .getAllByRole('button', { name })
+        .find((button) => !button.closest('.mobile-action-bar') && !button.closest('nav[aria-label="Dashboard sections"]'))
+    if (!match) throw new Error(`No header button matching ${name}`)
+    return match
+}
+
 const CONNECTED_KEY = 'GABCD1234567890TESTKEY1234567890'
 const SECOND_KEY = 'GZYXW9876543210TESTKEY9876543210'
 
@@ -217,14 +229,14 @@ describe('Mobile portfolio navigation (SPR-2026-090)', () => {
         ]
 
         for (const [label, expectedView] of navActions) {
-            const button = screen.getByRole('button', { name: label })
+            const button = getHeaderButton(label)
             expect(button).toBeVisible()
             expect(button).toBeEnabled()
             fireEvent.click(button)
             expect(onNavigate).toHaveBeenCalledWith(expectedView)
         }
 
-        expect(screen.getByRole('button', { name: /refresh data/i })).toBeVisible()
+        expect(getHeaderButton(/refresh data/i)).toBeVisible()
         expect(screen.getByRole('button', { name: /change language/i })).toBeVisible()
         expect(screen.getByRole('button', { name: /disconnect/i })).toBeVisible()
     })
@@ -238,7 +250,7 @@ describe('Mobile portfolio navigation (SPR-2026-090)', () => {
         fireEvent.click(languageTrigger)
         expect(languageTrigger).toHaveAttribute('aria-expanded', 'true')
         expect(screen.getByRole('button', { name: /connect wallet/i })).toBeVisible()
-        expect(screen.getByRole('button', { name: /reset demo portfolio/i })).toBeVisible()
+        expect(getHeaderButton(/reset demo portfolio/i)).toBeVisible()
 
         // Connect a wallet while the menu is open.
         view.rerender(<Dashboard onNavigate={onNavigate} publicKey={CONNECTED_KEY} />)
@@ -257,7 +269,7 @@ describe('Mobile portfolio navigation (SPR-2026-090)', () => {
         fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
         expect(screen.getByRole('button', { name: /change language/i })).toHaveAttribute('aria-expanded', 'false')
 
-        fireEvent.click(screen.getByRole('button', { name: /^analytics$/i }))
+        fireEvent.click(getHeaderButton(/^analytics$/i))
         expect(onNavigate).toHaveBeenCalledWith('analytics')
 
         // Disconnect wallet and confirm demo navigation actions reappear.
@@ -335,7 +347,8 @@ describe('Mobile portfolio navigation (SPR-2026-090)', () => {
         expect(backButton).toBeVisible()
 
         fireEvent.click(retryButton)
-        expect(refetchPortfolios).toHaveBeenCalledTimes(1)
+        // RouteErrorState delays the retry with a backoff (1s on the first attempt).
+        await waitFor(() => expect(refetchPortfolios).toHaveBeenCalledTimes(1), { timeout: 3000 })
         expect(refetchPrices).toHaveBeenCalledTimes(1)
 
         // Simulate recovered data after retry.
@@ -364,7 +377,7 @@ describe('Mobile portfolio navigation (SPR-2026-090)', () => {
         view.rerender(<Dashboard onNavigate={onNavigate} publicKey={CONNECTED_KEY} />)
 
         expect(screen.getByRole('heading', { name: /portfolio dashboard/i })).toBeVisible()
-        expect(screen.getByRole('button', { name: /^analytics$/i })).toBeVisible()
+        expect(getHeaderButton(/^analytics$/i)).toBeVisible()
     })
 
     it('prevents duplicate submissions for demo reset and account data deletion while in flight', async () => {
@@ -380,8 +393,8 @@ describe('Mobile portfolio navigation (SPR-2026-090)', () => {
 
         const view = renderWithQueryClient(<Dashboard onNavigate={onNavigate} publicKey={null} />)
 
-        fireEvent.click(screen.getByRole('button', { name: /reset demo portfolio/i }))
-        const confirmReset = screen.getByRole('button', { name: /confirm reset/i })
+        fireEvent.click(getHeaderButton(/reset demo portfolio/i))
+        const confirmReset = screen.getByRole('button', { name: /^reset demo$/i })
         fireEvent.click(confirmReset)
         fireEvent.click(confirmReset)
 
@@ -414,6 +427,63 @@ describe('Mobile portfolio navigation (SPR-2026-090)', () => {
             expect(testDoubles.authLogout).toHaveBeenCalledWith(CONNECTED_KEY)
             expect(testDoubles.walletDisconnect).toHaveBeenCalledTimes(1)
             expect(onNavigate).toHaveBeenCalledWith('landing')
+        })
+    })
+
+    describe('narrow-width layout (SPR-2026-089)', () => {
+        it('wraps the section tabs instead of overflowing, and marks the active tab', () => {
+            renderWithQueryClient(<Dashboard onNavigate={vi.fn()} publicKey={CONNECTED_KEY} />)
+
+            const nav = screen.getByRole('navigation', { name: /dashboard sections/i })
+            // Three tabs with fixed 32px gaps are wider than 320px; they must wrap.
+            expect(nav.className).toMatch(/\bflex-wrap\b/)
+            expect(nav.className).not.toMatch(/\bspace-x-8\b/)
+
+            const tabs = within(nav).getAllByRole('button')
+            expect(tabs.map((tab) => tab.textContent)).toEqual(['Overview', 'Analytics', 'Notifications'])
+            for (const tab of tabs) {
+                expect(tab).toBeVisible()
+                expect(tab.className).toMatch(/\bmin-h-\[44px\]\b/)
+            }
+
+            expect(tabs[0]).toHaveAttribute('aria-current', 'page')
+            expect(tabs[1]).not.toHaveAttribute('aria-current')
+            fireEvent.click(tabs[1])
+            expect(tabs[1]).toHaveAttribute('aria-current', 'page')
+            expect(tabs[0]).not.toHaveAttribute('aria-current')
+        })
+
+        it('uses responsive page padding so 320px keeps its content width', () => {
+            renderWithQueryClient(<Dashboard onNavigate={vi.fn()} publicKey={CONNECTED_KEY} />)
+
+            const nav = screen.getByRole('navigation', { name: /dashboard sections/i })
+            const page = nav.closest('.max-w-7xl')
+            expect(page).not.toBeNull()
+            expect(page?.className).toMatch(/\bp-4\b/)
+            expect(page?.className).toMatch(/\bsm:p-6\b/)
+            expect(page?.className).not.toMatch(/(^|\s)p-6(\s|$)/)
+            expect(page?.className).toMatch(/\bmin-w-0\b/)
+        })
+
+        it('keeps the mobile action bar in flow so enlarged text never hides content behind it', () => {
+            const { container } = renderWithQueryClient(
+                <Dashboard onNavigate={vi.fn()} publicKey={CONNECTED_KEY} />,
+            )
+
+            const bar = container.querySelector('.mobile-action-bar')
+            expect(bar).not.toBeNull()
+            // A fixed bar plus a fixed-height spacer covers content once the bar grows past the spacer.
+            expect(bar?.className).toMatch(/\bsticky\b/)
+            expect(bar?.className).not.toMatch(/\bfixed\b/)
+            expect(container.querySelector('.h-20')).toBeNull()
+
+            expect(bar?.querySelector('.flex-wrap')).not.toBeNull()
+            const buttons = within(bar as HTMLElement).getAllByRole('button')
+            expect(buttons.length).toBeGreaterThan(0)
+            for (const button of buttons) {
+                expect(button).toBeVisible()
+                expect(button.className).toMatch(/\bmin-h-\[44px\]\b/)
+            }
         })
     })
 })

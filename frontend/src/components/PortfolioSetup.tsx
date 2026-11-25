@@ -1573,11 +1573,11 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
         </>
         )}
 
-        {/* NEW: Sticky Mobile Action Bar for Portfolio Setup */}
-        <div className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 md:hidden z-40">
-          <div className="flex items-center justify-between max-w-sm mx-auto">
+        {/* Sticky (in flow) mobile action bar: never covers the form, however tall it gets at 200% text */}
+        <div className="mobile-action-bar sticky bottom-0 -mx-3 sm:-mx-6 mt-6 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 md:hidden z-40">
+          <div className="flex flex-wrap items-center justify-between gap-2 max-w-sm mx-auto min-w-0">
             {/* Allocation Summary */}
-            <div className="text-center">
+            <div className="text-center min-w-0">
               <div className="text-xs text-gray-500 dark:text-gray-400">
                 Total Allocation
               </div>
@@ -1596,11 +1596,11 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             </div>
 
             {/* Action Buttons */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {/* Back Button */}
               <button
                 onClick={() => onNavigate("dashboard")}
-                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
+                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 min-h-11 rounded-lg text-sm transition-colors flex items-center gap-1"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span className="hidden sm:inline">Back</span>
@@ -1615,7 +1615,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   !isValidTotal ||
                   createPortfolioMutation.isPending
                 }
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white px-4 py-2 min-h-11 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
               >
                 {createPortfolioMutation.isPending ? (
                   <>
@@ -1633,8 +1633,6 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           </div>
         </div>
 
-        {/* Add bottom padding to prevent overlap with mobile action bar */}
-        <div className="h-20 md:hidden"></div>
       </div>
     </div>
   )
