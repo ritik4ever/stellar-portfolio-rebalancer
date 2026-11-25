@@ -124,6 +124,7 @@ describe('Reflector price ingestion outcomes (SPR-2026-104)', () => {
         vi.spyOn(assetRegistryService, 'getSymbols').mockReturnValue(['XLM', 'BTC'])
         vi.spyOn(assetRegistryService, 'getCoingeckoIdMap').mockReturnValue({ XLM: 'stellar', BTC: 'bitcoin' })
 
+        const freshnessWrites = vi.spyOn(store, 'setAssetFreshness')
         // Seed an accepted Reflector quote for XLM at ledger 200.
         expect(store.acceptReflectorQuote({
             asset: 'XLM', source: 'reflector', price: 0.354,
@@ -135,7 +136,7 @@ describe('Reflector price ingestion outcomes (SPR-2026-104)', () => {
             .mockResolvedValueOnce(response({
                 prices: {
                     // BTC missing entirely; XLM replays an older ledger.
-                    XLM: { price: '3600000', decimals: 7, timestamp: nowSec - 30, ledger: 199 },
+                    XLM: { price: '3600000', decimals: 7, timestamp: nowSec - 601, ledger: 199 },
                 },
             }))
             .mockResolvedValueOnce(response({}))
@@ -152,10 +153,19 @@ describe('Reflector price ingestion outcomes (SPR-2026-104)', () => {
             expect.objectContaining({
                 asset: 'XLM', outcome: 'blocked', reasonCode: 'OLDER_LEDGER',
                 observedLedger: 199, acceptedLedger: 200, acceptedPrice: 0.354,
+                ageMs: 601000,
             }),
         ]))
         expect(blocked).toHaveLength(2)
         expect(ingestionCalls(info)).toEqual([])
+        expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes('coingecko'))).toHaveLength(1)
+        expect(freshnessWrites).toHaveBeenCalledTimes(1)
+        expect(store.getAcceptedReflectorQuote('XLM')).toMatchObject({
+            source: 'reflector',
+            price: 0.354,
+            ledger: 200,
+            timestamp: nowSec - 60,
+        })
     })
 
     it('never leaks provider credentials or URLs into ingestion outcome logs', async () => {

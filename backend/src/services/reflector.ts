@@ -504,22 +504,6 @@ export class ReflectorService {
             }
             const price = normalized.price
 
-            if (this.isPriceStale(row.timestamp)) {
-                staleCount += 1
-                recordReflectorStalePrice(asset)
-                stalePrices.set(asset, price)
-                this.logPriceIngestion({
-                    asset,
-                    outcome: 'delayed',
-                    reasonCode: 'STALE_QUOTE',
-                    observedLedger: row.ledger,
-                    quoteAgeSeconds: this.quoteAgeSeconds(row.timestamp),
-                    decimals: normalized.decimals,
-                    units: normalized.units
-                })
-                return
-            }
-
             let decision: PriceIngestionDecision
             try {
                 decision = databaseService.acceptReflectorQuote({
@@ -541,6 +525,26 @@ export class ReflectorService {
                 return
             }
             if (decision.result === 'rejected') {
+                if (decision.reasonCode === 'STALE_QUOTE') {
+                    staleCount += 1
+                    recordReflectorStalePrice(asset)
+                    stalePrices.set(asset, price)
+                    this.logPriceIngestion({
+                        asset,
+                        outcome: 'delayed',
+                        reasonCode: decision.reasonCode,
+                        observedLedger: decision.observedLedger,
+                        acceptedLedger: decision.acceptedLedger,
+                        acceptedPrice: decision.acceptedPrice,
+                        acceptedSource: decision.acceptedSource,
+                        ageMs: decision.ageMs,
+                        quoteAgeSeconds: this.quoteAgeSeconds(row.timestamp),
+                        decimals: normalized.decimals,
+                        units: normalized.units
+                    })
+                    return
+                }
+
                 this.logPriceIngestion({
                     asset,
                     outcome: 'blocked',

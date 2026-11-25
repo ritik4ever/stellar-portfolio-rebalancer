@@ -362,26 +362,31 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
             </footer>
 
             {showWalletSelector && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 flex items-center justify-center z-50 p-4">
+                <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 p-4 dark:bg-opacity-70 sm:items-center">
                     <motion.div
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full shadow-xl"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="wallet-selector-title"
+                        className="my-0 max-h-[calc(100dvh-2rem)] w-full min-w-0 max-w-md overflow-y-auto overscroll-contain rounded-xl bg-white p-6 shadow-xl dark:bg-gray-800 sm:my-auto"
                     >
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Select Wallet</h2>
+                        <div className="mb-4 flex min-w-0 items-center justify-between gap-3">
+                            <h2 id="wallet-selector-title" className="min-w-0 break-words text-xl font-semibold text-gray-900 dark:text-white">Select Wallet</h2>
                             <button
+                                type="button"
                                 onClick={() => {
                                     setShowWalletSelector(false)
                                     setError(null)
                                 }}
-                                className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                                aria-label="Close wallet selection"
+                                className="shrink-0 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
                             >
                                 <X className="w-5 h-5" />
                             </button>
                         </div>
                         {error && (
-                            <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-800 dark:text-red-300 text-sm">
+                            <div role="alert" className="mb-4 min-w-0 break-words rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
                                 {error}
                             </div>
                         )}

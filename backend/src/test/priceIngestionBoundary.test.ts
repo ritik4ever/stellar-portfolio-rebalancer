@@ -86,6 +86,7 @@ describe('Reflector price ingestion boundary (SPR-2026-105)', () => {
         let directory: string
         let freshness: MockInstance<typeof DatabaseService.prototype.setAssetFreshness>
         let warn: any
+        let info: any
 
         beforeEach(() => {
             vi.useFakeTimers()
@@ -103,6 +104,7 @@ describe('Reflector price ingestion boundary (SPR-2026-105)', () => {
             vi.spyOn(databaseService, 'getAcceptedReflectorQuote').mockImplementation((symbol) => store.getAcceptedReflectorQuote(symbol))
             freshness = vi.spyOn(store, 'setAssetFreshness')
             warn = vi.spyOn(logger, 'warn')
+            info = vi.spyOn(logger, 'info')
         })
 
         afterEach(() => {
@@ -140,6 +142,16 @@ describe('Reflector price ingestion boundary (SPR-2026-105)', () => {
                 price: 0.354,
                 ledger: 200,
             })
+            expect(info).toHaveBeenCalledWith('[ORACLE] price_ingestion', expect.objectContaining({
+                source: 'reflector',
+                asset: 'XLM',
+                outcome: 'success',
+                reasonCode: 'FRESH_AT_LIMIT',
+                observedLedger: 200,
+                acceptedLedger: 200,
+                acceptedPrice: 0.354,
+                ageMs: 600000,
+            }))
             expect(freshness).toHaveBeenCalledExactlyOnceWith('XLM', new Date(nowSec * 1000).toISOString(), false)
 
             vi.advanceTimersByTime(91_000)
