@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 
 const FOCUSABLE =
     'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
@@ -38,13 +38,28 @@ export function useDialogFocus(
     const onCloseRef = useRef(onClose)
     onCloseRef.current = onClose
 
+    // Remember what had focus *before* the dialog's own content (which may move
+    // focus in its effects) runs, so it can be restored when the dialog closes.
+    const openerRef = useRef<HTMLElement | null>(null)
+    useLayoutEffect(() => {
+        if (open) {
+            openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        }
+    }, [open])
+
     useEffect(() => {
         if (!open) return
         const container = containerRef.current
         if (!container) return
 
-        const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
-        const initial = initialFocusRef?.current ?? focusableWithin(container)[0] ?? container
+        const opener = openerRef.current
+        // An explicit target wins; otherwise keep focus the content already placed
+        // inside the dialog, else use its first control.
+        const alreadyInside =
+            document.activeElement instanceof HTMLElement && container.contains(document.activeElement)
+                ? document.activeElement
+                : null
+        const initial = initialFocusRef?.current ?? alreadyInside ?? focusableWithin(container)[0] ?? container
         initial.focus()
 
         const onKeyDown = (event: KeyboardEvent) => {
