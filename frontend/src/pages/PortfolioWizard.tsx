@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { 
   Plus,
@@ -102,6 +102,9 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   const [amountEditLanguage, setAmountEditLanguage] = useState<string | null>(null);
   const [dcaIntervalDays, setDcaIntervalDays] = useState<number>(7);
   const [dcaStartDate, setDcaStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [announcement, setAnnouncement] = useState<string | null>(null);
+  const dcaAmountInputRef = useRef<HTMLInputElement>(null);
+  const confirmAmountButtonRef = useRef<HTMLButtonElement>(null);
 
   
   const [error, setError] = useState<string | null>(null);
@@ -176,6 +179,32 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   const isDcaScheduleValid = !amountNeedsReview && Number.isFinite(dcaAmount) && dcaAmount > 0
     && Number.isInteger(dcaIntervalDays) && dcaIntervalDays >= 1 && dcaIntervalDays <= 365
     && Boolean(dcaStartDate) && !Number.isNaN(new Date(`${dcaStartDate}T00:00:00`).getTime());
+
+  useEffect(() => {
+    if (amountNeedsReview) {
+      setAnnouncement(`The language changed to ${language} while editing. Check the amount and correct it if needed, or confirm it to continue.`);
+    }
+  }, [amountNeedsReview, language]);
+
+  const handleConfirmAmount = () => {
+    setAmountEditLanguage(language);
+    setAnnouncement('DCA amount confirmed.');
+    dcaAmountInputRef.current?.focus();
+  };
+
+  const handleDcaAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    const num = val === '' ? 0 : Number(val);
+    setDcaAmount(num);
+    setAmountEditLanguage(language);
+    if (amountNeedsReview) {
+      setAnnouncement('DCA amount updated.');
+    }
+  };
+
+  const localizedDcaAmount = Number.isFinite(dcaAmount) && dcaAmount > 0
+    ? dcaAmount.toLocaleString(language || undefined, { maximumFractionDigits: 7, useGrouping: true })
+    : '';
 
   
   const handleSelectTemplate = (templateId: string) => {
@@ -341,9 +370,10 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
           <div className="flex items-center gap-3">
             <button 
               onClick={() => onNavigate('dashboard')}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              aria-label="Abandon wizard and return to dashboard"
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <ArrowLeft className="w-5 h-5" />
+              <ArrowLeft className="w-5 h-5" aria-hidden="true" />
             </button>
             <div>
               <span className="text-xs font-semibold tracking-wider text-blue-600 dark:text-blue-400 uppercase">
@@ -405,6 +435,11 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
 
         {/* Wizard Panel */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800/80 p-6 md:p-8 transition-all">
+          {announcement && (
+            <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+              {announcement}
+            </div>
+          )}
           
           {/* Resume Draft Prompt */}
           {showResumePrompt && pendingDraft && (
@@ -668,16 +703,58 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
               <div className="space-y-4">
                 <div>
                   <label htmlFor="dca-amount" className="block text-sm font-bold mb-2">DCA Amount</label>
-                  <input id="dca-amount" type="number" min="0.01" step="0.01" value={dcaAmount || ''}
+                  <input
+                    ref={dcaAmountInputRef}
+                    id="dca-amount"
+                    type="number"
+                    min="0.0000001"
+                    step="any"
+                    value={dcaAmount || ''}
                     onFocus={() => setAmountEditLanguage((previous) => previous ?? language)}
-                    onChange={(e) => { setDcaAmount(Number(e.target.value)); setAmountEditLanguage(language); }}
-                    aria-describedby={amountNeedsReview ? 'dca-amount-locale-review' : undefined}
-                    className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Enter a positive amount in your portfolio's funding currency.</p>
+                    onChange={handleDcaAmountChange}
+                    aria-describedby={
+                      amountNeedsReview
+                        ? 'dca-amount-locale-review dca-amount-help dca-amount-localized-display'
+                        : localizedDcaAmount
+                          ? 'dca-amount-help dca-amount-localized-display'
+                          : 'dca-amount-help'
+                    }
+                    aria-invalid={amountNeedsReview || !isDcaScheduleValid}
+                    aria-label="DCA Amount"
+                    className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <div className="flex flex-wrap justify-between items-center gap-1 mt-1">
+                    <p id="dca-amount-help" className="text-xs text-gray-500 dark:text-gray-400">
+                      Enter a positive amount in your portfolio's funding currency. High-precision token amounts (up to 7 decimals) are supported.
+                    </p>
+                    {localizedDcaAmount ? (
+                      <span
+                        id="dca-amount-localized-display"
+                        className="text-xs font-mono text-gray-600 dark:text-gray-300"
+                        aria-label={`Localized amount: ${localizedDcaAmount}`}
+                      >
+                        Formatted ({language}): {localizedDcaAmount}
+                      </span>
+                    ) : null}
+                  </div>
                   {amountNeedsReview && (
-                    <div id="dca-amount-locale-review" role="alert" className="mt-2 text-sm text-amber-800 dark:text-amber-200">
+                    <div
+                      id="dca-amount-locale-review"
+                      role="alert"
+                      aria-live="assertive"
+                      tabIndex={-1}
+                      className="mt-2 text-sm text-amber-800 dark:text-amber-200"
+                    >
                       <p>The language changed while editing. Check the amount and correct it if needed, or confirm it to continue.</p>
-                      <button type="button" onClick={() => setAmountEditLanguage(language)} className="mt-1 underline">Confirm amount</button>
+                      <button
+                        ref={confirmAmountButtonRef}
+                        type="button"
+                        onClick={handleConfirmAmount}
+                        aria-label="Confirm amount"
+                        className="mt-1 underline focus:outline-none focus:ring-2 focus:ring-amber-500 rounded px-1"
+                      >
+                        Confirm amount
+                      </button>
                     </div>
                   )}
                 </div>
@@ -726,7 +803,12 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                 {strategy === 'dca' && (
                   <div className="bg-gray-50 dark:bg-gray-900/40 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 space-y-2">
                     <h3 className="font-bold text-md border-b border-gray-200 dark:border-gray-800 pb-2">DCA Schedule</h3>
-                    <p className="text-sm">{dcaAmount} every {dcaIntervalDays} days starting {dcaStartDate}</p>
+                    <p
+                      className="text-sm"
+                      aria-label={`DCA Schedule: ${dcaAmount} every ${dcaIntervalDays} days starting ${dcaStartDate}`}
+                    >
+                      {dcaAmount} every {dcaIntervalDays} days starting {dcaStartDate}
+                    </p>
                   </div>
                 )}
 
@@ -829,27 +911,41 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
           {/* Footer Controls */}
           {step < successStep && (
             <div className="flex justify-between items-center gap-4 mt-8 pt-6 border-t border-gray-100 dark:border-gray-800">
-              <button
-                onClick={handleBack}
-                disabled={step === 1}
-                className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-transparent font-semibold rounded-xl text-sm transition-colors"
-              >
-                <ArrowLeft className="w-4 h-4" /> Back
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleBack}
+                  disabled={step === 1}
+                  aria-label="Go back to previous step"
+                  className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-transparent font-semibold rounded-xl text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <ArrowLeft className="w-4 h-4" aria-hidden="true" /> Back
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('dashboard')}
+                  aria-label="Cancel and abandon wizard"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 font-semibold rounded-xl text-sm transition-colors text-gray-600 dark:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                >
+                  Cancel
+                </button>
+              </div>
 
               {step === reviewStep ? (
                 <button
                   onClick={handleSignAndSubmit}
                   disabled={!canGoForward() || isSigning}
-                  className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-300 dark:disabled:bg-blue-800/50 disabled:cursor-not-allowed font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/10"
+                  aria-busy={isSigning}
+                  aria-label={isSigning ? 'Signing transaction with Freighter' : 'Sign with Freighter'}
+                  className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-300 dark:disabled:bg-blue-800/50 disabled:cursor-not-allowed font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/10 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {isSigning ? (
                     <>
-                      <RefreshCw className="w-4 h-4 animate-spin" /> Signing...
+                      <RefreshCw className="w-4 h-4 animate-spin" aria-hidden="true" /> Signing...
                     </>
                   ) : (
                     <>
-                      <Wallet className="w-4 h-4" /> Sign with Freighter
+                      <Wallet className="w-4 h-4" aria-hidden="true" /> Sign with Freighter
                     </>
                   )}
                 </button>
@@ -857,9 +953,10 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                 <button
                   onClick={handleNext}
                   disabled={!canGoForward()}
-                  className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-300 dark:disabled:bg-blue-800/50 disabled:cursor-not-allowed font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/10"
+                  aria-label="Go to next step"
+                  className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-300 dark:disabled:bg-blue-800/50 disabled:cursor-not-allowed font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/10 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  Next <ChevronRight className="w-4 h-4" />
+                  Next <ChevronRight className="w-4 h-4" aria-hidden="true" />
                 </button>
               )}
             </div>

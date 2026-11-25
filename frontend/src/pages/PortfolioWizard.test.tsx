@@ -225,6 +225,96 @@ describe('PortfolioWizard Page', () => {
     await i18n.changeLanguage('en');
   });
 
+  it('covers keyboard focus, names, and announcements for a decimal comma locale and high-precision token amount', async () => {
+    renderWizard();
+    fireEvent.change(screen.getByLabelText(/rebalancing strategy/i), { target: { value: 'dca' } });
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: /next/i }));
+
+    const amountInput = screen.getByLabelText('DCA Amount');
+    expect(amountInput).toHaveAttribute('type', 'number');
+    expect(amountInput).toHaveAttribute('step', 'any');
+    expect(amountInput).toHaveAttribute('min', '0.0000001');
+
+    // Switch to German (decimal comma locale)
+    await i18n.changeLanguage('de');
+
+    // Enter high-precision amount (7 decimal places / stroop)
+    fireEvent.change(amountInput, { target: { value: '0.0000001' } });
+    expect(screen.getByText(/formatted \(de\): 0,0000001/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Localized amount: 0,0000001')).toBeInTheDocument();
+
+    // Enter large amount with decimals
+    fireEvent.change(amountInput, { target: { value: '1234.5678' } });
+    expect(screen.getByText(/formatted \(de\): 1\.234,5678/i)).toBeInTheDocument();
+
+    // Verify accessible description includes helper and formatted display
+    expect(amountInput).toHaveAttribute(
+      'aria-describedby',
+      expect.stringContaining('dca-amount-help')
+    );
+    expect(amountInput).toHaveAttribute(
+      'aria-describedby',
+      expect.stringContaining('dca-amount-localized-display')
+    );
+
+    // Verify review summary displays DCA schedule with accessible label
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    expect(screen.getByLabelText(/dca schedule: 1234\.5678 every 7 days/i)).toBeInTheDocument();
+
+    await i18n.changeLanguage('en');
+  });
+
+  it('manages keyboard focus, alerts, and live announcements during a locale change during edit', async () => {
+    renderWizard();
+    fireEvent.change(screen.getByLabelText(/rebalancing strategy/i), { target: { value: 'dca' } });
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: /next/i }));
+
+    const amountInput = screen.getByLabelText('DCA Amount');
+    fireEvent.focus(amountInput);
+    fireEvent.change(amountInput, { target: { value: '500.25' } });
+
+    // Locale change during edit
+    await i18n.changeLanguage('de');
+
+    // Screen reader alert & live region announcement
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/language changed while editing/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/language changed to de while editing/i);
+    expect(amountInput).toHaveAttribute('aria-invalid', 'true');
+    expect(amountInput).toHaveAttribute(
+      'aria-describedby',
+      expect.stringContaining('dca-amount-locale-review')
+    );
+
+    // Confirm amount button is keyboard operable and restores focus
+    const confirmBtn = screen.getByRole('button', { name: /confirm amount/i });
+    expect(confirmBtn).toBeInTheDocument();
+    fireEvent.click(confirmBtn);
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/dca amount confirmed/i);
+    expect(amountInput).toHaveFocus();
+    expect(amountInput).toHaveAttribute('aria-invalid', 'false');
+
+    await i18n.changeLanguage('en');
+  });
+
+  it('allows keyboard and screen-reader users to abandon the wizard flow', async () => {
+    const { onNavigate } = renderWizard();
+
+    // Abandon via header button
+    const headerAbandonBtn = screen.getByRole('button', { name: /abandon wizard and return to dashboard/i });
+    expect(headerAbandonBtn).toBeInTheDocument();
+    fireEvent.click(headerAbandonBtn);
+    expect(onNavigate).toHaveBeenCalledWith('dashboard');
+
+    // Abandon via footer Cancel button
+    const cancelBtn = screen.getByRole('button', { name: /cancel and abandon wizard/i });
+    expect(cancelBtn).toBeInTheDocument();
+    fireEvent.click(cancelBtn);
+    expect(onNavigate).toHaveBeenCalledTimes(2);
+  });
+
   it('shows summary and signs using Freighter in Step 4 and shows success in Step 5', async () => {
     mockMutateAsync.mockResolvedValue({ id: 'portfolio-123' });
     mockPost.mockResolvedValue({ hash: 'share-abc' });
