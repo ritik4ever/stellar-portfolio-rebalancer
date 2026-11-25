@@ -26,6 +26,7 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
     const [autoReconnect, setAutoReconnect] = useState<boolean>(walletManager.getAutoReconnect())
     const [networkMismatch, setNetworkMismatch] = useState<NetworkMismatchState | null>(null)
     const containerRef = useRef<HTMLDivElement>(null)
+    const connectionPendingRef = useRef(false)
 
     useEffect(() => {
         const wallets = walletManager.getAvailableWallets()
@@ -63,22 +64,24 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
     }
 
     const handleConnect = async (walletType: string) => {
+        if (connectionPendingRef.current) return
+        connectionPendingRef.current = true
         setNetworkMismatch(null)
-        const configuredNetwork = getConfiguredNetwork()
-
-        const detected = await detectWalletNetwork(walletType)
-        if (detected && configuredNetwork !== 'unknown' && detected !== configuredNetwork) {
-            setNetworkMismatch({
-                configured: configuredNetwork,
-                detected,
-                walletType,
-            })
-            onError(`Network mismatch: wallet on ${detected}, app expects ${configuredNetwork}`)
-            return
-        }
-
         setConnecting(walletType)
+
         try {
+            const configuredNetwork = getConfiguredNetwork()
+            const detected = await detectWalletNetwork(walletType)
+            if (detected && configuredNetwork !== 'unknown' && detected !== configuredNetwork) {
+                setNetworkMismatch({
+                    configured: configuredNetwork,
+                    detected,
+                    walletType,
+                })
+                onError(`Network mismatch: wallet on ${detected}, app expects ${configuredNetwork}`)
+                return
+            }
+
             const publicKey = await walletManager.connect(walletType as any)
             onConnect(publicKey)
         } catch (error: any) {
@@ -98,6 +101,7 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
             }
             onError(errorMessage)
         } finally {
+            connectionPendingRef.current = false
             setConnecting(null)
         }
     }
@@ -137,7 +141,7 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
     }
 
     return (
-        <div className="space-y-3" ref={containerRef} role="group" aria-label="Available wallets">
+        <div className="w-full min-w-0 space-y-3" ref={containerRef} role="group" aria-label="Available wallets">
             {networkMismatch && (
                 <NetworkMismatchBanner
                     configuredNetwork={networkMismatch.configured as any}
@@ -153,23 +157,28 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
                 <button
                     key={wallet.type}
                     onClick={() => handleConnect(wallet.type)}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            handleConnect(wallet.type)
-                        }
-                    }}
-                    disabled={connecting === wallet.type}
+                    aria-disabled={connecting !== null}
                     aria-describedby={connecting === wallet.type ? 'connecting-description' : undefined}
                     aria-label={`Connect to ${wallet.name}`}
-                    className="wallet-selector-btn w-full flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:text-gray-200"
+                    className="wallet-selector-btn w-full min-w-0 flex flex-wrap items-center justify-between gap-2 p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed transition-colors dark:text-gray-200"
                 >
-                    <span className="font-medium">{wallet.name}</span>
+                    <span className="min-w-0 break-words font-medium">{wallet.name}</span>
                     {connecting === wallet.type && (
-                        <span className="text-sm text-blue-600" id="connecting-description">Connecting...</span>
+                        <span className="shrink-0 text-sm text-blue-600" aria-hidden="true">Connecting...</span>
                     )}
                 </button>
             ))}
+            <p
+                className="min-w-0 break-words text-sm text-blue-700 dark:text-blue-300"
+                id="connecting-description"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+            >
+                {connecting
+                    ? `Connecting to ${availableWallets.find((wallet) => wallet.type === connecting)?.name ?? 'wallet'}...`
+                    : ''}
+            </p>
             <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
                 <button
                     type="button"
@@ -177,13 +186,13 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
                     aria-checked={autoReconnect}
                     aria-label="Auto-reconnect on page refresh"
                     onClick={toggleAutoReconnect}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${autoReconnect ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${autoReconnect ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}
                 >
                     <span
                         className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${autoReconnect ? 'translate-x-[18px]' : 'translate-x-[3px]'}`}
                     />
                 </button>
-                <label className="text-xs text-gray-500 dark:text-gray-400 select-none">
+                <label className="min-w-0 break-words text-xs text-gray-500 dark:text-gray-400 select-none">
                     Auto-reconnect on page refresh
                 </label>
             </div>

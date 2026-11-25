@@ -426,7 +426,8 @@ describe("WalletSelector", () => {
       // Should immediately show connecting state
       await waitFor(() => {
         expect(screen.getByText("Connecting...")).toBeTruthy();
-        expect(freighterButton).toBeDisabled();
+        expect(freighterButton).toHaveAttribute("aria-disabled", "true");
+        expect(freighterButton).not.toBeDisabled();
       });
     });
 
@@ -538,7 +539,7 @@ describe("WalletSelector", () => {
       });
     });
 
-    it("should disable only the currently connecting wallet button", async () => {
+    it("should keep wallet actions focusable and announce the active connection", async () => {
       mockWalletManager.connect.mockImplementation(
         () => new Promise((resolve) => setTimeout(resolve, 100)),
       );
@@ -553,12 +554,14 @@ describe("WalletSelector", () => {
 
       fireEvent.click(freighterButton!);
 
-      // Only freighter button should be disabled (toggle stays enabled)
       await waitFor(() => {
-        expect(freighterButton).toBeDisabled();
+        expect(freighterButton).toHaveAttribute("aria-disabled", "true");
       });
+      expect(rabetButton).toHaveAttribute("aria-disabled", "true");
+      expect(freighterButton).not.toBeDisabled();
       expect(rabetButton).not.toBeDisabled();
       expect(toggleBtn).not.toBeDisabled();
+      expect(screen.getByRole("status")).toHaveTextContent("Connecting to Freighter...");
     });
   });
 
@@ -654,8 +657,9 @@ describe("WalletSelector", () => {
     });
 
     it("should render connecting description for active wallet", async () => {
+      let finishConnect!: (key: string) => void;
       mockWalletManager.connect.mockImplementation(
-        () => new Promise((resolve) => setTimeout(resolve, 100)),
+        () => new Promise((resolve) => { finishConnect = resolve; }),
       );
 
       render(
@@ -663,12 +667,20 @@ describe("WalletSelector", () => {
       );
 
       const freighterButton = screen.getByLabelText("Connect to Freighter");
+      freighterButton.focus();
       fireEvent.click(freighterButton);
 
       await waitFor(() => {
         expect(screen.getByText("Connecting...")).toBeTruthy();
         expect(freighterButton).toHaveAttribute("aria-describedby");
+        expect(screen.getByRole("status")).toHaveTextContent("Connecting to Freighter...");
       });
+      expect(freighterButton).toHaveAttribute("aria-disabled", "true");
+      expect(freighterButton).not.toBeDisabled();
+      expect(document.activeElement).toBe(freighterButton);
+
+      finishConnect("GAfreightertest1234567890abcdef1234567890abcdef1234567890abcdef");
+      await waitFor(() => expect(mockOnConnect).toHaveBeenCalled());
     });
   });
 });
