@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { 
   Plus,
   Trash2,
@@ -82,6 +83,8 @@ const TEMPLATES: Template[] = [
 
 const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey }) => {
   const createPortfolioMutation = useCreatePortfolioMutation();
+  const { i18n } = useTranslation();
+  const language = i18n.resolvedLanguage || i18n.language;
 
  
   const [step, setStep] = useState<number>(1);
@@ -96,6 +99,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   const [cooldown, setCooldown] = useState<number>(24);
   const [autoRebalance, setAutoRebalance] = useState<boolean>(true);
   const [dcaAmount, setDcaAmount] = useState<number>(100);
+  const [amountEditLanguage, setAmountEditLanguage] = useState<string | null>(null);
   const [dcaIntervalDays, setDcaIntervalDays] = useState<number>(7);
   const [dcaStartDate, setDcaStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
 
@@ -109,6 +113,10 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
  
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<ReturnType<typeof loadWizardDraft> | null>(null);
+
+  useEffect(() => {
+    if (step !== 4 || strategy !== 'dca') setAmountEditLanguage(null);
+  }, [step, strategy]);
 
   
   useEffect(() => {
@@ -164,7 +172,8 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   const totalPercentage = allocations.reduce((sum, item) => sum + (item.percentage || 0), 0);
   const remaining = remainingAllocation(allocations);
   const isAllocationValid = Math.abs(totalPercentage - 100) < 0.01 && allocations.every(item => item.percentage > 0);
-  const isDcaScheduleValid = Number.isFinite(dcaAmount) && dcaAmount > 0
+  const amountNeedsReview = step === 4 && strategy === 'dca' && amountEditLanguage !== null && amountEditLanguage !== language;
+  const isDcaScheduleValid = !amountNeedsReview && Number.isFinite(dcaAmount) && dcaAmount > 0
     && Number.isInteger(dcaIntervalDays) && dcaIntervalDays >= 1 && dcaIntervalDays <= 365
     && Boolean(dcaStartDate) && !Number.isNaN(new Date(`${dcaStartDate}T00:00:00`).getTime());
 
@@ -660,9 +669,17 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                 <div>
                   <label htmlFor="dca-amount" className="block text-sm font-bold mb-2">DCA Amount</label>
                   <input id="dca-amount" type="number" min="0.01" step="0.01" value={dcaAmount || ''}
-                    onChange={(e) => setDcaAmount(Number(e.target.value))}
+                    onFocus={() => setAmountEditLanguage((previous) => previous ?? language)}
+                    onChange={(e) => { setDcaAmount(Number(e.target.value)); setAmountEditLanguage(language); }}
+                    aria-describedby={amountNeedsReview ? 'dca-amount-locale-review' : undefined}
                     className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Enter a positive amount in your portfolio's funding currency.</p>
+                  {amountNeedsReview && (
+                    <div id="dca-amount-locale-review" role="alert" className="mt-2 text-sm text-amber-800 dark:text-amber-200">
+                      <p>The language changed while editing. Check the amount and correct it if needed, or confirm it to continue.</p>
+                      <button type="button" onClick={() => setAmountEditLanguage(language)} className="mt-1 underline">Confirm amount</button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label htmlFor="dca-interval" className="block text-sm font-bold mb-2">Interval (days)</label>
@@ -676,7 +693,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                     onChange={(e) => setDcaStartDate(e.target.value)}
                     className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
-                {!isDcaScheduleValid && (
+                {!isDcaScheduleValid && !amountNeedsReview && (
                   <p role="alert" className="text-sm font-semibold text-red-600 dark:text-red-400">Enter a positive amount, an interval from 1 to 365 days, and a valid start date to continue.</p>
                 )}
               </div>
