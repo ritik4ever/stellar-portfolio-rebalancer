@@ -817,3 +817,23 @@ describe('PortfolioSetup – slippage control usable at narrow widths (SPR-2026-
         expect(summaryContainer).toHaveTextContent('3.5%')
     })
 })
+
+describe('PortfolioSetup mobile action bar (SPR-2026-089)', () => {
+  it('stays in flow, wraps and keeps touch-sized buttons at narrow widths', () => {
+    const { container } = renderSetup('GABCD1234567890TESTKEY1234567890')
+
+    const bar = container.querySelector('.mobile-action-bar') as HTMLElement | null
+    expect(bar).not.toBeNull()
+    // Sticky keeps the bar in the layout, so it cannot cover the form at 200% text.
+    expect(bar?.className).toMatch(/\bsticky\b/)
+    expect(bar?.className).not.toMatch(/\bfixed\b/)
+    expect(container.querySelector('.h-20')).toBeNull()
+    expect(bar?.querySelectorAll('.flex-wrap').length).toBeGreaterThanOrEqual(2)
+
+    const buttons = Array.from(bar?.querySelectorAll('button') ?? [])
+    expect(buttons.length).toBe(2)
+    for (const button of buttons) {
+      expect(button.className).toMatch(/\bmin-h-11\b/)
+    }
+  })
+})

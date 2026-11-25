@@ -290,30 +290,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         ;(visible ?? candidates.find(Boolean))?.focus()
     }, [loading])
 
-    // Keep content and focused controls clear of the fixed mobile action bar at
-    // any text size: size the spacer to the bar and reserve the same room when
-    // the browser scrolls a focused element into view.
-    const mobileBarRef = useRef<HTMLDivElement>(null)
-    const [mobileBarHeight, setMobileBarHeight] = useState(0)
-    useEffect(() => {
-        const bar = mobileBarRef.current
-        if (!bar) return
-        const update = () => setMobileBarHeight(bar.offsetHeight)
-        update()
-        if (typeof ResizeObserver === 'undefined') return
-        const observer = new ResizeObserver(update)
-        observer.observe(bar)
-        return () => observer.disconnect()
-    }, [])
-    useEffect(() => {
-        const root = document.documentElement
-        const previous = root.style.scrollPaddingBottom
-        root.style.scrollPaddingBottom = mobileBarHeight ? `${mobileBarHeight}px` : previous
-        return () => {
-            root.style.scrollPaddingBottom = previous
-        }
-    }, [mobileBarHeight])
-
     const resetDemoPortfolio = useCallback(async () => {
         if (publicKey || demoResetInFlightRef.current) return
         demoResetInFlightRef.current = true
@@ -567,7 +543,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
             {latestPortfolioId && reviewPortfolioId === latestPortfolioId && !balancesUnavailable && (
                 <RebalanceConfirm
                     key={latestPortfolioId}
@@ -748,7 +724,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         )}
                         <button ref={desktopRefreshRef} type="button" onClick={handleRefreshClick} disabled={loading}
                             aria-label="Refresh data"
-                            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50 flex-shrink-0">
+                            className="p-2 min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50 flex-shrink-0">
                             <RefreshCw className={`w-5 h-5 ${loading ? 'motion-safe:animate-spin' : ''}`} aria-hidden />
                         </button>
                     </div>
@@ -918,7 +894,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             {/* Price Ticker Banner */}
             <PriceTicker />
 
-            <div className="p-6 max-w-7xl mx-auto">
+            <div className="p-4 sm:p-6 w-full max-w-7xl mx-auto min-w-0">
                 {/* Section navigation. Wraps instead of overflowing at 320px / large text; each
                     control keeps a 44px touch target and exposes the current section. */}
                 <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
@@ -932,7 +908,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 key={tab}
                                 type="button"
                                 onClick={() => selectTab(tab, label)}
-                                aria-current={activeTab === tab ? 'true' : undefined}
+                                aria-current={activeTab === tab ? 'page' : undefined}
                                 // The header also has an "Analytics" link to the full page; qualify the
                                 // in-page section so the two controls are never announced identically.
                                 aria-label={`${label} section`}
@@ -1285,8 +1261,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 )}
             </div>
 
-            {/* Sticky Mobile Action Bar */}
-            <div ref={mobileBarRef} role="region" aria-label="Portfolio quick actions" className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-3 py-2 sm:p-4 md:hidden z-40">
+            {/* Sticky and in-flow so enlarged text cannot cover dashboard content. */}
+            <div role="region" aria-label="Portfolio quick actions" className="mobile-action-bar sticky bottom-0 mt-auto bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-3 py-2 sm:p-4 md:hidden z-40">
                 <div className="flex flex-wrap items-center justify-between gap-2 max-w-sm mx-auto min-w-0">
                     <div className="text-left min-w-0">
                         <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
@@ -1351,8 +1327,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     </div>
                 </div>
             </div>
-
-            <div className="md:hidden" aria-hidden style={{ height: Math.max(mobileBarHeight, 80) }} />
         </div>
     )
 }
