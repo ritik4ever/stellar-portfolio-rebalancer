@@ -1,308 +1,310 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import { AlertCircle, Clock, TrendingUp, TrendingDown, RefreshCw, X, AlertTriangle } from 'lucide-react'
-import { useRebalanceEstimate, useRebalancePlan } from '../hooks/queries/usePortfolioQuery'
+import { useEffect, useState, useRef } from 'react'
+import { usePortfolioDetails, useRebalancePlan } from '../hooks/queries/usePortfolioQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 import { Button } from './ui/Button'
+import { Modal } from './ui/Modal'
+
+function readSlippageTolerance(details: any): number | null {
+    if (!details) return null
+    const raw = details.slippageTolerancePercent ?? details.slippageTolerance
+    const value = typeof raw === 'string' ? Number(raw) : raw
+    return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function isSlippageFailure(message: string | null): boolean {
+    if (!message) return false
+    return /slippage|tolerance|price (?:moved|changed|deviated)|quote (?:expired|stale)/i.test(message)
+}
+
+function formatPercent(value: number): string {
+    return Number.isInteger(value) ? String(value) : value.toFixed(2)
+}
 
 interface RebalanceConfirmProps {
-  portfolioId: string | null
-  open: boolean
-  onClose: () => void
-  onSuccess?: (result: any) => void
-  cooldownSeconds?: number
-  maxSlippageThresholdBps?: number
+    portfolioId: string | null
+    open: boolean
+    onClose: () => void
+    onSuccess?: (result: any) => void
 }
 
-
-
-interface TradeEstimate {
-  fromAsset: string
-  toAsset: string
-  amount: number
-  estimatedSlippageBps: number
+export default function RebalanceConfirm({ open, ...props }: RebalanceConfirmProps) {
+    return open ? <RebalanceReview key={props.portfolioId} {...props} /> : null
 }
 
-interface RebalanceSimulationData {
-  trades: TradeEstimate[]
-  totalGasXlm: number
-  totalGasUsd: number
-  maxSlippageBps: number
-  estimatedSlippageBps: number
-  tradeCount: number
-  gasWarning: boolean
-  cooldownRemaining?: number
-  planMaxSlippagePercent?: number
-  highSlippageLegs: TradeEstimate[]
-}
+function RebalanceReview({ portfolioId, onClose, onSuccess }: Omit<RebalanceConfirmProps, 'open'>) {
+    const { data: plan, isLoading, isFetching, isError, error: planError, refetch } = useRebalancePlan(portfolioId)
+    const { data: portfolioDetails } = usePortfolioDetails(portfolioId)
+    const execute = useExecuteRebalanceMutation(portfolioId)
+    const [reviewedPlan, setReviewedPlan] = useState<typeof plan>()
+    const [executionError, setExecutionError] = useState<string | null>(null)
+    const [statusAnnouncement, setStatusAnnouncement] = useState<string | null>(null)
+    const [isSubmitting, setIsSubmitting] = useState(false)
+    const submittingRef = useRef(false)
+    const errorAlertRef = useRef<HTMLDivElement>(null)
+    const boundaryStatusRef = useRef<HTMLDivElement>(null)
+    const [now, setNow] = useState(Date.now)
 
-const DEFAULT_SLIPPAGE_THRESHOLD_BPS = 500
-
-function formatSlippage(bps: number): string {
-  return `${(bps / 100).toFixed(2)}%`
-}
-
-function formatAmount(value: number): string {
-  if (value >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 2 })
-  return value.toFixed(4)
-}
-
-const RebalanceConfirm: React.FC<RebalanceConfirmProps> = ({
-  portfolioId,
-  open,
-  onClose,
-  onSuccess,
-  cooldownSeconds = 60,
-  maxSlippageThresholdBps = DEFAULT_SLIPPAGE_THRESHOLD_BPS,
-}) => {
-  const [confirmed, setConfirmed] = useState(false)
-  const [cooldownRemaining, setCooldownRemaining] = useState(0)
-  const [lastRebalanceTime, setLastRebalanceTime] = useState<number | null>(null)
-
-  const { data: estimate, isLoading: estimateLoading } = useRebalanceEstimate(portfolioId)
-  const { data: plan } = useRebalancePlan(portfolioId)
-  const executeRebalance = useExecuteRebalanceMutation(portfolioId)
-
- 
-
-  useEffect(() => {
-    if (!estimate?.lastRebalanceTimestamp) return
-    const lastTime = new Date(estimate.lastRebalanceTimestamp).getTime()
-    setLastRebalanceTime(lastTime)
-  }, [estimate])
-
-  const effectiveCooldown = useMemo(() => {
-    if (!lastRebalanceTime) return 0
-    const elapsed = (Date.now() - lastRebalanceTime) / 1000
-    return Math.max(0, cooldownSeconds - elapsed)
-  }, [lastRebalanceTime, cooldownSeconds])
-
-  useEffect(() => {
-    if (effectiveCooldown <= 0) {
-      setCooldownRemaining(0)
-      return
-    }
-    setCooldownRemaining(Math.ceil(effectiveCooldown))
-    const interval = setInterval(() => {
-      setCooldownRemaining(prev => {
-        if (prev <= 1) {
-          clearInterval(interval)
-          return 0
+    useEffect(() => {
+        if (executionError) {
+            errorAlertRef.current?.focus()
         }
-        return prev - 1
-      })
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [effectiveCooldown])
+    }, [executionError])
 
-  const simData = useMemo<RebalanceSimulationData | null>(() => {
-    if (!estimate) return null
-    const trades = estimate.trades ?? []
-    const highSlippageLegs = trades.filter(
-      (t: TradeEstimate) => t.estimatedSlippageBps > maxSlippageThresholdBps
-    )
-    return {
-      trades,
-      totalGasXlm: estimate.gasEstimateXlm ?? 0,
-      totalGasUsd: estimate.gasEstimateUsd ?? 0,
-      maxSlippageBps: estimate.maxSlippageBps ?? estimate.slippageToleranceBps ?? 100,
-      estimatedSlippageBps: estimate.estimatedSlippageBps ?? 0,
-      tradeCount: estimate.tradeCount ?? trades.length ?? 0,
-      gasWarning: estimate.gasWarning ?? (estimate.gasEstimateXlm ?? 0) > 0.5,
-      cooldownRemaining: effectiveCooldown,
-      planMaxSlippagePercent: plan?.maxSlippagePercent,
-      highSlippageLegs,
+    useEffect(() => {
+        if (plan && !isError && (plan.boundary?.trades ?? []).length === 0) {
+            boundaryStatusRef.current?.focus()
+        }
+    }, [plan, isError])
+
+    useEffect(() => {
+        const timer = setInterval(() => setNow(Date.now()), 15000)
+        return () => clearInterval(timer)
+    }, [])
+    const boundary = plan?.boundary
+    const trades = boundary?.trades ?? []
+    const fees = plan?.estimatedFees
+    const quote = boundary?.quoteSnapshot
+    const requiredQuotes = new Set(trades.map(({ asset }) => asset))
+    if (fees && fees.xlm > 0) requiredQuotes.add('XLM')
+    const quoteDates = Array.from(requiredQuotes, asset => {
+        const timestamp = quote?.prices?.[asset]?.timestamp
+        if (!timestamp || timestamp <= 0) return NaN
+        return new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp).getTime()
+    })
+    const oldestQuoteMs = quoteDates.length > 0 && quoteDates.every(Number.isFinite) ? Math.min(...quoteDates) : null
+    const quoteAgeMinutes = oldestQuoteMs === null ? null : Math.max(0, Math.floor((now - oldestQuoteMs) / 60000))
+    const hasTrades = trades.length > 0
+    const confirmed = !!plan && reviewedPlan === plan
+    useEffect(() => {
+        if (reviewedPlan && reviewedPlan !== plan) setReviewedPlan(undefined)
+    }, [plan, reviewedPlan])
+    const inFlight = isSubmitting || execute.isPending
+    const activeTolerance = readSlippageTolerance(portfolioDetails)
+    const planTolerance = plan?.maxSlippagePercent
+    const toleranceChanged = plan != null
+        && activeTolerance != null
+        && planTolerance != null
+        && Number.isFinite(planTolerance)
+        && Math.abs(activeTolerance - planTolerance) > 1e-9
+    const canConfirm = hasTrades && confirmed && !isFetching && !isError && !inFlight && !toleranceChanged
+    const withinThreshold = boundary?.reasonCode === 'WITHIN_EVERY_THRESHOLD'
+    const thresholdAmountCopy = boundary?.thresholdPercent != null && Number.isFinite(boundary.thresholdPercent)
+        ? `${boundary.thresholdPercent.toFixed(2)} percentage points`
+        : null
+    const thresholdCopy = thresholdAmountCopy ? `±${thresholdAmountCopy}` : null
+    const maxDriftCopy = boundary?.maxDriftPercent != null && Number.isFinite(boundary.maxDriftPercent)
+        ? `${boundary.maxDriftPercent.toFixed(2)} percentage points`
+        : null
+    const noTradeStatusId = plan && !hasTrades && !isError ? 'dry-run-boundary-status' : undefined
+    const isTimeout = isError && /timeout|timed out/i.test(String((planError as Error | undefined)?.message ?? planError ?? ''))
+    const timeoutCopy = isTimeout
+        ? 'The simulation request timed out. Retry loading the plan, or cancel to abandon.'
+        : 'The rebalance plan is unavailable.'
+
+    const refreshPlan = async () => {
+        if (isFetching || inFlight) return
+        setExecutionError(null)
+        setReviewedPlan(undefined)
+        setStatusAnnouncement('Refreshing the rebalance plan…')
+        try {
+            await refetch()
+        } finally {
+            setStatusAnnouncement(null)
+        }
     }
-  }, [estimate, effectiveCooldown, plan, maxSlippageThresholdBps])
 
-  const handleConfirm = useCallback(async () => {
-    if (cooldownRemaining > 0 || !confirmed) return
-    try {
-      const result = await executeRebalance.mutateAsync()
-      onSuccess?.(result)
-      setLastRebalanceTime(Date.now())
-      onClose()
-    } catch {
-      // Error handled by mutation
+    const handleConfirm = async () => {
+        if (submittingRef.current || inFlight) {
+            setStatusAnnouncement('Rebalance submission is already in progress.')
+            return
+        }
+        if (!canConfirm) return
+        submittingRef.current = true
+        setIsSubmitting(true)
+        setExecutionError(null)
+        setStatusAnnouncement('Submitting rebalance…')
+        try {
+            const result = await execute.mutateAsync()
+            const finalStatus = result?.result?.status ?? result?.status
+            if (finalStatus === 'failed') {
+                const reason = result?.result?.failureReason ?? result?.result?.error ?? result?.failureReason
+                const txRef = result?.txId ?? result?.result?.txId ?? result?.result?.txHash
+                throw new Error(`${reason || 'Rebalance execution failed.'}${txRef ? ` (TX: ${txRef})` : ''}`)
+            }
+            submittingRef.current = false
+            setIsSubmitting(false)
+            onSuccess?.(result)
+            onClose()
+        } catch (error) {
+            submittingRef.current = false
+            setIsSubmitting(false)
+            setReviewedPlan(undefined)
+            setStatusAnnouncement(null)
+            setExecutionError(error instanceof Error ? error.message : 'Rebalance failed. Please try again.')
+        }
     }
-  }, [confirmed, cooldownRemaining, executeRebalance, onSuccess, onClose])
 
-  if (!open) return null
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="rebalance-confirm-title"
-    >
-      <div className="absolute inset-0 bg-black/60 dark:bg-black/70" aria-hidden onClick={onClose} />
-      <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl bg-white dark:bg-gray-800 p-6 shadow-xl">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-orange-500" />
-            <h2 id="rebalance-confirm-title" className="text-lg font-semibold text-gray-900 dark:text-white">
-              Review rebalance
-            </h2>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
-            aria-label="Close"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {estimateLoading ? (
-          <div className="py-8 text-center">
-            <RefreshCw className="w-8 h-8 mx-auto text-gray-400 motion-safe:animate-spin" aria-hidden="true" />
-            <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">Loading rebalance estimate...</p>
-          </div>
-        ) : !simData ? (
-          <div className="py-8 text-center">
-            <AlertCircle className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600" aria-hidden="true" />
-            <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">Unable to load rebalance data. Please try again.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {cooldownRemaining > 0 && (
-              <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg" role="alert">
-                <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Cooldown active</p>
-                  <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Please wait {Math.ceil(cooldownRemaining)} second{cooldownRemaining !== 1 ? 's' : ''} before rebalancing again.
-                  </p>
+    return (
+        <Modal
+            open
+            title="Review rebalance"
+            onClose={() => { if (!inFlight) onClose() }}
+            footer={(
+                <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                    <Button variant="secondary" onClick={onClose} disabled={inFlight} aria-describedby={noTradeStatusId}>
+                        {plan && !hasTrades ? 'Close' : 'Cancel'}
+                    </Button>
+                    {hasTrades && !isError && (
+                        <p id="rebalance-submit-hint" className="w-full min-w-0 break-words text-right text-xs text-gray-600 dark:text-gray-400">
+                            {inFlight
+                                ? 'Submission in progress. Extra clicks are ignored, so only one rebalance is sent.'
+                                : toleranceChanged
+                                    ? 'Refresh the plan to re-price trades before confirming.'
+                                    : isFetching
+                                        ? 'Refreshing the plan. Confirm becomes available when it finishes.'
+                                        : !confirmed
+                                            ? 'Check the review box to enable Confirm. Click it once: repeated clicks are ignored.'
+                                            : 'Click Confirm once. Repeated clicks are ignored while it submits.'}
+                        </p>
+                    )}
+                    {hasTrades && !isError && (
+                        <Button
+                            aria-describedby="rebalance-submit-hint"
+                            variant="primary"
+                            onClick={handleConfirm}
+                            disabled={!canConfirm}
+                            loading={inFlight}
+                            aria-busy={inFlight}
+                            aria-label={inFlight ? 'Submitting rebalance…' : 'Confirm rebalance'}
+                        >
+                            {inFlight ? 'Submitting rebalance…' : 'Confirm rebalance'}
+                        </Button>
+                    )}
                 </div>
-              </div>
             )}
-
-            <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4 space-y-3">
-              <h3 className="text-sm font-medium text-gray-900 dark:text-white">Estimated trades</h3>
-              {simData.tradeCount === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">No trades are required at current allocations.</p>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    {simData.tradeCount} trade{simData.tradeCount !== 1 ? 's' : ''} estimated
-                  </p>
-                  {simData.trades.length > 0 && (
-                    <div className="space-y-1 max-h-40 overflow-y-auto">
-                      {simData.trades.map((trade, i) => (
-                        <div key={i} className="flex items-center justify-between text-sm bg-white dark:bg-gray-800 rounded px-2 py-1.5">
-                          <div className="flex items-center gap-1">
-                            <span className="font-medium text-gray-900 dark:text-white">{trade.fromAsset}</span>
-                            <TrendingUp className="w-3 h-3 text-gray-400" />
-                            <span className="font-medium text-gray-900 dark:text-white">{trade.toAsset}</span>
-                          </div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
-                            {formatAmount(trade.amount)} @ {formatSlippage(trade.estimatedSlippageBps)} slippage
-                          </div>
-                        </div>
-                      ))}
+        >
+            {statusAnnouncement && (
+                <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+                    {statusAnnouncement}
+                </div>
+            )}
+            {isLoading ? (
+                <p role="status">Loading rebalance plan…</p>
+            ) : isError || !plan || !fees ? (
+                <div className="min-w-0 space-y-2 break-words">
+                    <p role="alert">{timeoutCopy}</p>
+                    <div className="flex min-w-0 flex-wrap gap-2">
+                        <Button variant="secondary" onClick={() => void refetch()} disabled={isFetching}>
+                            Retry loading plan
+                        </Button>
+                        <Button variant="secondary" onClick={onClose}>
+                            Cancel
+                        </Button>
                     </div>
-                  )}
                 </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3">
-                <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mb-1">
-                  <Clock className="w-3 h-3" aria-hidden="true" />
-                  Network fee
+            ) : !hasTrades ? (
+                <div
+                    id="dry-run-boundary-status"
+                    ref={boundaryStatusRef}
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    tabIndex={-1}
+                    className="min-w-0 space-y-2 break-words outline-none focus-visible:ring-2"
+                >
+                    <p className="font-semibold">0 planned trades — read-only preview</p>
+                    {withinThreshold && thresholdCopy ? (
+                        <p>
+                            {maxDriftCopy ? `Largest observed drift is ${maxDriftCopy}. ` : ''}
+                            Allowed drift is {thresholdCopy} or less from target (inclusive): an allocation exactly at {thresholdCopy} is still inside the threshold, and only absolute drift above {thresholdAmountCopy} is traded. No trades are required and there is no network fee.
+                        </p>
+                    ) : withinThreshold ? (
+                        <p>All allocations are within the configured drift threshold. No trades are required and there is no network fee.</p>
+                    ) : (
+                        <p>This plan contains no executable trades. Close the review and try again when quotes or balances change.</p>
+                    )}
                 </div>
-                <div className="text-sm font-medium text-gray-900 dark:text-white">
-                  {simData.totalGasXlm.toFixed(4)} XLM
+            ) : (
+                <div className="max-h-[65vh] min-w-0 space-y-3 overflow-y-auto break-words text-sm">
+                    <h3 id="quoted-trades" className="font-semibold">
+                        {trades.length} planned {trades.length === 1 ? 'trade' : 'trades'}
+                    </h3>
+                    {trades.length > 4 && <p>Scroll the trade list to review all planned trades.</p>}
+                    <div role="region" tabIndex={0} aria-labelledby="quoted-trades"
+                        className="max-h-36 min-w-0 overflow-y-auto rounded bg-gray-50 p-2 focus-visible:ring-2 dark:bg-gray-900">
+                        <ol className="list-decimal space-y-1 pl-6 break-words">
+                            {trades.map(trade => (
+                                <li key={trade.asset} className="min-w-0 break-words">
+                                    {trade.action === 'buy' ? 'Buy' : 'Sell'} {trade.amount.toLocaleString(undefined, { maximumFractionDigits: 7 })} {trade.asset}
+                                </li>
+                            ))}
+                        </ol>
+                    </div>
+                    <p className="min-w-0 break-words">Estimated network fee for all trades: {fees.xlm.toFixed(7)} XLM (~${fees.usd.toFixed(3)})</p>
+                    <p className="min-w-0 break-words">
+                        {oldestQuoteMs === null
+                            ? 'Price age unavailable for one or more quotes.'
+                            : <>Oldest quoted price as of <time dateTime={new Date(oldestQuoteMs).toISOString()}>{new Date(oldestQuoteMs).toLocaleString()}</time> ({quoteAgeMinutes === 0 ? 'less than 1 minute old' : `${quoteAgeMinutes} min old`}).</>}
+                    </p>
+                    {quote?.feedMeta.degraded && <p className="min-w-0 break-words">Some prices use a fallback feed.</p>}
+                    {quote?.feedMeta.staleOrLimited && <p className="min-w-0 break-words">Some quoted prices may be stale.</p>}
+                    {toleranceChanged && (
+                        <div
+                            role="alert"
+                            className="min-w-0 space-y-2 break-words rounded border border-amber-300 bg-amber-50 p-2.5 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+                        >
+                            <p className="font-semibold">Slippage tolerance changed after this plan was quoted</p>
+                            <p>
+                                These trades were quoted with a {formatPercent(planTolerance)}% maximum slippage, but the portfolio now uses {formatPercent(activeTolerance!)}%.
+                                Refresh the plan to re-price the trades before confirming.
+                            </p>
+                            <Button variant="secondary" size="sm" onClick={() => void refreshPlan()} disabled={isFetching || inFlight}>
+                                {isFetching ? 'Refreshing…' : 'Refresh plan'}
+                            </Button>
+                        </div>
+                    )}
+                    <p className="min-w-0 break-words">Maximum slippage: {plan.maxSlippagePercent}%</p>
+                    <p className="min-w-0 break-words">The execution price and fees may change. Executed trades cannot be reversed from this app.</p>
+                    <label className="flex min-w-0 items-start gap-2 break-words">
+                        <input type="checkbox" checked={confirmed} disabled={isFetching || inFlight}
+                            aria-label="I reviewed the planned trades, fees, and prices."
+                            onChange={event => setReviewedPlan(event.target.checked ? plan : undefined)} />
+                        <span className="min-w-0 break-words">I reviewed the planned trades, fees, and prices.</span>
+                    </label>
                 </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">
-                  ~${simData.totalGasUsd.toFixed(3)}
-                </div>
-              </div>
-
-              <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3">
-                <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mb-1">
-                  <TrendingDown className="w-3 h-3" aria-hidden="true" />
-                  Max slippage
-                </div>
-                <div className="text-sm font-medium text-gray-900 dark:text-white">
-                  {formatSlippage(simData.maxSlippageBps)}
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">
-                  Est. {formatSlippage(simData.estimatedSlippageBps)}
-                </div>
-              </div>
-            </div>
-
-            {simData.gasWarning && (
-              <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg" role="alert">
-                <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-red-800 dark:text-red-300">High gas warning</p>
-                  <p className="text-xs text-red-700 dark:text-red-400">
-                    Estimated gas is higher than usual ({simData.totalGasXlm.toFixed(2)} XLM). Consider fewer trades or waiting for calmer network conditions.
-                  </p>
-                </div>
-              </div>
             )}
-
-            {simData.highSlippageLegs.length > 0 && (
-              <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg" role="alert">
-                <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-red-800 dark:text-red-300">High slippage detected</p>
-                  <p className="text-xs text-red-700 dark:text-red-400">
-                    {simData.highSlippageLegs.length} leg{simData.highSlippageLegs.length !== 1 ? 's' : ''} exceed{simData.highSlippageLegs.length === 1 ? 's' : ''} the {formatSlippage(maxSlippageThresholdBps)} slippage threshold:
-                  </p>
-                  <ul className="mt-1 text-xs text-red-700 dark:text-red-400 list-disc list-inside">
-                    {simData.highSlippageLegs.map((leg, i) => (
-                      <li key={i}>
-                        {leg.fromAsset} → {leg.toAsset}: {formatSlippage(leg.estimatedSlippageBps)} slippage
-                      </li>
-                    ))}
-                  </ul>
+            {executionError && (
+                <div
+                    ref={errorAlertRef}
+                    role="alert"
+                    tabIndex={-1}
+                    className="mt-3 min-w-0 break-words rounded border border-red-200 bg-red-50 p-2.5 text-sm text-red-700 outline-none focus:ring-2 focus:ring-red-500 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
+                >
+                    <p className="font-semibold">Rebalance submission failed</p>
+                    <p className="min-w-0 break-words">{executionError}</p>
+                    {isSlippageFailure(executionError) ? (
+                        <>
+                            <p className="mt-1 min-w-0 break-words text-xs text-red-600 dark:text-red-400">
+                                Prices moved beyond your slippage limit before the rebalance was accepted, so nothing was executed.
+                                Refresh the plan for fresh prices, re-acknowledge, and try again.
+                            </p>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                className="mt-2"
+                                onClick={() => void refreshPlan()}
+                                disabled={isFetching || inFlight}
+                            >
+                                {isFetching ? 'Refreshing…' : 'Refresh quote and retry'}
+                            </Button>
+                        </>
+                    ) : (
+                        <p className="mt-1 min-w-0 break-words text-xs text-red-600 dark:text-red-400">
+                            Review and re-acknowledge the planned trades to retry, or cancel to abandon.
+                        </p>
+                    )}
                 </div>
-              </div>
             )}
-
-            <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3">
-              <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                Executed trades cannot be reversed from this app. Review allocations before confirming.
-              </p>
-            </div>
-
-            <label className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg cursor-pointer">
-              <input
-                type="checkbox"
-                checked={confirmed}
-                onChange={(e) => setConfirmed(e.target.checked)}
-                disabled={cooldownRemaining > 0}
-                className="mt-0.5 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-              />
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-                I have reviewed the estimated trades, fees, and slippage. I understand that executed trades cannot be reversed.
-              </span>
-            </label>
-          </div>
-        )}
-
-        <div className="mt-6 flex justify-end gap-3">
-          <Button variant="secondary" onClick={onClose} disabled={executeRebalance.isPending}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleConfirm}
-            disabled={!confirmed || cooldownRemaining > 0 || !simData || executeRebalance.isPending}
-            loading={executeRebalance.isPending}
-          >
-            {executeRebalance.isPending ? 'Submitting...' : cooldownRemaining > 0 ? `Wait ${Math.ceil(cooldownRemaining)}s` : 'Confirm rebalance'}
-          </Button>
-        </div>
-      </div>
-    </div>
-  )
+        </Modal>
+    )
 }
-
-export default RebalanceConfirm

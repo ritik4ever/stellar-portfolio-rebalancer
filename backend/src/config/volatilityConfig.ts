@@ -8,6 +8,14 @@ export const MAX_VOLATILITY_THRESHOLD_PCT = 50
 export interface VolatilityThresholdCheckResult {
     safe: boolean
     reason?: string
+    context?: {
+        asset: string
+        observedChangePct?: number
+        thresholdPct: number
+        comparison: '>'
+        /** True when the feed could not supply a usable 24h change for the asset. */
+        missingInterval?: boolean
+    }
 }
 
 export const isVolatilityThresholdPctValid = (pct: number): boolean =>
@@ -62,10 +70,28 @@ export function checkVolatilityThreshold(
     thresholdPct: number
 ): VolatilityThresholdCheckResult {
     for (const [asset, data] of Object.entries(prices)) {
-        if (Math.abs(data.change) > thresholdPct) {
+        const change = data?.change
+        // A missing feed interval must not silently pass as "no volatility":
+        // the caller treats this as a delayed, diagnosable outcome and the
+        // next scheduled cycle retries with a complete feed.
+        if (typeof change !== 'number' || !Number.isFinite(change)) {
             return {
                 safe: false,
-                reason: `High volatility detected: ${asset} moved ${data.change.toFixed(2)}% in 24h`
+                reason: `Volatility feed missing interval data for ${asset}: no usable 24h change`,
+                context: { asset, thresholdPct, comparison: '>', missingInterval: true },
+            }
+        }
+        if (Math.abs(change) > thresholdPct) {
+            return {
+                safe: false,
+                reason: `High volatility detected: ${asset} moved ${change.toFixed(2)}% in 24h`,
+                context: { asset, observedChangePct: change, thresholdPct, comparison: '>' },
+            }
+        }
+        if (Math.abs(change) === thresholdPct) {
+            return {
+                safe: true,
+                context: { asset, observedChangePct: change, thresholdPct, comparison: '>' },
             }
         }
     }

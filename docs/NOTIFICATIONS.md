@@ -13,8 +13,27 @@ The Stellar Portfolio Rebalancer includes a comprehensive notification system th
 - **Event Filtering**: Subscribe to specific event types
 - **User Preferences**: Per-user notification configuration
 - **Configurable backoff**: Provider-specific retry timing for email, webhooks, Slack, and SMS (max attempts, initial delay, exponential multiplier, cap)
-- **Delivery logs**: Each attempt records status (`sent`, `retried`, `failed`, `skipped`) with optional `attempt_number` and `backoff_delay_ms`
+- **Delivery logs**: Each attempt records status (`sent`, `retried`, `failed`, `uncertain`, `skipped`) with optional `attempt_number` and `backoff_delay_ms`
 - **Non-blocking**: Notification failures don't affect core operations
+
+## Notification channel preferences
+
+Email, webhook, and Telegram channels are enabled independently. You may save preferences with zero channels enabled; no notifications will be delivered in that state. Enabling exactly one channel sends notifications only through that channel. An enabled channel must have its required destination configured (email address, HTTP(S) webhook URL, or Telegram chat ID) before preferences can be saved.
+
+Test delivery requires at least one saved channel. Unsaved channel changes do not affect test delivery until they are saved.
+
+### Accessibility of the notification settings form
+
+The notification settings form (including webhook settings) is fully usable with a keyboard and a screen reader:
+
+- Every field has a programmatic label. The callback URL, email address, and Telegram chat ID fields expose validation errors through `aria-describedby` together with `aria-invalid`, and the errors are announced assertively (`role="alert"`).
+- State changes are announced through live regions. Replacing the callback URL (rotating the endpoint) is announced as a pending replacement that keeps delivery on the saved endpoint until you save, and as the active endpoint after a successful save; a failed save is announced as an alert and delivery keeps using the previously saved settings.
+- Test delivery outcomes are announced per event type: successes through a polite status region (`role="status"`) and failures — for example a webhook endpoint answering with a non-2xx response — through an alert (`role="alert"`).
+- Every channel, event, and digest switch exposes its on/off state (`role="switch"` with `aria-checked`) and is described by its help text; channel switches are also described by their save status ("pending save", "unchanged"). The digest frequency buttons sit in a labelled group and expose the selected frequency with `aria-pressed`.
+- The channel summary ("0 of 3 notification channels enabled", "1 of 3 … Email only") is a polite live region and also describes the Save Preferences button. With all channels off, "Unsubscribe from all" is disabled and described by "All notification channels are off."
+- Toggling a switch updates the form immediately, before anything is saved. Focus stays on Save Preferences while a save is in flight (it is `aria-disabled` rather than removed from the tab order). If the save fails, the alert states that the changes shown have not been saved, Save Preferences keeps focus (described by the alert) so the user can retry, and a "Discard changes" button returns the form to the saved settings. After a successful save or a discard, focus moves to the "Notifications" heading instead of being lost.
+- The unsubscribe confirmation dialog moves focus into itself when opened, keeps Tab navigation inside while it is open, can be abandoned with Escape or its Cancel button, and returns focus to the "Unsubscribe from all" button when closed.
+- At narrow viewports (down to 320px) and 200% text sizing, webhook settings controls, masked callback URL inputs, endpoint status messages, validation alerts, and test delivery rows wrap cleanly without horizontal clipping or exposing webhook secrets.
 
 ## Delivery backoff configuration
 
@@ -42,6 +61,40 @@ Retry behavior is loaded at startup from environment variables (validated in `st
 | `SMS_BACKOFF_MULTIPLIER` | SMS | `2` | Exponential multiplier per retry |
 
 On each failed attempt (before the final failure), the service logs a `retried` row with the scheduled backoff delay. After all attempts are exhausted, a `failed` row is written and an error is logged with `maxAttempts` and the last error message.
+
+### Safe email recovery (ambiguous delivery)
+
+SMTP has no way to retract a message. When a connection times out (or is dropped) *after* the message body was written but *before* the server's final confirmation arrived, the server may already have delivered the email. Retrying that failure could send the same alert twice, so email failures are classified before retrying (`backend/src/services/emailDeliverySafety.ts`):
+
+| Classification | Examples | Behaviour |
+|----------------|----------|-----------|
+| `retryable` | `ECONNREFUSED`, `ENOTFOUND`, DNS failures, explicit 4xx responses, generic local errors | Retried with the configured backoff, up to `EMAIL_MAX_ATTEMPTS` |
+| `permanent` | SMTP 5xx responses, `EAUTH` credential failures, invalid/missing recipients detected locally | Not retried; logged as `failed` with `failureKind: "permanent"` |
+| `ambiguous` | `ETIMEDOUT`/`ECONNECTION`/`ECONNRESET`/`EPIPE` after a connection was established, with no explicit rejection response | **Not retried**; logged as `uncertain` with `failureKind: "ambiguous"` |
+
+Every email carries a deterministic `Message-ID` derived from the user, portfolio, event type, title and timestamp. The same id is reused for every retry of one notification and is included in the error message, delivery-log metadata (`idempotencyKey`) and logs, so an operator or the receiving provider can correlate a possible duplicate with the original attempt. Look for the structured log line `Notification delivery outcome unknown; retry stopped to avoid duplicate side effects` and the metric label `reason="delivery_unknown"` when triaging.
+
+Because the outcome is genuinely unknown, no automatic resend happens. Confirm delivery with the SMTP provider using the `Message-ID` before re-triggering the notification manually. When a `deliveryId` is in play, the delivery is cached as `uncertain`, so a repeated trigger for the same event is logged as `skipped` (`Delivery outcome unknown for this event; not resending automatically`) instead of sending again.
+
+## State Consistency in Notification Delivery (SPR-2026-168)
+
+To prevent discrepancies between user-visible delivery results and persisted database records, the notification delivery subsystem enforces the following guarantees:
+
+### 1. Exactly-Once Visible Notification under Concurrency
+When concurrent operations trigger notification delivery for the same event (e.g., duplicate webhooks, rebalance queue retries, or concurrent API requests), deliveries are coordinated using a deterministic `deliveryId`:
+- **In-Flight Deduplication**: If a delivery is already in flight for a given `deliveryId`, concurrent requests wait on the in-flight execution rather than dispatching duplicate SMTP messages or webhooks.
+- **Completed Delivery Caching**: Subsequent triggers for an already-completed delivery are skipped with status `skipped` and reason `Duplicate notification: already sent for this event`.
+- **Traceable Attempts**: Every invocation records an entry in `notification_logs` associated with the `delivery_id`. The user receives exactly one notification, while audit logs maintain a full trace of all initiated and deduplicated attempts.
+
+### 2. Interrupted Work & Abort Consistency
+During network partitions, worker restarts, or process termination:
+- If delivery is interrupted or cancelled (e.g. via `AbortSignal` during backoff retry delay), `deliverWithBackoff` catches the interruption and guarantees that a final `failed` outcome is logged to `notification_logs` (`Interrupted: <reason>`).
+- Persisted records never remain stuck in a pending `retried` state when an operation has externally failed or aborted.
+
+### 3. Rebalance Workflow Agreement
+- Both completed and failed rebalances (manual or automated) trigger corresponding notification events and delivery attempts.
+- Rebalance status (`completed` | `failed`) and failure reasons are rendered consistently across templates and recorded in notification logs.
+
 
 ## Event Types
 

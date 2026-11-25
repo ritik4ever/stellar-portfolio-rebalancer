@@ -90,7 +90,7 @@ For exceptional cases (e.g., a false positive that hasn't been allowlisted yet),
 SKIP_SECRET_SCAN=1 git commit ...
 ```
 
-**Note:** Bypassing the local hook does **not** bypass CI. The same scan runs in GitHub Actions, so you must still justify the bypass in your pull request. Do not use this unless absolutely necessary.
+**Note:** Bypassing the local hook does not skip CI checks. GitHub Actions runs the same scan, and any bypass must be justified in your pull request. Only bypass the hook when absolutely necessary.
 
 ### Maintaining the allowlist
 
