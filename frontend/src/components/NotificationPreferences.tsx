@@ -33,6 +33,9 @@ const defaultPreferences: Preferences = {
 }
 
 const WEBHOOK_SAVE_ERROR = 'Could not save webhook settings. Delivery still uses the previously saved settings.'
+const SAVE_FAILURE_GUIDANCE =
+    'Your changes are still shown but have not been saved. Retry with Save Preferences or choose Discard changes to return to your saved settings.'
+const SAVE_ERROR_ID = 'notification-preferences-error'
 
 function getWebhookUrlError(value: string): string | null {
     if (!value) return 'A callback URL is required when webhook delivery is enabled.'
@@ -62,6 +65,12 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const unsubscribeDialogRef = useRef<HTMLDivElement>(null)
     const unsubscribeTriggerRef = useRef<HTMLButtonElement>(null)
+    const headingRef = useRef<HTMLHeadingElement>(null)
+    const saveButtonRef = useRef<HTMLButtonElement>(null)
+    // Where keyboard focus should go once the next render has committed. Save
+    // and Discard disable themselves when there is nothing left to save, which
+    // would otherwise drop focus to <body>.
+    const [focusRequest, setFocusRequest] = useState<'heading' | 'save' | null>(null)
 
     const savePending = saveMutation.microstate.phase === 'pending'
     const unsubscribePending = unsubscribeMutation.microstate.phase === 'pending'
@@ -81,6 +90,21 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             setSavedProviderActive(false)
         }
     }, [prefData])
+
+    useEffect(() => {
+        if (!focusRequest) return
+        const target = focusRequest === 'heading' ? headingRef.current : saveButtonRef.current
+        target?.focus()
+        setFocusRequest(null)
+    }, [focusRequest])
+
+    // Only move focus when it would otherwise be lost (on <body>) or is still
+    // on the control that started the action, so focus is never pulled away
+    // from somewhere the user deliberately moved to.
+    const focusIsOnBodyOr = (element: HTMLElement | null) => {
+        const active = document.activeElement
+        return !active || active === document.body || active === element
+    }
 
     useEffect(() => {
         return () => {
@@ -147,6 +171,10 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     }
 
     const handleSave = async () => {
+        // The Save button stays focusable (aria-disabled) while a save is in
+        // flight so keyboard focus is not lost; ignore repeat activations.
+        if (actionPending) return
+
         // Validate email address if email is enabled
         if (preferences.emailEnabled && !preferences.emailAddress.trim()) {
             setEmailError('Email address is required when email notifications are enabled')
@@ -183,11 +211,26 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             setOriginalPreferences(submitted)
             setSavedProviderActive(preferences.emailEnabled || preferences.webhookEnabled || preferences.telegramEnabled)
             showSuccessMessage('Preferences saved successfully')
+            // Save becomes disabled once nothing is unsaved; keep focus in the panel.
+            if (focusIsOnBodyOr(saveButtonRef.current)) setFocusRequest('heading')
         } catch (err) {
             setError(webhookHasUnsavedChanges
                 ? WEBHOOK_SAVE_ERROR
                 : err instanceof Error ? err.message : 'Failed to save preferences')
+            // Keep focus on Save so the user can retry, or move to Discard changes.
+            if (focusIsOnBodyOr(saveButtonRef.current)) setFocusRequest('save')
         }
+    }
+
+    const handleDiscardChanges = () => {
+        if (actionPending || !originalPreferences) return
+        setPreferences(originalPreferences)
+        setEmailError(null)
+        setTelegramError(null)
+        setError(null)
+        saveMutation.reset()
+        showSuccessMessage('Unsaved changes discarded. Your saved notification preferences are shown.')
+        setFocusRequest('heading')
     }
 
     const handleUnsubscribeClick = () => {
@@ -387,6 +430,15 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
           ? unsubscribeMutation.microstate.label
           : null
     const displayedError = error || saveErrorMessage || unsubscribeErrorMessage || loadErrMsg
+    // A failed save leaves the edited (optimistic) values on screen. Tell the
+    // user they are not saved and how to retry or abandon them.
+    const saveFailed = saveMutation.microstate.phase === 'error' && hasUnsavedChanges()
+    const noChannelsEnabled = enabledChannelCount === 0
+    const saveBlocked =
+        !hasUnsavedChanges() ||
+        (preferences.webhookEnabled && !!webhookError) ||
+        (preferences.emailEnabled && !!emailError) ||
+        (preferences.telegramEnabled && !!telegramError)
 
     if (loading) {
         return (
@@ -405,7 +457,13 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
                 <div className="flex items-center min-w-0">
                     <Bell className="w-6 h-6 text-blue-600 mr-2 flex-shrink-0" />
-                    <h2 className="text-xl font-semibold text-gray-900 break-words min-w-0">Notifications</h2>
+                    <h2
+                        ref={headingRef}
+                        tabIndex={-1}
+                        className="text-xl font-semibold text-gray-900 break-words min-w-0 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                        Notifications
+                    </h2>
                 </div>
                 {hasUnsavedChanges() && (
                     <span className="text-sm text-orange-600 font-medium break-words">Unsaved changes</span>
@@ -417,11 +475,15 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                 <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
+                    id={SAVE_ERROR_ID}
                     className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-red-800 min-w-0"
                     role="alert"
                 >
-                    <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                    <span className="text-sm break-words min-w-0">{displayedError}</span>
+                    <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                    <span className="text-sm break-words min-w-0">
+                        {displayedError}
+                        {saveFailed && <> {SAVE_FAILURE_GUIDANCE}</>}
+                    </span>
                 </motion.div>
             )}
 
@@ -491,7 +553,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
             {/* Provider Configuration */}
             <div className="space-y-6 mb-6">
-                <p className="text-sm text-gray-600" role="status" aria-live="polite">
+                <p id="notification-channel-status" className="text-sm text-gray-600" role="status" aria-live="polite">
                     {channelSelectionStatus}
                 </p>
                 {/* Email Provider */}
@@ -506,6 +568,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             role="switch"
                             aria-checked={preferences.emailEnabled}
                             aria-label="Email notifications"
+                            aria-describedby="notification-email-description notification-email-status"
                             onClick={() => {
                                 setPreferences(prev => {
                                     const nextEnabled = !prev.emailEnabled
@@ -525,10 +588,11 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             />
                         </button>
                     </div>
-                    <p className="text-sm text-gray-600 mb-3">
+                    <p id="notification-email-description" className="text-sm text-gray-600 mb-3">
                         Receive notifications via email (requires SMTP configuration)
                     </p>
                     <p
+                        id="notification-email-status"
                         className={`mb-3 text-xs ${
                             savePending && emailHasUnsavedChanges
                                 ? 'text-blue-600'
@@ -586,6 +650,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             role="switch"
                             aria-checked={preferences.webhookEnabled}
                             aria-label="Webhook notifications"
+                            aria-describedby="notification-webhook-description notification-webhook-status"
                             onClick={() => setPreferences(prev => ({ ...prev, webhookEnabled: !prev.webhookEnabled }))}
                             disabled={actionPending}
                             className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
@@ -599,10 +664,11 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             />
                         </button>
                     </div>
-                    <p className="text-sm text-gray-600 mb-3 break-words">
+                    <p id="notification-webhook-description" className="text-sm text-gray-600 mb-3 break-words">
                         Send notifications to your webhook endpoint via HTTP POST
                     </p>
                     <p
+                        id="notification-webhook-status"
                         className={`mb-3 text-xs break-words ${
                             savePending && webhookHasUnsavedChanges
                                 ? 'text-blue-600'
@@ -662,7 +728,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                 <div className="border border-gray-200 rounded-lg p-4">
                     <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center">
-                            <span className="w-5 h-5 flex items-center justify-center text-gray-600 mr-2 font-bold">TG</span>
+                            <span aria-hidden="true" className="w-5 h-5 flex items-center justify-center text-gray-600 mr-2 font-bold">TG</span>
                             <span className="font-medium text-gray-900">Telegram Notifications</span>
                         </div>
                         <button
@@ -670,6 +736,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             role="switch"
                             aria-checked={preferences.telegramEnabled}
                             aria-label="Telegram notifications"
+                            aria-describedby="notification-telegram-description notification-telegram-status"
                             onClick={() => {
                                 setPreferences(prev => {
                                     const nextEnabled = !prev.telegramEnabled
@@ -689,10 +756,11 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             />
                         </button>
                     </div>
-                    <p className="text-sm text-gray-600 mb-3">
+                    <p id="notification-telegram-description" className="text-sm text-gray-600 mb-3">
                         Send notifications to your Telegram chat via bot
                     </p>
                     <p
+                        id="notification-telegram-status"
                         className={`mb-3 text-xs ${
                             savePending && telegramHasUnsavedChanges
                                 ? 'text-blue-600'
@@ -763,7 +831,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                     <div className="flex items-center justify-between py-2">
                         <div className="flex-1">
                             <div className="font-medium text-gray-900">Rebalance Alerts</div>
-                            <div className="text-sm text-gray-600">
+                            <div id="notification-event-rebalance-description" className="text-sm text-gray-600">
                                 Notify when portfolio is rebalanced
                             </div>
                         </div>
@@ -773,6 +841,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                                 type="button"
                                 role="switch"
                                 aria-checked={preferences.events.rebalance}
+                                aria-describedby="notification-event-rebalance-description"
                                 aria-label="Rebalance alerts"
                                 onClick={() => setPreferences(prev => ({
                                     ...prev,
@@ -795,7 +864,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                     <div className="flex items-center justify-between py-2">
                         <div className="flex-1">
                             <div className="font-medium text-gray-900">Circuit Breaker Alerts</div>
-                            <div className="text-sm text-gray-600">
+                            <div id="notification-event-circuitBreaker-description" className="text-sm text-gray-600">
                                 Notify when circuit breakers are triggered
                             </div>
                         </div>
@@ -805,6 +874,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                                 type="button"
                                 role="switch"
                                 aria-checked={preferences.events.circuitBreaker}
+                                aria-describedby="notification-event-circuitBreaker-description"
                                 aria-label="Circuit breaker alerts"
                                 onClick={() => setPreferences(prev => ({
                                     ...prev,
@@ -827,7 +897,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                     <div className="flex items-center justify-between py-2">
                         <div className="flex-1">
                             <div className="font-medium text-gray-900">Large Price Movement Alerts</div>
-                            <div className="text-sm text-gray-600">
+                            <div id="notification-event-priceMovement-description" className="text-sm text-gray-600">
                                 Notify when asset prices move significantly
                             </div>
                         </div>
@@ -837,6 +907,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                                 type="button"
                                 role="switch"
                                 aria-checked={preferences.events.priceMovement}
+                                aria-describedby="notification-event-priceMovement-description"
                                 aria-label="Large price movement alerts"
                                 onClick={() => setPreferences(prev => ({
                                     ...prev,
@@ -859,7 +930,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                     <div className="flex items-center justify-between py-2">
                         <div className="flex-1">
                             <div className="font-medium text-gray-900">Risk Level Change Alerts</div>
-                            <div className="text-sm text-gray-600">
+                            <div id="notification-event-riskChange-description" className="text-sm text-gray-600">
                                 Notify when portfolio risk level changes
                             </div>
                         </div>
@@ -869,6 +940,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                                 type="button"
                                 role="switch"
                                 aria-checked={preferences.events.riskChange}
+                                aria-describedby="notification-event-riskChange-description"
                                 aria-label="Risk level change alerts"
                                 onClick={() => setPreferences(prev => ({
                                     ...prev,
@@ -904,6 +976,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                         role="switch"
                         aria-checked={preferences.digestEnabled}
                         aria-label="Digest mode"
+                        aria-describedby="notification-digest-description"
                         onClick={() => {
                             setPreferences(prev => ({
                                 ...prev,
@@ -923,20 +996,26 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                         />
                     </button>
                 </div>
-                <p className="text-sm text-gray-600 mb-3">
+                <p id="notification-digest-description" className="text-sm text-gray-600 mb-3">
                     Group notifications into a single daily or weekly summary instead of sending them in real time.
                 </p>
 
                 {preferences.digestEnabled && (
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <span id="notification-digest-frequency-label" className="block text-sm font-medium text-gray-700 mb-2">
                             Digest Frequency
-                        </label>
-                        <div className="flex flex-col sm:flex-row gap-2">
+                        </span>
+                        <div
+                            role="group"
+                            aria-labelledby="notification-digest-frequency-label"
+                            aria-describedby="notification-digest-frequency-help"
+                            className="flex flex-col sm:flex-row gap-2"
+                        >
                             {(['daily', 'weekly'] as const).map((freq) => (
                                 <button
                                     key={freq}
                                     type="button"
+                                    aria-pressed={preferences.digestFrequency === freq}
                                     onClick={() => setPreferences(prev => ({ ...prev, digestFrequency: freq }))}
                                     disabled={actionPending}
                                     className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
@@ -949,7 +1028,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                                 </button>
                             ))}
                         </div>
-                        <p className="mt-2 text-xs text-gray-500">
+                        <p id="notification-digest-frequency-help" className="mt-2 text-xs text-gray-500">
                             {preferences.digestFrequency === 'daily'
                                 ? 'Receive one summary per day with all events.'
                                 : 'Receive one summary per week with all events.'}
@@ -1032,33 +1111,58 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             )}
 
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-200 min-w-0">
-                <button
-                    type="button"
-                    ref={unsubscribeTriggerRef}
-                    onClick={handleUnsubscribeClick}
-                    disabled={actionPending || showUnsubscribeReason || (!preferences.emailEnabled && !preferences.webhookEnabled && !preferences.telegramEnabled)}
-                    className="text-sm text-left sm:text-center break-words text-red-600 hover:text-red-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
-                >
-                    Unsubscribe from all
-                </button>
-
-                <button
-                    onClick={handleSave}
-                    disabled={actionPending || !hasUnsavedChanges() || (preferences.webhookEnabled && !!webhookError) || (preferences.emailEnabled && !!emailError) || (preferences.telegramEnabled && !!telegramError)}
-                    className="w-full sm:w-auto flex flex-wrap items-center justify-center gap-2 px-4 sm:px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors text-center break-words"
-                >
-                    {savePending ? (
-                        <>
-                            <Loader className="w-4 h-4 animate-spin flex-shrink-0" />
-                            <span>Saving preferences...</span>
-                        </>
-                    ) : (
-                        <>
-                            <Save className="w-4 h-4 flex-shrink-0" />
-                            <span>Save Preferences</span>
-                        </>
+                <div className="flex flex-col gap-1 min-w-0">
+                    <button
+                        type="button"
+                        ref={unsubscribeTriggerRef}
+                        onClick={handleUnsubscribeClick}
+                        disabled={actionPending || showUnsubscribeReason || noChannelsEnabled}
+                        aria-describedby={noChannelsEnabled ? 'unsubscribe-all-hint' : undefined}
+                        className="text-sm text-left sm:text-center break-words text-red-600 hover:text-red-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+                    >
+                        Unsubscribe from all
+                    </button>
+                    {noChannelsEnabled && (
+                        <span id="unsubscribe-all-hint" className="text-xs text-gray-500 break-words">
+                            All notification channels are off.
+                        </span>
                     )}
-                </button>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2 min-w-0">
+                    {hasUnsavedChanges() && (
+                        <button
+                            type="button"
+                            onClick={handleDiscardChanges}
+                            disabled={actionPending}
+                            className="w-full sm:w-auto px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed break-words"
+                        >
+                            Discard changes
+                        </button>
+                    )}
+                    {/* While saving, Save stays focusable (aria-disabled) so keyboard focus is not dropped to <body>. */}
+                    <button
+                        type="button"
+                        ref={saveButtonRef}
+                        onClick={handleSave}
+                        disabled={!savePending && (actionPending || saveBlocked)}
+                        aria-disabled={savePending || undefined}
+                        aria-describedby={displayedError ? `${SAVE_ERROR_ID} notification-channel-status` : 'notification-channel-status'}
+                        className="w-full sm:w-auto flex flex-wrap items-center justify-center gap-2 px-4 sm:px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed aria-disabled:bg-gray-300 aria-disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors text-center break-words"
+                    >
+                        {savePending ? (
+                            <>
+                                <Loader className="w-4 h-4 animate-spin flex-shrink-0" aria-hidden="true" />
+                                <span>Saving preferences...</span>
+                            </>
+                        ) : (
+                            <>
+                                <Save className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+                                <span>Save Preferences</span>
+                            </>
+                        )}
+                    </button>
+                </div>
             </div>
         </div>
     )
