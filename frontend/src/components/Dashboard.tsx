@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Copy, Share2, Settings, WalletCards } from 'lucide-react'
@@ -31,6 +31,7 @@ import { downloadPortfolioExport } from '../config/api'
 import { usePortfolioLiveFeed } from '../hooks/usePortfolioLiveFeed'
 import { DriftGaugeGrid, type DriftGaugeAsset } from './DriftGauge'
 import { trackEvent } from '../analytics'
+import { useDialogFocus } from '../hooks/useDialogFocus'
 import PriceCandlestick, { type RebalanceEvent as CandlestickRebalanceEvent } from './PriceCandlestick'
 
 interface DashboardProps {
@@ -42,6 +43,12 @@ type DashboardPriceRow = { price?: number; change?: number;[key: string]: unknow
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications'>('overview')
+    // Polite screen-reader announcements for navigation and wallet-state changes.
+    const [navAnnouncement, setNavAnnouncement] = useState('')
+    const selectTab = useCallback((tab: 'overview' | 'analytics' | 'notifications', label: string) => {
+        setActiveTab(tab)
+        setNavAnnouncement(`${label} section shown`)
+    }, [])
     const [reviewPortfolioId, setReviewPortfolioId] = useState<string | null>(null)
     const [rebalanceNotice, setRebalanceNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
     const [candlestickAsset, setCandlestickAsset] = useState<string>('XLM')
@@ -236,6 +243,76 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         setShowDemoResetConfirm(false)
         setDemoResetError(null)
     }, [resettingDemo])
+
+    // Dialog focus management for the demo reset confirmation.
+    const demoResetDialogRef = useRef<HTMLDivElement>(null)
+    const demoResetInitialFocusRef = useRef<HTMLButtonElement>(null)
+    const mobileRefreshRef = useRef<HTMLButtonElement>(null)
+    useDialogFocus(showDemoResetConfirm, demoResetDialogRef, {
+        onClose: closeDemoResetModal,
+        initialFocusRef: demoResetInitialFocusRef,
+        fallbackFocusRef: mobileRefreshRef,
+    })
+
+    // The demo reset only applies without a wallet. If a wallet connects (or
+    // disconnects) while the dialog or the action bar is in use, close the
+    // dialog that no longer applies and announce what changed, instead of
+    // leaving a dead dialog or silently re-labelled controls.
+    const prevHasWalletRef = useRef(Boolean(publicKey))
+    useEffect(() => {
+        const hasWallet = Boolean(publicKey)
+        if (prevHasWalletRef.current === hasWallet) return
+        prevHasWalletRef.current = hasWallet
+        if (hasWallet) {
+            setShowDemoResetConfirm(false)
+            setDemoResetError(null)
+            setNavAnnouncement('Wallet connected. Portfolio actions updated.')
+        } else {
+            setNavAnnouncement('Wallet disconnected. Showing the demo portfolio.')
+        }
+    }, [publicKey])
+
+    // Refreshing swaps the whole dashboard for the loading screen, which unmounts
+    // the control the user just activated. Put keyboard focus back on a Refresh
+    // control once the dashboard returns, rather than leaving it on <body>.
+    const desktopRefreshRef = useRef<HTMLButtonElement>(null)
+    const restoreRefreshFocusRef = useRef(false)
+    const handleRefreshClick = useCallback(() => {
+        restoreRefreshFocusRef.current = true
+        return refreshData()
+    }, [refreshData])
+    useEffect(() => {
+        if (loading || !restoreRefreshFocusRef.current) return
+        restoreRefreshFocusRef.current = false
+        if (document.activeElement && document.activeElement !== document.body) return
+        const candidates = [mobileRefreshRef.current, desktopRefreshRef.current]
+        const visible = candidates.find(el => el && el.offsetParent !== null)
+        ;(visible ?? candidates.find(Boolean))?.focus()
+    }, [loading])
+
+    // Keep content and focused controls clear of the fixed mobile action bar at
+    // any text size: size the spacer to the bar and reserve the same room when
+    // the browser scrolls a focused element into view.
+    const mobileBarRef = useRef<HTMLDivElement>(null)
+    const [mobileBarHeight, setMobileBarHeight] = useState(0)
+    useEffect(() => {
+        const bar = mobileBarRef.current
+        if (!bar) return
+        const update = () => setMobileBarHeight(bar.offsetHeight)
+        update()
+        if (typeof ResizeObserver === 'undefined') return
+        const observer = new ResizeObserver(update)
+        observer.observe(bar)
+        return () => observer.disconnect()
+    }, [])
+    useEffect(() => {
+        const root = document.documentElement
+        const previous = root.style.scrollPaddingBottom
+        root.style.scrollPaddingBottom = mobileBarHeight ? `${mobileBarHeight}px` : previous
+        return () => {
+            root.style.scrollPaddingBottom = previous
+        }
+    }, [mobileBarHeight])
 
     const resetDemoPortfolio = useCallback(async () => {
         if (publicKey || demoResetInFlightRef.current) return
@@ -669,7 +746,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 </button>
                             </>
                         )}
-                        <button onClick={refreshData} disabled={loading}
+                        <button ref={desktopRefreshRef} type="button" onClick={handleRefreshClick} disabled={loading}
                             aria-label="Refresh data"
                             className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50 flex-shrink-0">
                             <RefreshCw className={`w-5 h-5 ${loading ? 'motion-safe:animate-spin' : ''}`} aria-hidden />
@@ -781,12 +858,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             {/* Demo reset confirmation modal */}
             {showDemoResetConfirm && (
                 <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-3 sm:p-4">
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-4 sm:p-6 min-w-0 max-h-[90vh] overflow-y-auto">
+                    <div
+                        ref={demoResetDialogRef}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="demo-reset-title"
+                        aria-describedby="demo-reset-description"
+                        aria-busy={resettingDemo}
+                        tabIndex={-1}
+                        className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-4 sm:p-6 min-w-0 max-h-[90vh] overflow-y-auto"
+                    >
                         <div className="flex items-center gap-2 mb-4 min-w-0">
-                            <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0" />
-                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white break-words">Reset Demo Portfolio</h2>
+                            <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0" aria-hidden />
+                            <h2 id="demo-reset-title" className="text-xl font-semibold text-gray-900 dark:text-white break-words">Reset Demo Portfolio</h2>
                         </div>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6 break-words">
+                        <p id="demo-reset-description" className="text-gray-600 dark:text-gray-400 text-sm mb-6 break-words">
                             This will reset the demo portfolio to its default state with $10,000 total value and 40% XLM / 60% USDC allocation. Real wallet balances and on-chain portfolios are not affected.
                         </p>
                         {demoResetError && (
@@ -809,17 +895,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 </p>
                             </div>
                         )}
+                        <p role="status" className="sr-only">{resettingDemo ? 'Resetting demo portfolio' : ''}</p>
+                        {/* aria-disabled (not disabled) while resetting so keyboard focus stays inside the dialog. */}
                         <div className="flex flex-wrap justify-end gap-2 sm:gap-3">
-                            <button type="button" onClick={closeDemoResetModal} disabled={resettingDemo}
-                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 text-sm">Cancel</button>
-                            <button type="button" onClick={resetDemoPortfolio} disabled={resettingDemo}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2 text-sm">
+                            <button type="button" onClick={closeDemoResetModal} aria-disabled={resettingDemo}
+                                className={`px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm ${resettingDemo ? 'opacity-50 cursor-not-allowed' : ''}`}>Cancel</button>
+                            <button ref={demoResetInitialFocusRef} type="button" onClick={resetDemoPortfolio} aria-disabled={resettingDemo}
+                                className={`px-4 py-2 text-white rounded-lg font-medium transition-colors flex items-center gap-2 text-sm ${resettingDemo ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
                                 {resettingDemo ? (
-                                    <><RefreshCw className="w-4 h-4 animate-spin flex-shrink-0" />Resetting...</>
+                                    <><RefreshCw className="w-4 h-4 motion-safe:animate-spin flex-shrink-0" aria-hidden />Resetting...</>
                                 ) : demoResetError ? (
-                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" />{demoResetError.completedSteps.length > 0 ? 'Retry Remaining Steps' : 'Retry Reset'}</>
+                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />{demoResetError.completedSteps.length > 0 ? 'Retry Remaining Steps' : 'Retry Reset'}</>
                                 ) : (
-                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" />Reset Demo</>
+                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />Reset Demo</>
                                 )}
                             </button>
                         </div>
@@ -831,25 +919,31 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             <PriceTicker />
 
             <div className="p-6 max-w-7xl mx-auto">
-                {/* Tab Navigation */}
+                {/* Section navigation. Wraps instead of overflowing at 320px / large text; each
+                    control keeps a 44px touch target and exposes the current section. */}
                 <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
-                    <nav className="flex space-x-8" aria-label="Dashboard sections">
-                        <button onClick={() => setActiveTab('overview')}
-                            className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'overview'
-                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
-                            }`}>Overview</button>
-                        <button onClick={() => setActiveTab('analytics')}
-                            className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'analytics'
-                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
-                            }`}>Analytics</button>
-                        <button onClick={() => setActiveTab('notifications')}
-                            className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'notifications'
-                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
-                            }`}>Notifications</button>
+                    <nav className="flex flex-wrap gap-x-6 gap-y-1" aria-label="Dashboard sections">
+                        {([
+                            ['overview', 'Overview'],
+                            ['analytics', 'Analytics'],
+                            ['notifications', 'Notifications'],
+                        ] as const).map(([tab, label]) => (
+                            <button
+                                key={tab}
+                                type="button"
+                                onClick={() => selectTab(tab, label)}
+                                aria-current={activeTab === tab ? 'true' : undefined}
+                                // The header also has an "Analytics" link to the full page; qualify the
+                                // in-page section so the two controls are never announced identically.
+                                aria-label={`${label} section`}
+                                className={`min-h-[44px] py-3 px-1 border-b-2 font-medium text-sm ${activeTab === tab
+                                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
+                                }`}
+                            >{label}</button>
+                        ))}
                     </nav>
+                    <p role="status" aria-live="polite" className="sr-only">{navAnnouncement}</p>
                 </div>
 
                 {/* Debug Info */}
@@ -1184,10 +1278,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         <NotificationPreferences userId={publicKey} />
                     </div>
                 )}
+                {activeTab === 'notifications' && !publicKey && (
+                    <p className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 text-sm text-gray-600 dark:text-gray-300">
+                        Connect a wallet to manage notification preferences.
+                    </p>
+                )}
             </div>
 
             {/* Sticky Mobile Action Bar */}
-            <div className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-3 py-2 sm:p-4 md:hidden z-40">
+            <div ref={mobileBarRef} role="region" aria-label="Portfolio quick actions" className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-3 py-2 sm:p-4 md:hidden z-40">
                 <div className="flex flex-wrap items-center justify-between gap-2 max-w-sm mx-auto min-w-0">
                     <div className="text-left min-w-0">
                         <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
@@ -1198,14 +1297,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 </span>
                             )}
                         </div>
-                        <div className="text-base sm:text-lg font-bold text-gray-900 dark:text-white break-words">
+                        <div id="mobile-total-value" className="text-base sm:text-lg font-bold text-gray-900 dark:text-white break-words">
                             {balancesUnavailable ? 'Balance unavailable' : `$${portfolioData?.totalValue?.toLocaleString() ?? '0'}`}
                         </div>
                         <div className={`text-xs flex items-center gap-1 ${(portfolioData?.dayChange || 0) >= 0
                             ? 'text-green-600 dark:text-green-400'
                             : 'text-red-600 dark:text-red-400'
                         }`}>
-                            {(portfolioData?.dayChange || 0) >= 0 ? <TrendingUp className="w-3 h-3 flex-shrink-0" /> : <TrendingUp className="w-3 h-3 rotate-180 flex-shrink-0" />}
+                            {(portfolioData?.dayChange || 0) >= 0 ? <TrendingUp className="w-3 h-3 flex-shrink-0" aria-hidden /> : <TrendingUp className="w-3 h-3 rotate-180 flex-shrink-0" aria-hidden />}
+                            <span className="sr-only">{(portfolioData?.dayChange || 0) >= 0 ? 'Up' : 'Down'} today:</span>
                             <span>{Math.abs(portfolioData?.dayChange || 0.85).toFixed(2)}%</span>
                         </div>
                     </div>
@@ -1215,41 +1315,44 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             <button type="button" onClick={() => setReviewPortfolioId(latestPortfolioId)}
                                 aria-label="Review rebalance on mobile"
                                 disabled={balancesUnavailable}
-                                className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1">
+                                aria-describedby={balancesUnavailable ? 'mobile-total-value' : undefined}
+                                className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white px-3 sm:px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors flex items-center gap-1">
                                 Review rebalance
                             </button>
                         ) : (
                             <div className="flex items-center gap-1 text-green-600 dark:text-green-400 text-sm">
-                                <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                                <span className="hidden sm:inline">Balanced</span>
+                                <CheckCircle className="w-4 h-4 flex-shrink-0" aria-hidden />
+                                <span className="sr-only sm:not-sr-only">Balanced</span>
                             </div>
                         )}
 
                         {publicKey ? (
                             <button type="button" onClick={() => onNavigate('setup')}
-                                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1">
-                                <Plus className="w-4 h-4 flex-shrink-0" />
-                                <span className="hidden sm:inline">New</span>
+                                aria-label="New portfolio"
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 min-h-[44px] min-w-[44px] justify-center rounded-lg text-sm transition-colors flex items-center gap-1">
+                                <Plus className="w-4 h-4 flex-shrink-0" aria-hidden />
+                                <span className="hidden sm:inline" aria-hidden>New</span>
                             </button>
                         ) : (
                             <button type="button" onClick={() => setShowDemoResetConfirm(true)}
-                                aria-label="Reset demo portfolio"
-                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-2.5 sm:px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1">
+                                aria-label="Reset demo data"
+                                aria-haspopup="dialog"
+                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-2.5 sm:px-3 py-2 min-h-[44px] rounded-lg text-sm transition-colors flex items-center gap-1">
                                 <RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />
-                                <span>Reset</span>
+                                <span aria-hidden>Reset</span>
                             </button>
                         )}
 
-                        <button type="button" onClick={refreshData} disabled={loading}
-                            aria-label="Refresh data"
-                            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50 flex-shrink-0">
+                        <button ref={mobileRefreshRef} type="button" onClick={handleRefreshClick} disabled={loading}
+                            aria-label="Refresh portfolio data"
+                            className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50 flex-shrink-0">
                             <RefreshCw className={`w-5 h-5 ${loading ? 'motion-safe:animate-spin' : ''}`} aria-hidden />
                         </button>
                     </div>
                 </div>
             </div>
 
-            <div className="h-20 md:hidden"></div>
+            <div className="md:hidden" aria-hidden style={{ height: Math.max(mobileBarHeight, 80) }} />
         </div>
     )
 }
