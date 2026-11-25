@@ -337,15 +337,15 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors">
       {/* Navbar header */}
       <header className="border-b border-gray-200 dark:border-gray-800 bg-white/70 dark:bg-gray-900/70 backdrop-blur-md sticky top-0 z-30">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="max-w-4xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-3">
             <button 
               onClick={() => onNavigate('dashboard')}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              className="shrink-0 p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <div>
+            <div className="min-w-0 [overflow-wrap:anywhere]">
               <span className="text-xs font-semibold tracking-wider text-blue-600 dark:text-blue-400 uppercase">
                 Portfolio Builder
               </span>
@@ -368,8 +368,8 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
               const isActive = step === stepNum;
               return (
                 <React.Fragment key={title}>
-                  <div className="flex flex-col items-center flex-1 position-relative">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${
+                  <div className="flex min-w-0 flex-col items-center flex-1 position-relative">
+                    <div className={`w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${
                       isCompleted 
                         ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' 
                         : isActive 
@@ -385,7 +385,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                     </span>
                   </div>
                   {i < stepTitles.length - 1 && (
-                    <div className={`h-[2px] w-full flex-1 mx-2 transition-colors duration-300 ${
+                    <div className={`h-[2px] min-w-0 flex-1 mx-1 sm:mx-2 transition-colors duration-300 ${
                       step > stepNum ? 'bg-emerald-500' : 'bg-gray-200 dark:bg-gray-800'
                     }`} />
                   )}
@@ -404,7 +404,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
         )}
 
         {/* Wizard Panel */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800/80 p-6 md:p-8 transition-all">
+        <div className="min-w-0 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800/80 p-4 sm:p-6 md:p-8 transition-all">
           
           {/* Resume Draft Prompt */}
           {showResumePrompt && pendingDraft && (
@@ -726,7 +726,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                 {strategy === 'dca' && (
                   <div className="bg-gray-50 dark:bg-gray-900/40 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 space-y-2">
                     <h3 className="font-bold text-md border-b border-gray-200 dark:border-gray-800 pb-2">DCA Schedule</h3>
-                    <p className="text-sm">{dcaAmount} every {dcaIntervalDays} days starting {dcaStartDate}</p>
+                    <p className="text-sm break-words [overflow-wrap:anywhere]">{dcaAmount} every {dcaIntervalDays} days starting {dcaStartDate}</p>
                   </div>
                 )}
 
@@ -757,9 +757,9 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                 {publicKey ? (
                   <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-400 flex items-center gap-3 text-sm">
                     <Check className="w-5 h-5 shrink-0" />
-                    <div>
+                    <div className="min-w-0">
                       <span className="font-bold block">Wallet Connected</span>
-                      <span className="font-mono text-xs opacity-90">{publicKey}</span>
+                      <span className="font-mono text-xs opacity-90 break-all">{publicKey}</span>
                     </div>
                   </div>
                 ) : (
@@ -828,7 +828,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
 
           {/* Footer Controls */}
           {step < successStep && (
-            <div className="flex justify-between items-center gap-4 mt-8 pt-6 border-t border-gray-100 dark:border-gray-800">
+            <div className="flex flex-wrap justify-between items-center gap-3 mt-8 pt-6 border-t border-gray-100 dark:border-gray-800">
               <button
                 onClick={handleBack}
                 disabled={step === 1}
@@ -841,7 +841,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                 <button
                   onClick={handleSignAndSubmit}
                   disabled={!canGoForward() || isSigning}
-                  className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-300 dark:disabled:bg-blue-800/50 disabled:cursor-not-allowed font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/10"
+                  className="inline-flex max-w-full flex-wrap items-center justify-center gap-1.5 px-3 sm:px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-300 dark:disabled:bg-blue-800/50 disabled:cursor-not-allowed font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/10"
                 >
                   {isSigning ? (
                     <>

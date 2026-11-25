@@ -6,6 +6,8 @@ If the language changes while you are editing a DCA amount in the portfolio wiza
 the wizard keeps the entered amount and the rest of the schedule. Check the amount,
 then either correct it or select **Confirm amount** before continuing to review and sign.
 Confirming the amount does not create or submit a portfolio.
+The schedule editor and review controls reflow at narrow viewport widths and
+larger text sizes; the review displays the numeric amount used by the schedule.
 
 ## Create a Portfolio
 
