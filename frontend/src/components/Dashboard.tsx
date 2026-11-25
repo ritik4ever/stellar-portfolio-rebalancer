@@ -635,7 +635,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             <Settings className="h-5 w-5" aria-hidden />
                         </button>
                         <ThemeToggle />
-                        <LanguageSelector />
+                        <LanguageSelector publicKey={publicKey} />
                         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
                             {publicKey && portfolioData?.id && portfolioData.id !== 'demo' ? (
                                 <>

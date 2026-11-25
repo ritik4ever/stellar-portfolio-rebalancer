@@ -3,7 +3,7 @@ import { Globe } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { SUPPORTED_LOCALES } from '../i18n'
 
-const LanguageSelector = () => {
+const LanguageSelector = ({ publicKey }: { publicKey?: string }) => {
   const { i18n } = useTranslation()
   const [isOpen, setIsOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -40,6 +40,22 @@ const LanguageSelector = () => {
     }
   }, [isOpen])
 
+  // Close the language menu when the wallet state changes (connect/disconnect),
+  // so the user can recover without duplicating actions or losing their place.
+  useEffect(() => {
+    const handleWalletStateChange = () => setIsOpen(false)
+    if (publicKey) {
+      window.addEventListener('wallet:connect', handleWalletStateChange)
+      window.addEventListener('wallet:disconnect', handleWalletStateChange)
+    }
+    return () => {
+      if (publicKey) {
+        window.removeEventListener('wallet:connect', handleWalletStateChange)
+        window.removeEventListener('wallet:disconnect', handleWalletStateChange)
+      }
+    }
+  }, [publicKey])
+
   const closeMenu = () => {
     setIsOpen(false)
     triggerRef.current?.focus()
@@ -54,9 +70,6 @@ const LanguageSelector = () => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       setIsOpen(!isOpen)
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setIsOpen(true)
     } else if (e.key === 'Escape') {
       closeMenu()
     }
