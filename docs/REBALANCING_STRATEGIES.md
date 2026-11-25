@@ -16,6 +16,16 @@ Portfolios can use different strategies to decide when to rebalance. You choose 
 
 **Use case:** Best when you want to react to allocation drift regardless of time or market volatility.
 
+#### Dry-run preview boundary
+
+The frontend **Review rebalance** dialog uses the same plan as the dry-run endpoint. The plan boundary reports the configured `thresholdPercent` and the largest observed `maxDriftPercent`, so the preview can state the exact allowed value:
+
+- Drift up to and including `±thresholdPercent` is allowed. An allocation exactly at the threshold is still inside the boundary; only drift greater than the threshold is traded.
+- When every asset is inside the boundary, the dialog reports **0 planned trades — read-only preview**, shows no trade list, charges no network fee, and offers only **Close**. There is nothing to confirm or submit.
+- If drift exceeds the threshold but no executable trade is produced (for example, the trade is below the minimum value), the dialog uses the generic “no executable trades” message instead. It does not claim the portfolio is inside the threshold.
+
+The threshold explanation is exposed as a live status and is linked with `aria-describedby` from the Close control, so keyboard and screen-reader users get the same boundary information as the visible text.
+
 ---
 
 ### 2. Periodic / time-based (`periodic`)
@@ -97,3 +107,12 @@ Response includes `strategies`: array of `{ value, label, description }` for eac
 - **SQLite:** The same columns are added via runtime migration in `DatabaseService`.
 
 Existing portfolios without these columns are treated as `strategy: 'threshold'` with no extra config.
+
+---
+
+## Historical Backtesting & Simulation
+
+To evaluate how a chosen threshold or target allocation would have performed historically against a buy-and-hold strategy, see **[BACKTEST.md](BACKTEST.md)** (`POST /api/v1/backtest`).
+
+The simulation replays real daily closing prices and includes explicit boundary handling for calendar lookback windows, including leap day (February 29) inclusion and absent-day documentation.
+

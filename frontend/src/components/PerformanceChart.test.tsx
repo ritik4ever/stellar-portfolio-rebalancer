@@ -1,731 +1,358 @@
 import React from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, cleanup, fireEvent, act, within } from "@testing-library/react";
 import PerformanceChart from "./PerformanceChart";
 
-// Mock the analytics query hooks
+// Isolated API doubles: every data hook the chart uses is replaced, so no request leaves the test and no
+// wallet or provider is needed (the chart only takes a portfolio id).
 const queryMocks = vi.hoisted(() => ({
   usePortfolioAnalytics: vi.fn(),
   usePerformanceSummary: vi.fn(),
+  usePortfolioBenchmark: vi.fn(),
   useRebalanceHistory: vi.fn(),
 }));
 
-// Mock export utilities
 const exportMocks = vi.hoisted(() => ({
   downloadCSV: vi.fn(),
-  toCSV: vi.fn((rows, headers) => 'mocked-csv-content'),
+  toCSV: vi.fn(() => "mocked-csv-content"),
 }));
 
 vi.mock("../hooks/queries/useAnalyticsQuery", () => ({
   usePortfolioAnalytics: queryMocks.usePortfolioAnalytics,
   usePerformanceSummary: queryMocks.usePerformanceSummary,
+  usePortfolioBenchmark: queryMocks.usePortfolioBenchmark,
 }));
 
-// Mock ThemeContext
+vi.mock("../hooks/queries/useHistoryQuery", () => ({
+  useRebalanceHistory: queryMocks.useRebalanceHistory,
+}));
+
+vi.mock("../utils/export", () => ({
+  downloadCSV: exportMocks.downloadCSV,
+  toCSV: exportMocks.toCSV,
+}));
+
 vi.mock("../context/ThemeContext", () => ({
   useTheme: vi.fn(() => ({ isDark: false })),
 }));
 
-// Mock Recharts components to avoid rendering complexity
+// Recharts needs real layout; a light double keeps what the tests assert on (data length, single-point dot).
 vi.mock("recharts", () => ({
-  LineChart: ({
-    children,
-    data,
-  }: {
-    children: React.ReactNode;
-    data: any[];
-  }) => (
+  LineChart: ({ children, data }: { children: React.ReactNode; data: any[] }) => (
     <div data-testid="line-chart" data-chart-length={data.length}>
       {children}
     </div>
   ),
-  Line: () => <div data-testid="line" />,
+  Line: ({ dot }: { dot: unknown }) => <div data-testid="line" data-dot={dot ? "shown" : "hidden"} />,
   XAxis: () => <div data-testid="x-axis" />,
   YAxis: () => <div data-testid="y-axis" />,
-  CartesianGrid: () => <div data-testid="cartesian-grid" />,
-  Tooltip: () => <div data-testid="tooltip" />,
-  Legend: () => <div data-testid="legend" />,
+  CartesianGrid: () => <div />,
+  Tooltip: () => <div />,
+  Legend: () => <div />,
   ReferenceDot: () => <div data-testid="reference-dot" />,
-  ResponsiveContainer: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="responsive-container">{children}</div>
-  ),
+  ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div data-testid="responsive-container">{children}</div>,
+  BarChart: ({ children }: { children: React.ReactNode }) => <div data-testid="bar-chart">{children}</div>,
+  Bar: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Cell: () => <div />,
 }));
 
-// Mock Lucide icons
 vi.mock("lucide-react", () => ({
   TrendingUp: () => <div data-testid="trending-up" />,
   TrendingDown: () => <div data-testid="trending-down" />,
   BarChart3: () => <div data-testid="bar-chart3" />,
   AlertCircle: () => <div data-testid="alert-circle" />,
-  Download: () => <div data-testid="download" />,
 }));
+
+type QueryDouble = { data: any; isLoading: boolean; error: unknown; refetch: ReturnType<typeof vi.fn> };
+
+function query(data: any, overrides: Partial<QueryDouble> = {}): QueryDouble {
+  return { data, isLoading: false, error: null, refetch: vi.fn(() => Promise.resolve({ data })), ...overrides };
+}
+
+function series(values: number[], allocations?: (i: number) => Record<string, unknown>) {
+  return values.map((totalValue, i) => ({
+    timestamp: `2024-01-0${i + 1}T00:00:00Z`,
+    totalValue,
+    ...(allocations ? { allocations: allocations(i) } : {}),
+  }));
+}
+
+/** A promise the test resolves by hand, to hold a retry "in flight". */
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+let analytics: QueryDouble;
+
+function setAnalytics(q: QueryDouble) {
+  analytics = q;
+  queryMocks.usePortfolioAnalytics.mockImplementation(() => analytics);
+}
+
+const status = () => screen.getByTestId("performance-chart-status").textContent ?? "";
 
 describe("PerformanceChart", () => {
   beforeEach(() => {
-    cleanup();
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
+    setAnalytics(query({ data: [] }));
+    queryMocks.usePerformanceSummary.mockReturnValue(query(null));
+    queryMocks.useRebalanceHistory.mockReturnValue(query({ history: [] }));
+    queryMocks.usePortfolioBenchmark.mockReturnValue(query({ benchmarks: [] }));
+  });
 
-    // Default mock implementations
-    queryMocks.usePortfolioAnalytics.mockReturnValue({
-      data: { data: [] },
-      isLoading: false,
-      error: null,
+  afterEach(() => cleanup());
+
+  describe("time range", () => {
+    it("starts on 1D, shows it visibly and as pressed, and requests that range", () => {
+      render(<PerformanceChart portfolioId="p1" />);
+      expect(screen.getByTestId("selected-range").textContent).toBe("Range: 1D");
+      expect(screen.getByRole("button", { name: "Show 1 day" }).getAttribute("aria-pressed")).toBe("true");
+      expect(queryMocks.usePortfolioAnalytics).toHaveBeenLastCalledWith("p1", 1);
     });
 
-    queryMocks.usePerformanceSummary.mockReturnValue({
-      data: null,
-      isLoading: false,
-      error: null,
-    });
-
-    // Reset export mocks
-    exportMocks.downloadCSV.mockReset();
-    exportMocks.toCSV.mockReturnValue('mocked-csv-content');
-
-    queryMocks.useRebalanceHistory.mockReturnValue({
-      data: { history: [] },
-      isLoading: false,
-      error: null,
+    it("switches range, updates the visible label and the announcement", () => {
+      setAnalytics(query({ data: series([1000, 1050, 1100]) }));
+      render(<PerformanceChart portfolioId="p1" />);
+      fireEvent.click(screen.getByRole("button", { name: "Show 1 week" }));
+      expect(queryMocks.usePortfolioAnalytics).toHaveBeenLastCalledWith("p1", 7);
+      expect(screen.getByTestId("selected-range").textContent).toBe("Range: 1W");
+      expect(screen.getByRole("button", { name: "Show 1 week" }).getAttribute("aria-pressed")).toBe("true");
+      expect(screen.getByRole("button", { name: "Show 1 day" }).getAttribute("aria-pressed")).toBe("false");
+      expect(status()).toContain("1W (last 7 days): 3 price points.");
     });
   });
 
-  describe("Rendering with known snapshot data", () => {
-    it("should render chart data points correctly for known input", () => {
-      const knownSnapshots = [
-        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.0 },
-        { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050.5 },
-        { timestamp: "2024-01-03T00:00:00Z", totalValue: 1100.75 },
-        { timestamp: "2024-01-04T00:00:00Z", totalValue: 1089.25 },
-      ];
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: knownSnapshots },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const chart = screen.getByTestId("line-chart");
-      expect(chart).toBeTruthy();
-      expect(chart.getAttribute("data-chart-length")).toBe("4");
-
-      // Verify chart components are rendered
-      expect(screen.getByTestId("responsive-container")).toBeTruthy();
-      expect(screen.getByTestId("line")).toBeTruthy();
-      expect(screen.getByTestId("x-axis")).toBeTruthy();
-      expect(screen.getByTestId("y-axis")).toBeTruthy();
-    });
-
-    it("should produce expected chart data shape", () => {
-      const knownSnapshots = [
-        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.123 },
-        { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050.567 },
-      ];
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: knownSnapshots },
-        isLoading: false,
-        error: null,
-      });
-
-      // We need to access the internal formatChartData function
-      // Let's test by rendering and checking the chart receives properly formatted data
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const chart = screen.getByTestId("line-chart");
-      expect(chart.getAttribute("data-chart-length")).toBe("2");
+  describe("empty series", () => {
+    it("explains the empty state, announces it, and disables export", () => {
+      render(<PerformanceChart portfolioId="p1" />);
+      expect(screen.getByTestId("performance-chart-empty")).toBeTruthy();
+      expect(screen.getByText("No performance data available yet")).toBeTruthy();
+      expect(screen.queryByTestId("line-chart")).toBeNull();
+      expect(status()).toContain("1D (last 1 day): 0 price points.");
+      expect(screen.getByTestId("selected-range").textContent).toBe("Range: 1D");
+      expect(screen.getByRole("button", { name: "Export chart data as CSV" })).toHaveProperty("disabled", true);
+      expect(screen.queryByTestId("missing-data-indicator")).toBeNull();
     });
   });
 
-  describe("Data gap handling", () => {
-    it("should handle gaps in data points without producing NaN Y-values", () => {
-      const snapshotsWithGaps = [
-        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.0 },
-        { timestamp: "2024-01-02T00:00:00Z", totalValue: 0 },
-        { timestamp: "2024-01-03T00:00:00Z", totalValue: 0 },
-        { timestamp: "2024-01-04T00:00:00Z", totalValue: 1100.0 },
-        { timestamp: "2024-01-05T00:00:00Z", totalValue: 0 },
-        { timestamp: "2024-01-06T00:00:00Z", totalValue: 1200.0 },
-      ];
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: snapshotsWithGaps },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      // Chart should still render without errors
-      expect(screen.getByTestId("line-chart")).toBeTruthy();
-
-      // All data points should be processed (6 points)
-      const chart = screen.getByTestId("line-chart");
-      expect(chart.getAttribute("data-chart-length")).toBe("6");
+  describe("single price point", () => {
+    it("draws the point as a dot, explains why there is no trend, and labels the chart", () => {
+      setAnalytics(query({ data: series([1234.5]) }));
+      render(<PerformanceChart portfolioId="p1" />);
+      expect(screen.getByTestId("line-chart").getAttribute("data-chart-length")).toBe("1");
+      expect(screen.getByTestId("line").getAttribute("data-dot")).toBe("shown");
+      expect(screen.getByTestId("single-point-note")).toBeTruthy();
+      expect(screen.getByRole("img").getAttribute("aria-label")).toMatch(/one price point for 1D/);
+      expect(status()).toContain("1D (last 1 day): 1 price point.");
     });
 
-    it("should handle zero values correctly", () => {
-      const snapshotsWithZeros = [
-        { timestamp: "2024-01-01T00:00:00Z", totalValue: 0 },
-        { timestamp: "2024-01-02T00:00:00Z", totalValue: 1000.0 },
-        { timestamp: "2024-01-03T00:00:00Z", totalValue: 0 },
-      ];
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: snapshotsWithZeros },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const chart = screen.getByTestId("line-chart");
-      expect(chart).toBeTruthy();
-      expect(chart.getAttribute("data-chart-length")).toBe("3");
-    });
-
-    it("should coerce null snapshot values to zero without crashing", () => {
-      const snapshotsWithNulls = [
-        { timestamp: "2024-01-01T00:00:00Z", totalValue: null },
-        { timestamp: "2024-01-02T00:00:00Z", totalValue: 1000.0 },
-      ];
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: snapshotsWithNulls },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-      const chart = screen.getByTestId("line-chart");
-      expect(chart.getAttribute("data-chart-length")).toBe("2");
+    it("hides dots for a normal series", () => {
+      setAnalytics(query({ data: series([1000, 1100]) }));
+      render(<PerformanceChart portfolioId="p1" />);
+      expect(screen.getByTestId("line").getAttribute("data-dot")).toBe("hidden");
+      expect(screen.queryByTestId("single-point-note")).toBeNull();
+      expect(screen.getByRole("img").getAttribute("aria-label")).toMatch(/2 data points/);
     });
   });
 
-  describe("Range selector functionality", () => {
-    it("should switch to 7-day range when selected", async () => {
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: {
+  describe("one asset missing historical prices", () => {
+    const withGap = () =>
+      series([1000, 1010, 1020], (i) => ({ XLM: 60, USDC: i === 1 ? null : 40 }));
+
+    it("shows which asset is missing, how much, and offers retry and dismiss", () => {
+      setAnalytics(query({ data: withGap() }));
+      render(<PerformanceChart portfolioId="p1" />);
+      const panel = screen.getByTestId("missing-history-panel");
+      expect(within(panel).getByText("Price history is missing for USDC.")).toBeTruthy();
+      expect(within(panel).getByText("USDC: no price for 1 of 3 points")).toBeTruthy();
+      expect(within(panel).getByRole("button", { name: "Retry loading prices" })).toBeTruthy();
+      expect(within(panel).getByRole("button", { name: "Dismiss" })).toBeTruthy();
+      expect(status()).toContain("Price history is missing for USDC.");
+      // the chart itself still renders
+      expect(screen.getByTestId("line-chart").getAttribute("data-chart-length")).toBe("3");
+    });
+
+    it("retries only the price query, once, however often it is clicked", async () => {
+      setAnalytics(query({ data: withGap() }));
+      const inFlight = deferred();
+      analytics.refetch.mockReturnValue(inFlight.promise);
+      render(<PerformanceChart portfolioId="p1" />);
+
+      const retry = screen.getByRole("button", { name: "Retry loading prices" });
+      fireEvent.click(retry);
+      fireEvent.click(retry);
+      fireEvent.click(screen.getByRole("button", { name: "Retrying…" }));
+      expect(analytics.refetch).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "Retrying…" })).toHaveProperty("disabled", true);
+      expect(queryMocks.usePerformanceSummary.mock.results[0].value.refetch).not.toHaveBeenCalled();
+
+      // the prices come back complete: the warning goes away and the selected range is kept
+      setAnalytics(query({ data: series([1000, 1010, 1020], () => ({ XLM: 60, USDC: 40 })) }));
+      await act(async () => inFlight.resolve());
+      expect(screen.queryByTestId("missing-history-panel")).toBeNull();
+      expect(screen.queryByTestId("missing-data-indicator")).toBeNull();
+      expect(screen.getByTestId("selected-range").textContent).toBe("Range: 1D");
+    });
+
+    it("can be dismissed, leaves a visible indicator that reopens it, and moves focus with it", () => {
+      setAnalytics(query({ data: withGap() }));
+      render(<PerformanceChart portfolioId="p1" />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByTestId("missing-history-panel")).toBeNull();
+      const badge = screen.getByTestId("missing-data-indicator");
+      expect(badge.textContent).toBe("Missing data (1)");
+      expect(badge.getAttribute("aria-label")).toBe("Missing price history for USDC. Show details");
+      expect(document.activeElement).toBe(badge);
+
+      fireEvent.click(badge);
+      const panel = screen.getByTestId("missing-history-panel");
+      expect(document.activeElement).toBe(panel);
+    });
+
+    it("does not warn when snapshots carry no per-asset data", () => {
+      setAnalytics(query({ data: series([1000, 1100]) }));
+      render(<PerformanceChart portfolioId="p1" />);
+      expect(screen.queryByTestId("missing-history-panel")).toBeNull();
+      expect(screen.queryByTestId("missing-data-indicator")).toBeNull();
+    });
+  });
+
+  describe("failure and recovery", () => {
+    it("keeps the range controls, explains the failure, and announces it", () => {
+      setAnalytics(query(undefined, { error: new Error("boom") }));
+      render(<PerformanceChart portfolioId="p1" />);
+      expect(screen.getByRole("alert").textContent).toBe("Failed to load performance data");
+      expect(screen.getByTestId("range-controls")).toBeTruthy();
+      expect(screen.getByTestId("selected-range").textContent).toBe("Range: 1D");
+      expect(status()).toBe("Performance data failed to load for 1 day. Retry is available.");
+      expect(screen.getByRole("button", { name: "Export chart data as CSV" })).toHaveProperty("disabled", true);
+    });
+
+    it("retries only the failed queries, never twice at once, and recovers in place", async () => {
+      setAnalytics(query(undefined, { error: new Error("boom") }));
+      const summary = query(null);
+      queryMocks.usePerformanceSummary.mockReturnValue(summary);
+      const inFlight = deferred();
+      analytics.refetch.mockReturnValue(inFlight.promise);
+      render(<PerformanceChart portfolioId="p1" />);
+
+      // the user changes the range while it is failing: that choice must survive the retry
+      fireEvent.click(screen.getByRole("button", { name: "Show 1 month" }));
+      const failed = analytics;
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      fireEvent.click(screen.getByRole("button", { name: "Retrying…" }));
+      expect(failed.refetch).toHaveBeenCalledTimes(1);
+      expect(summary.refetch).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Retrying…" }).getAttribute("aria-busy")).toBe("true");
+
+      setAnalytics(query({ data: series([1000, 1100, 1200]) }));
+      await act(async () => inFlight.resolve());
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.getByTestId("line-chart").getAttribute("data-chart-length")).toBe("3");
+      expect(screen.getByTestId("selected-range").textContent).toBe("Range: 1M");
+      expect(status()).toContain("1M (last 30 days): 3 price points.");
+      // the retry button is gone, so focus lands on the chart heading instead of being lost
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Portfolio performance" }));
+    });
+
+    it("allows another retry after a retry fails", async () => {
+      setAnalytics(query(undefined, { error: new Error("boom") }));
+      analytics.refetch.mockRejectedValueOnce(new Error("still down"));
+      render(<PerformanceChart portfolioId="p1" />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      });
+      const again = screen.getByRole("button", { name: "Retry" });
+      expect(again).toHaveProperty("disabled", false);
+      await act(async () => {
+        fireEvent.click(again);
+      });
+      expect(analytics.refetch).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("loading, demo and narrow layout", () => {
+    it("keeps the range controls while loading and announces the load", () => {
+      setAnalytics(query(undefined, { isLoading: true }));
+      render(<PerformanceChart portfolioId="p1" />);
+      expect(screen.getByTestId("performance-chart-loading")).toBeTruthy();
+      expect(document.querySelector(".h-80.bg-gray-200")).toBeTruthy();
+      expect(screen.getByTestId("range-controls")).toBeTruthy();
+      expect(status()).toBe("Loading performance data for 1 day.");
+    });
+
+    it("asks to connect a wallet for no portfolio or the demo", () => {
+      for (const id of [null, "demo"]) {
+        const { unmount } = render(<PerformanceChart portfolioId={id} />);
+        expect(screen.getByText("Connect a wallet and create a portfolio to view performance analytics")).toBeTruthy();
+        unmount();
+      }
+    });
+
+    it("lets controls and the missing-data indicator wrap instead of clipping at narrow widths", () => {
+      setAnalytics(query({ data: series([1000, 1010], (i) => ({ XLM: 60, USDC: i === 0 ? undefined : 40 })) }));
+      render(<PerformanceChart portfolioId="p1" />);
+      const controls = screen.getByTestId("range-controls");
+      expect(controls.className).toMatch(/\bflex-wrap\b/);
+      expect(controls.className).toMatch(/\bmin-w-0\b/);
+      expect(screen.getByTestId("missing-history-panel").className).toMatch(/\bflex-col\b/);
+      expect(screen.getByTestId("performance-chart-card").className).toMatch(/\bmin-w-0\b/);
+      expect(screen.getByRole("img").className).toMatch(/\bw-full\b/);
+    });
+  });
+
+  describe("data and export", () => {
+    it("keeps a valid zero and skips null and malformed values", () => {
+      setAnalytics(
+        query({
           data: [
-            { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
-            { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050 },
+            { timestamp: "invalid-date", totalValue: null },
+            { timestamp: "2024-01-02T00:00:00Z", totalValue: 0 },
+            { timestamp: null, totalValue: "1100.75" },
           ],
-        },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const select = screen.getByDisplayValue("30 days");
-      expect(select).toBeTruthy();
-
-      // Change to 7 days
-      fireEvent.change(select, { target: { value: "7" } });
-
-      expect(screen.getByDisplayValue("7 days")).toBeTruthy();
-
-      // Verify the hook was called with the correct days parameter
-      expect(queryMocks.usePortfolioAnalytics).toHaveBeenCalledWith(
-        "test-portfolio",
-        7,
+        }),
       );
+      render(<PerformanceChart portfolioId="p1" />);
+      expect(screen.getByTestId("line-chart").getAttribute("data-chart-length")).toBe("1");
     });
 
-    it("should switch to 30-day range when selected", () => {
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: [] },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const select = screen.getByDisplayValue("30 days");
-      fireEvent.change(select, { target: { value: "30" } });
-
-      expect(screen.getByDisplayValue("30 days")).toBeTruthy();
-      expect(queryMocks.usePortfolioAnalytics).toHaveBeenCalledWith(
-        "test-portfolio",
-        30,
+    it("renders rebalance markers from history events", () => {
+      setAnalytics(query({ data: series([1000, 1100]) }));
+      queryMocks.useRebalanceHistory.mockReturnValue(
+        query({ history: [{ id: "e1", timestamp: "2024-01-02T00:00:00Z", status: "completed" }] }),
       );
+      render(<PerformanceChart portfolioId="p1" />);
+      expect(screen.getAllByTestId("reference-dot").length).toBe(1);
     });
 
-    it("should switch to 90-day range when selected", () => {
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: [] },
-        isLoading: false,
-        error: null,
-      });
+    it("exports the rounded series with the selected range in the filename", () => {
+      setAnalytics(query({ data: series([1000.123, 1050.567]) }));
+      render(<PerformanceChart portfolioId="p1" />);
+      fireEvent.click(screen.getByRole("button", { name: "Show 1 week" }));
+      fireEvent.click(screen.getByRole("button", { name: "Export chart data as CSV" }));
+      const rows = (exportMocks.toCSV.mock.calls[0] as any[])[0];
+      expect(rows.map((r: any) => r.portfolioValue)).toEqual([1000.12, 1050.57]);
+      expect(exportMocks.downloadCSV).toHaveBeenCalledWith(expect.stringMatching(/^portfolio_performance_p1_7d_/), "mocked-csv-content");
+    });
 
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const select = screen.getByDisplayValue("30 days");
-      fireEvent.change(select, { target: { value: "90" } });
-
-      expect(screen.getByDisplayValue("90 days")).toBeTruthy();
-      expect(queryMocks.usePortfolioAnalytics).toHaveBeenCalledWith(
-        "test-portfolio",
-        90,
+    it("renders summary metrics when available", () => {
+      setAnalytics(query({ data: series([1000]) }));
+      queryMocks.usePerformanceSummary.mockReturnValue(
+        query({
+          metrics: {
+            totalReturn: 15.5, dailyChange: -2.3, weeklyChange: 1.2, maxDrawdown: -5.8,
+            bestDay: { change: 8.9, date: "2024-01-15" }, worstDay: { change: -4.2, date: "2024-01-10" },
+            sharpeRatio: 1.45, volatility: 12.3,
+          },
+        }),
       );
-    });
-
-    it("should update data slice when range changes", () => {
-      // Mock different data for different ranges
-      queryMocks.usePortfolioAnalytics.mockImplementation(
-        (portfolioId, days) => {
-          const dataByDays = {
-            7: {
-              data: [
-                { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
-                { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050 },
-              ],
-            },
-            30: {
-              data: [
-                { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
-                { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050 },
-                { timestamp: "2024-01-03T00:00:00Z", totalValue: 1100 },
-              ],
-            },
-            90: {
-              data: [
-                { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
-                { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050 },
-                { timestamp: "2024-01-03T00:00:00Z", totalValue: 1100 },
-                { timestamp: "2024-01-04T00:00:00Z", totalValue: 1150 },
-              ],
-            },
-          };
-
-          return {
-            data: dataByDays[days as keyof typeof dataByDays] || { data: [] },
-            isLoading: false,
-            error: null,
-          };
-        },
-      );
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      // Initially 30 days (3 data points)
-      expect(
-        screen.getByTestId("line-chart").getAttribute("data-chart-length"),
-      ).toBe("3");
-
-      // Change to 7 days (2 data points)
-      const select = screen.getByDisplayValue("30 days");
-      fireEvent.change(select, { target: { value: "7" } });
-
-      expect(
-        screen.getByTestId("line-chart").getAttribute("data-chart-length"),
-      ).toBe("2");
-
-      // Change to 90 days (4 data points)
-      fireEvent.change(select, { target: { value: "90" } });
-
-      expect(
-        screen.getByTestId("line-chart").getAttribute("data-chart-length"),
-      ).toBe("4");
-    });
-
-    it("should request extended analytics data when compare mode is enabled", () => {
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: {
-          data: [
-            { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
-            { timestamp: "2024-01-02T00:00:00Z", totalValue: 1020 },
-            { timestamp: "2024-01-03T00:00:00Z", totalValue: 1040 },
-            { timestamp: "2024-01-04T00:00:00Z", totalValue: 1060 },
-          ],
-        },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const toggle = screen.getByRole('button', {
-        name: /compare previous period/i,
-      });
-      fireEvent.click(toggle);
-
-      expect(queryMocks.usePortfolioAnalytics).toHaveBeenCalledWith(
-        "test-portfolio",
-        60,
-      );
-    });
-
-    it("should render rebalance markers from history events", () => {
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: {
-          data: [
-            { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
-            { timestamp: "2024-01-02T00:00:00Z", totalValue: 1100 },
-          ],
-        },
-        isLoading: false,
-        error: null,
-      });
-
-      queryMocks.useRebalanceHistory.mockReturnValue({
-        data: {
-          history: [
-            {
-              id: 'event-1',
-              timestamp: '2024-01-02T00:00:00Z',
-              status: 'completed',
-              trigger: 'Rebalance executed',
-            },
-          ],
-        },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      expect(screen.getAllByTestId('reference-dot').length).toBeGreaterThan(0);
-    });
-  });
-
-  describe("Empty state rendering", () => {
-    it("should render placeholder message when no portfolio is connected", () => {
-      render(<PerformanceChart portfolioId={null} />);
-
-      expect(
-        screen.getByText(
-          "Connect a wallet and create a portfolio to view performance analytics",
-        ),
-      ).toBeTruthy();
-      expect(screen.getByTestId("bar-chart3")).toBeTruthy();
-    });
-
-    it("should render placeholder message when demo portfolio is selected", () => {
-      render(<PerformanceChart portfolioId="demo" />);
-
-      expect(
-        screen.getByText(
-          "Connect a wallet and create a portfolio to view performance analytics",
-        ),
-      ).toBeTruthy();
-      expect(screen.getByTestId("bar-chart3")).toBeTruthy();
-    });
-
-    it("should render empty state when analytics data is empty", () => {
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: [] },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      expect(
-        screen.getByText("No performance data available yet"),
-      ).toBeTruthy();
-      expect(
-        screen.getByText("Data will appear as your portfolio value changes"),
-      ).toBeTruthy();
-      expect(screen.getByTestId("bar-chart3")).toBeTruthy();
-    });
-
-    it("should render loading state while fetching data", () => {
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: undefined,
-        isLoading: true,
-        error: null,
-      });
-
-      queryMocks.usePerformanceSummary.mockReturnValue({
-        data: undefined,
-        isLoading: true,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      // Check for skeleton loading elements using animate-pulse class
-      const skeletonElements = document.querySelectorAll(".animate-pulse");
-      expect(skeletonElements.length).toBeGreaterThan(0);
-
-      // Should have skeleton elements for the chart area and metrics
-      const chartSkeleton = document.querySelector(".h-80.bg-gray-200");
-      expect(chartSkeleton).toBeTruthy();
-    });
-
-    it("should render error state when data fetching fails", () => {
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        error: new Error("API Error"),
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      expect(screen.getByText("Failed to load performance data")).toBeTruthy();
-      expect(screen.getByTestId("alert-circle")).toBeTruthy();
-    });
-  });
-
-  describe("Performance metrics rendering", () => {
-    it("should render performance metrics when summary data is available", () => {
-      const mockMetrics = {
-        totalReturn: 15.5,
-        dailyChange: 2.3,
-        weeklyChange: -1.2,
-        maxDrawdown: -5.8,
-        bestDay: { change: 8.9, date: "2024-01-15" },
-        worstDay: { change: -4.2, date: "2024-01-10" },
-        sharpeRatio: 1.45,
-        volatility: 12.3,
-      };
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: {
-          data: [{ timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 }],
-        },
-        isLoading: false,
-        error: null,
-      });
-
-      queryMocks.usePerformanceSummary.mockReturnValue({
-        data: { metrics: mockMetrics },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      expect(screen.getByText("+15.50%")).toBeTruthy();
-      expect(screen.getByText("+2.30%")).toBeTruthy();
-      expect(screen.getByText("-1.20%")).toBeTruthy();
-      expect(screen.getByText("-5.80%")).toBeTruthy();
+      render(<PerformanceChart portfolioId="p1" />);
       expect(screen.getByText("1.45")).toBeTruthy();
-    });
-
-    it("should show appropriate icons for positive and negative changes", () => {
-      const mockMetrics = {
-        totalReturn: 15.5,
-        dailyChange: -2.3,
-        weeklyChange: 1.2,
-        maxDrawdown: -5.8,
-        bestDay: { change: 8.9, date: "2024-01-15" },
-        worstDay: { change: -4.2, date: "2024-01-10" },
-        sharpeRatio: 1.45,
-        volatility: 12.3,
-      };
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: {
-          data: [{ timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 }],
-        },
-        isLoading: false,
-        error: null,
-      });
-
-      queryMocks.usePerformanceSummary.mockReturnValue({
-        data: { metrics: mockMetrics },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const trendingUpIcons = screen.getAllByTestId("trending-up");
-      const trendingDownIcons = screen.getAllByTestId("trending-down");
-
-      expect(trendingUpIcons.length).toBeGreaterThan(0);
-      expect(trendingDownIcons.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe("Data normalization edge cases", () => {
-    it("should handle malformed timestamps gracefully", () => {
-      const malformedSnapshots = [
-        { timestamp: "invalid-date", totalValue: 1000 },
-        { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050 },
-        { timestamp: "", totalValue: 1100 },
-        { timestamp: null, totalValue: 1150 },
-      ];
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: malformedSnapshots },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      // Chart should still render without crashing
-      expect(screen.getByTestId("line-chart")).toBeTruthy();
-    });
-
-    it("should handle very large and very small values", () => {
-      const extremeValueSnapshots = [
-        { timestamp: "2024-01-01T00:00:00Z", totalValue: 0.001 },
-        { timestamp: "2024-01-02T00:00:00Z", totalValue: 999999999.99 },
-        { timestamp: "2024-01-03T00:00:00Z", totalValue: 1000000000 },
-      ];
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: extremeValueSnapshots },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const chart = screen.getByTestId("line-chart");
-      expect(chart).toBeTruthy();
-      expect(chart.getAttribute("data-chart-length")).toBe("3");
-    });
-  });
-
-  describe("CSV Export", () => {
-    it("should render export button", () => {
-      const knownSnapshots = [
-        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.0 },
-        { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050.5 },
-      ];
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: knownSnapshots },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const exportButton = screen.getByText("Export CSV");
-      expect(exportButton).toBeTruthy();
-    });
-
-    it("should export chart data as CSV when button is clicked", () => {
-      const knownSnapshots = [
-        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.0 },
-        { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050.5 },
-      ];
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: knownSnapshots },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const exportButton = screen.getByText("Export CSV");
-      fireEvent.click(exportButton);
-
-      // Verify toCSV was called with correct data structure
-      expect(exportMocks.toCSV).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({
-            timestamp: "2024-01-01T00:00:00Z",
-            portfolioValue: 1000,
-          }),
-          expect.objectContaining({
-            timestamp: "2024-01-02T00:00:00Z",
-            portfolioValue: 1050.5,
-          }),
-        ]),
-        ["timestamp", "date", "portfolioValue"]
-      );
-
-      // Verify downloadCSV was called with filename and CSV content
-      expect(exportMocks.downloadCSV).toHaveBeenCalledWith(
-        expect.stringMatching(/^portfolio_performance_test-portfolio_30days_/),
-        "mocked-csv-content"
-      );
-    });
-
-    it("should disable export button when no data is available", () => {
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: [] },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const exportButton = screen.getByText("Export CSV");
-      expect(exportButton).toHaveProperty("disabled", true);
-    });
-
-    it("should export data with correct time period in filename", () => {
-      const knownSnapshots = [
-        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.0 },
-      ];
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: knownSnapshots },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      // Change time period to 7 days
-      const select = screen.getByDisplayValue("30 days");
-      fireEvent.change(select, { target: { value: "7" } });
-
-      const exportButton = screen.getByText("Export CSV");
-      fireEvent.click(exportButton);
-
-      // Verify filename includes 7days
-      expect(exportMocks.downloadCSV).toHaveBeenCalledWith(
-        expect.stringMatching(/7days/),
-        expect.any(String)
-      );
-    });
-
-    it("should include all required columns in CSV export", () => {
-      const knownSnapshots = [
-        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.0 },
-      ];
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: knownSnapshots },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const exportButton = screen.getByText("Export CSV");
-      fireEvent.click(exportButton);
-
-      // Verify the headers passed to toCSV
-      expect(exportMocks.toCSV).toHaveBeenCalledWith(
-        expect.any(Array),
-        ["timestamp", "date", "portfolioValue"]
-      );
-    });
-
-    it("should format values correctly for CSV export", () => {
-      const knownSnapshots = [
-        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.123 },
-        { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050.567 },
-      ];
-
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: { data: knownSnapshots },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const exportButton = screen.getByText("Export CSV");
-      fireEvent.click(exportButton);
-
-      const csvRows = exportMocks.toCSV.mock.calls[0][0];
-      
-      // Values should be rounded to 2 decimal places
-      expect(csvRows[0].portfolioValue).toBe(1000.12);
-      expect(csvRows[1].portfolioValue).toBe(1050.57);
+      expect(screen.getAllByTestId("trending-up").length).toBeGreaterThan(0);
+      expect(screen.getAllByTestId("trending-down").length).toBeGreaterThan(0);
     });
   });
 });

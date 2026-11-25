@@ -92,7 +92,7 @@ describe('Multi-hop path-payment support (#1176)', () => {
                             destination_amount: '90',
                             destination_asset_type: 'credit_alphanum4',
                             destination_asset_code: 'ETH',
-                            destination_asset_issuer: 'ISSUER',
+                            destination_asset_issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
                             path: [
                                 { asset_type: 'credit_alphanum4', asset_code: 'USDC', asset_issuer: 'ISSUER' }
                             ]
@@ -102,7 +102,7 @@ describe('Multi-hop path-payment support (#1176)', () => {
                             destination_amount: '95',
                             destination_asset_type: 'credit_alphanum4',
                             destination_asset_code: 'ETH',
-                            destination_asset_issuer: 'ISSUER',
+                            destination_asset_issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
                             path: [
                                 { asset_type: 'credit_alphanum4', asset_code: 'BTC', asset_issuer: 'ISSUER' }
                             ]

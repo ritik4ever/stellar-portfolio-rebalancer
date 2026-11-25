@@ -172,13 +172,13 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                   : null
 
     return (
-        <section aria-label="Test notifications" className="mt-6 border-t border-gray-200 pt-6">
-            <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-gray-900">Test Delivery</h3>
+        <section aria-label="Test notifications" className="mt-6 border-t border-gray-200 pt-6 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                <h3 className="text-sm font-semibold text-gray-900 break-words">Test Delivery</h3>
                 {anyResult && (
                     <button
                         onClick={handleClearAll}
-                        className="text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                        className="text-xs text-gray-500 hover:text-gray-700 transition-colors break-words"
                         aria-label="Clear all test results"
                     >
                         Clear results
@@ -186,18 +186,18 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                 )}
             </div>
 
-            <p className="text-sm text-gray-600 mb-4">
+            <p className="text-sm text-gray-600 mb-4 break-words">
                 Send a test notification to verify your configured providers are working.
             </p>
 
             {testStatus && (
                 <div
-                    className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 flex items-center"
+                    className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 flex items-start gap-2 min-w-0"
                     role="status"
                     aria-live="polite"
                 >
-                    <Loader className={`w-4 h-4 mr-2 flex-shrink-0 ${testingAll || testingEvent ? 'animate-spin' : ''}`} />
-                    {testStatus}
+                    <Loader className={`w-4 h-4 flex-shrink-0 mt-0.5 ${testingAll || testingEvent ? 'animate-spin' : ''}`} />
+                    <span className="break-words min-w-0">{testStatus}</span>
                 </div>
             )}
 
@@ -223,7 +223,7 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                 onClick={handleTestAll}
                 disabled={testingAll || testingEvent !== null}
                 aria-busy={testingAll}
-                className="w-full mb-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 text-sm font-medium"
+                className="w-full mb-4 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex flex-wrap items-center justify-center gap-2 text-sm font-medium text-center break-words"
             >
                 {testingAll ? (
                     <>
@@ -247,17 +247,17 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                     return (
                         <li
                             key={type}
-                            className="border border-gray-200 rounded-lg p-3 hover:border-blue-200 transition-colors"
+                            className="border border-gray-200 rounded-lg p-3 hover:border-blue-200 transition-colors min-w-0"
                         >
-                            <div className="flex items-start justify-between gap-3">
+                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 min-w-0">
                                 <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 mb-0.5">
-                                        <span aria-hidden="true">{icon}</span>
-                                        <span className="font-medium text-sm text-gray-900">
+                                    <div className="flex items-center gap-2 mb-0.5 min-w-0">
+                                        <span aria-hidden="true" className="flex-shrink-0">{icon}</span>
+                                        <span className="font-medium text-sm text-gray-900 break-words min-w-0">
                                             {label}
                                         </span>
                                     </div>
-                                    <p className="text-xs text-gray-500">{description}</p>
+                                    <p className="text-xs text-gray-500 break-words">{description}</p>
 
                                     {/* Inline result */}
                                     <AnimatePresence>
@@ -270,7 +270,7 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                                                 className="mt-2 overflow-hidden"
                                             >
                                                 <div
-                                                    role="status"
+                                                    role={result.success ? 'status' : 'alert'}
                                                     aria-label={`${label} test result`}
                                                     className={`flex items-start gap-1.5 text-xs ${
                                                         result.success
@@ -289,14 +289,14 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                                                             aria-hidden="true"
                                                         />
                                                     )}
-                                                    <span>{result.message}</span>
+                                                    <span className="break-words min-w-0">{result.message}</span>
                                                 </div>
 
                                                 {result.success &&
                                                     (result.sentTo.email ||
                                                         result.sentTo.webhook ||
                                                         result.sentTo.telegram) && (
-                                                        <div className="mt-1 ml-5 text-xs text-gray-500 space-y-0.5">
+                                                        <div className="mt-1 ml-0 sm:ml-5 text-xs text-gray-500 space-y-0.5 break-words">
                                                             {result.sentTo.email && (
                                                                 <p>
                                                                     📧{' '}
@@ -312,7 +312,7 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                                                                     <span className="font-medium">
                                                                         Webhook:
                                                                     </span>{' '}
-                                                                    {result.sentTo.webhook}
+                                                                    Saved webhook endpoint
                                                                 </p>
                                                             )}
                                                             {result.sentTo.telegram && (
@@ -347,7 +347,7 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                                               ? `Re-test ${label}`
                                               : `Test ${label}`
                                     }
-                                    className="flex-shrink-0 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 text-xs font-medium"
+                                    className="self-start sm:self-auto flex-shrink-0 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 text-xs font-medium"
                                 >
                                     {isLoading ? (
                                         <>

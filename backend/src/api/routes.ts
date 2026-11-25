@@ -12,6 +12,10 @@ import { analyticsRouter } from './analytics.routes.js'
 import { adminRouter } from './admin.routes.js'
 import { taxReportRouter } from './taxReport.routes.js'
 import { pricesRouter } from './prices.routes.js'
+import { backtestRouter } from './backtest.routes.js'
+import { eventsRouter } from './events.routes.js'
+import { preferencesRouter } from './preferences.routes.js'
+import { marketRouter } from './market.routes.js'
 
 
 export const portfolioRouter = Router()
@@ -22,6 +26,7 @@ portfolioRouter.use(portfoliosRouter)
 portfolioRouter.use(rebalancingRouter)
 portfolioRouter.use(opsRouter)
 portfolioRouter.use(pricesRouter)
+portfolioRouter.use(backtestRouter)
 portfolioRouter.use(statusRouter)
 portfolioRouter.use(notificationsRouter)
 portfolioRouter.use(debugRouter)
@@ -29,4 +34,8 @@ portfolioRouter.use(consentRouter)
 portfolioRouter.use(assetsRouter)
 portfolioRouter.use(analyticsRouter)
 portfolioRouter.use('/admin', adminRouter)
+portfolioRouter.use(eventsRouter)
+portfolioRouter.use(preferencesRouter)
+portfolioRouter.use(marketRouter)
+
 

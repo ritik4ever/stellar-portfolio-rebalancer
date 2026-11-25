@@ -127,6 +127,68 @@ body {
     -webkit-overflow-scrolling: touch;
 }
 
+/* ─── Rebalance review / dry-run preview narrow-width utilities ───────────── */
+
+/*
+ * Review and preview containers must never force horizontal page scrolling.
+ * Long quoted values (trade amounts, fees, price age) wrap instead of clipping.
+ */
+.rebalance-review,
+.rebalance-preview {
+    max-width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.rebalance-review *,
+.rebalance-preview * {
+    min-width: 0;
+}
+
+/* Quoted trade / fee / price-age values stay fully visible at 320px. */
+.rebalance-quote-value {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
+}
+
+/* Controls stack and stay operable when space is tight or text is enlarged. */
+.rebalance-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    max-width: 100%;
+}
+
+.rebalance-controls > * {
+    max-width: 100%;
+}
+
+/* Focus-visible ring for rebalance workflow interactive controls. */
+.rebalance-focusable:focus-visible,
+.rebalance-review button:focus-visible,
+.rebalance-review a:focus-visible,
+.rebalance-preview button:focus-visible,
+.rebalance-preview a:focus-visible {
+    outline: 2px solid #3B82F6;
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+}
+
+/* Screen-reader-only helper for live-region announcements. */
+.sr-only-live {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 /* ─── Price Ticker Banner ──────────────────────────────────────────────────── */
 
 @keyframes ticker-scroll {

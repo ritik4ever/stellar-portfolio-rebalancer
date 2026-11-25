@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
-import { DriftGauge, DriftGaugeGrid, type DriftGaugeAsset } from './DriftGauge'
+import { DriftGauge, DriftGaugeGrid, getDriftStatus, describeDriftStatus, type DriftGaugeAsset } from './DriftGauge'
 
 describe('DriftGauge', () => {
   beforeEach(() => {
@@ -54,6 +54,66 @@ describe('DriftGauge', () => {
     const svg = container.querySelector('svg')
     expect(svg).toHaveAttribute('width', '128')
     expect(svg).toHaveAttribute('height', '128')
+  })
+
+  it('labels zero drift as on target without a sign', () => {
+    const onTarget: DriftGaugeAsset = { name: 'XLM', target: 40, current: 40, threshold: 5 }
+    render(<DriftGauge asset={onTarget} />)
+    const svg = screen.getByRole('img')
+    expect(svg).toHaveAttribute('aria-label', expect.stringContaining('drift 0.0%'))
+    expect(svg).toHaveAttribute('aria-label', expect.stringContaining('on target'))
+    expect(svg).toHaveAttribute('aria-label', expect.stringContaining('On target'))
+    expect(svg).toHaveAttribute('aria-label', expect.stringContaining('Threshold: ±5%'))
+  })
+
+  it('labels negative movement as below target with a signed drift', () => {
+    const below: DriftGaugeAsset = { name: 'BTC', target: 30, current: 27.5, threshold: 5 }
+    render(<DriftGauge asset={below} />)
+    const svg = screen.getByRole('img')
+    expect(svg).toHaveAttribute('aria-label', expect.stringContaining('drift -2.5%'))
+    expect(svg).toHaveAttribute('aria-label', expect.stringContaining('below target'))
+    fireEvent.mouseEnter(svg)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('-2.5%')
+  })
+
+  it('treats a move exactly at the threshold as allowed, not exceeding', () => {
+    const atThreshold: DriftGaugeAsset = { name: 'ETH', target: 30, current: 35, threshold: 5 }
+    render(<DriftGauge asset={atThreshold} />)
+    const svg = screen.getByRole('img')
+    const label = svg.getAttribute('aria-label') ?? ''
+    expect(label).toContain('At threshold')
+    expect(label).not.toContain('Exceeds threshold')
+    expect(getDriftStatus(5, 5)).toBe('at_threshold')
+    expect(getDriftStatus(-5, 5)).toBe('at_threshold')
+    expect(describeDriftStatus(5, 5)).toBe('At threshold')
+  })
+
+  it('marks drift beyond the threshold as exceeding it', () => {
+    expect(getDriftStatus(5.01, 5)).toBe('critical')
+    expect(getDriftStatus(-5.01, 5)).toBe('critical')
+    expect(describeDriftStatus(8, 5)).toBe('Exceeds threshold')
+  })
+
+  it.each([0, -3, Number.NaN, Number.POSITIVE_INFINITY])(
+    'communicates the allowed threshold value when threshold %s is invalid',
+    (threshold) => {
+      const asset: DriftGaugeAsset = { name: 'XLM', target: 40, current: 60, threshold }
+      render(<DriftGauge asset={asset} />)
+      const svg = screen.getByRole('img')
+      expect(svg).toHaveAttribute('aria-label', expect.stringContaining('No threshold set'))
+      expect(svg).toHaveAttribute('aria-label', expect.stringContaining('greater than 0%'))
+      fireEvent.mouseEnter(svg)
+      expect(screen.getByRole('tooltip')).toHaveTextContent('Not set (must be > 0%)')
+    }
+  )
+
+  it('shows the as-of timestamp alongside the drift so scale and time stay aligned', () => {
+    const asOf = Date.parse('2026-01-01T12:00:00.000Z')
+    const asset: DriftGaugeAsset = { name: 'XLM', target: 40, current: 42.5, threshold: 5, asOf }
+    render(<DriftGauge asset={asset} />)
+    const svg = screen.getByRole('img')
+    expect(svg).toHaveAttribute('aria-label', expect.stringContaining('As of'))
+    expect(screen.getByText(/as of /)).toBeInTheDocument()
   })
 })
 

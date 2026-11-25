@@ -243,35 +243,36 @@ const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) =>
     }
 
     return (
-        <div ref={timelineRef} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
+        <div ref={timelineRef} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 sm:p-6 min-w-0">
             <header className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-700 pb-4">
-                <div>
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white">Rebalance Timeline</h2>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">View history of portfolio rebalances</p>
+                <div className="min-w-0">
+                    <h2 className="text-xl font-bold text-gray-900 dark:text-white break-words">Rebalance Timeline</h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 break-words">View history of portfolio rebalances</p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3 min-w-0">
                     <button
                         type="button"
                         onClick={handleExportImage}
                         disabled={exporting || history.length === 0}
-                        className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                        className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 whitespace-nowrap"
                         title="Export as image"
                     >
-                        <ImageIcon className="w-4 h-4" />
+                        <ImageIcon className="w-4 h-4 flex-shrink-0" />
                         Export
                     </button>
                     <button
                         type="button"
                         onClick={handleShare}
                         disabled={exporting || history.length === 0}
-                        className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                        className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 whitespace-nowrap"
                         title={typeof navigator !== 'undefined' && typeof navigator.share === 'function' ? 'Share' : 'Download'}
                     >
-                        <Share2 className="w-4 h-4" />
+                        <Share2 className="w-4 h-4 flex-shrink-0" />
                         Share
                     </button>
                     <select 
-                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
+                        aria-label="Filter by trigger"
+                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500 min-w-0 max-w-full"
                         value={triggerFilter}
                         onChange={(e) => setTriggerFilter(e.target.value)}
                     >
@@ -282,7 +283,8 @@ const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) =>
                     </select>
                     <input 
                         type="date"
-                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
+                        aria-label="Filter by date"
+                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500 min-w-0 max-w-full"
                         value={dateRangeFilter}
                         onChange={(e) => setDateRangeFilter(e.target.value)}
                     />
@@ -319,37 +321,37 @@ const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) =>
                             const isExpanded = expandedRows.has(event.id)
                             
                             return (
-                                <div key={event.id} className="relative flex flex-col sm:flex-row gap-4 sm:gap-6">
+                                <div key={event.id} className="relative flex flex-col sm:flex-row gap-4 sm:gap-6 min-w-0">
                                     {/* Timeline Marker & Timestamp */}
-                                    <div className="sm:w-32 flex flex-row sm:flex-col items-center sm:items-end gap-2 sm:gap-1 pt-3 sm:pt-4 z-10 relative bg-white dark:bg-gray-800">
-                                        <div className="text-sm font-medium text-gray-900 dark:text-white">
+                                    <div className="sm:w-32 flex flex-row sm:flex-col items-center sm:items-end gap-2 sm:gap-1 pt-3 sm:pt-4 z-10 relative bg-white dark:bg-gray-800 min-w-0">
+                                        <div className="text-sm font-medium text-gray-900 dark:text-white whitespace-nowrap">
                                             {formatShortDate(event.timestamp)}
                                         </div>
-                                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                                        <div className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
                                             {formatTime(event.timestamp)}
                                         </div>
                                         <div className="absolute left-[-1.125rem] sm:left-auto sm:right-[-1.5rem] top-4 w-4 h-4 rounded-full bg-blue-500 border-4 border-white dark:border-gray-800 shadow hidden sm:block"></div>
                                     </div>
 
                                     {/* Timeline Card */}
-                                    <div className="flex-1 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl overflow-hidden hover:shadow-md transition-shadow">
+                                    <div className="flex-1 min-w-0 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl overflow-hidden hover:shadow-md transition-shadow">
                                         <div 
                                             className="p-4 sm:p-5 cursor-pointer flex items-start sm:items-center justify-between gap-4"
                                             onClick={() => toggleRow(event.id)}
                                         >
-                                            <div className="flex items-center gap-4 flex-1">
+                                            <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
                                                 <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${getStatusBgColor(event.status)}`}>
                                                     {getStatusIcon(event.status)}
                                                 </div>
-                                                <div>
-                                                    <h3 className="font-semibold text-gray-900 dark:text-white">{event.trigger}</h3>
+                                                <div className="min-w-0">
+                                                    <h3 className="font-semibold text-gray-900 dark:text-white break-words">{event.trigger}</h3>
                                                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-sm text-gray-600 dark:text-gray-400">
-                                                        <span className="flex items-center gap-1 font-medium bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded text-xs">
+                                                        <span className="flex items-center gap-1 font-medium bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded text-xs whitespace-nowrap">
                                                             {event.trades} Trade{event.trades !== 1 ? 's' : ''}
                                                         </span>
-                                                        <span>Fee: {event.gasUsed}</span>
+                                                        <span className="break-words">Fee: {event.gasUsed}</span>
                                                         {event.details?.amount && (
-                                                            <span>Vol: ${formatNumber(event.details.amount)}</span>
+                                                            <span className="break-words">Vol: ${formatNumber(event.details.amount)}</span>
                                                         )}
                                                     </div>
                                                 </div>
@@ -361,20 +363,20 @@ const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) =>
 
                                         {/* Expanded Details */}
                                         {isExpanded && (
-                                            <div className="bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-700 p-4 sm:p-5">
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                                    <div>
+                                            <div className="bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-700 p-4 sm:p-5 min-w-0">
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 min-w-0">
+                                                    <div className="min-w-0">
                                                         <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3">Trade Legs</h4>
                                                         {event.details?.gasBreakdown && event.details.gasBreakdown.length > 0 ? (
                                                             <div className="space-y-2">
                                                                 {event.details.gasBreakdown.map(leg => (
-                                                                    <div key={leg.tradeId} className="flex items-center justify-between text-sm bg-gray-50 dark:bg-gray-800 px-3 py-2 rounded-lg border border-gray-100 dark:border-gray-700">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="font-medium text-gray-900 dark:text-white">{leg.fromAsset || '???'}</span>
-                                                                            <ArrowRight className="w-3 h-3 text-gray-400" />
-                                                                            <span className="font-medium text-gray-900 dark:text-white">{leg.toAsset || '???'}</span>
+                                                                    <div key={leg.tradeId} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-sm bg-gray-50 dark:bg-gray-800 px-3 py-2 rounded-lg border border-gray-100 dark:border-gray-700 min-w-0">
+                                                                        <div className="flex items-center gap-2 min-w-0">
+                                                                            <span className="font-medium text-gray-900 dark:text-white break-words">{leg.fromAsset || '???'}</span>
+                                                                            <ArrowRight className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                                                                            <span className="font-medium text-gray-900 dark:text-white break-words">{leg.toAsset || '???'}</span>
                                                                         </div>
-                                                                        <span className="text-gray-500 dark:text-gray-400">{leg.feeXlm.toFixed(4)} XLM fee</span>
+                                                                        <span className="text-gray-500 dark:text-gray-400 whitespace-nowrap">{leg.feeXlm.toFixed(4)} XLM fee</span>
                                                                     </div>
                                                                 ))}
                                                             </div>
@@ -383,18 +385,18 @@ const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) =>
                                                         )}
                                                     </div>
                                                     
-                                                    <div className="space-y-4">
-                                                        <div>
+                                                    <div className="space-y-4 min-w-0">
+                                                        <div className="min-w-0">
                                                             <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Network Transaction</h4>
                                                             {event.txHash ? (
                                                                 <a 
                                                                     href={`https://stellar.expert/explorer/public/tx/${event.txHash}`} 
                                                                     target="_blank" 
                                                                     rel="noopener noreferrer"
-                                                                    className="inline-flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                                                                    className="inline-flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline break-words min-w-0"
                                                                 >
-                                                                    <ExternalLink className="w-4 h-4" />
-                                                                    View on Stellar Explorer
+                                                                    <ExternalLink className="w-4 h-4 flex-shrink-0" />
+                                                                    <span className="break-words">View on Stellar Explorer</span>
                                                                 </a>
                                                             ) : (
                                                                 <span className="text-sm text-gray-500 italic">No transaction hash available</span>
@@ -402,9 +404,9 @@ const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) =>
                                                         </div>
                                                         
                                                         {event.details?.reason && (
-                                                            <div>
+                                                            <div className="min-w-0">
                                                                 <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-1">Reason</h4>
-                                                                <p className="text-sm text-gray-600 dark:text-gray-400">{event.details.reason}</p>
+                                                                <p className="text-sm text-gray-600 dark:text-gray-400 break-words">{event.details.reason}</p>
                                                             </div>
                                                         )}
                                                     </div>

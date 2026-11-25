@@ -71,7 +71,24 @@ The backend publishes:
 - in-flight request gauge
 - readiness status gauge
 - BullMQ queue depth metrics
+- portfolio persistence outcomes (`stellar_portfolio_portfolio_persistence_outcomes_total`)
 - structured JSON logs for Loki ingestion
+
+`portfolio_persistence_outcomes_total` distinguishes `success`, `delayed`, and
+`blocked` rebalance-history writes. It is partitioned by bounded `source`,
+`event_status`, and `state_transition` labels. For example, this query shows
+blocked writes over the last hour:
+
+```promql
+sum by (source, event_status, state_transition) (
+  increase(stellar_portfolio_portfolio_persistence_outcomes_total{outcome="blocked"}[1h])
+)
+```
+
+Write-failure logs include the operation, retry availability, duration,
+portfolio bucket, and safe database error code, without emitting raw portfolio
+IDs or database error messages. See [Portfolio Persistence](./PORTFOLIO_PERSISTENCE.md)
+for outcome definitions and retry semantics.
 
 ### Queue Metrics Cardinality
 
@@ -427,6 +444,10 @@ Significant system actions (e.g., portfolio creations, configuration changes) ar
 - `action`: A string describing the specific action taken (e.g., `portfolio_created`, `rebalance_triggered`).
 - Additional fields specific to the action can be merged into the payload.
 
+### Guardrail outcomes
+
+Circuit breaker, cooldown, and concentration-limit decisions are logged as `[GUARDRAIL] <guardrail> <outcome>`. Each line has a `source`, a `reasonCode`, and diagnostic context. The `outcome` field (`allowed`, `delayed`, or `blocked`) tells operators whether work went ahead, was held back for now, or needs action. See [GUARDRAIL_OUTCOMES.md](GUARDRAIL_OUTCOMES.md) for the reason codes, the cooldown boundary contract, and example queries.
+
 ### Redaction
 
 For security and compliance, sensitive fields in log payloads (like passwords, tokens, or PII) are automatically redacted before the log is printed.
@@ -544,4 +565,3 @@ the new policy to take effect.
    `336h` to `168h`) and wait one compaction cycle.
 5. If disk is critically full, stop new ingestion by scaling Promtail to 0 replicas
    while you resolve the root cause.
-
