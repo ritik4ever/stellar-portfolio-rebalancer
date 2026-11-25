@@ -6,6 +6,7 @@ import { WalletSelector } from './WalletSelector'
 import { api, ENDPOINTS } from '../config/api'
 import { getConfiguredNetwork } from '../utils/networkDetection'
 import SystemStatusPanel from './SystemStatusPanel'
+import { useDialogFocus } from '../hooks/useDialogFocus'
 
 interface LandingProps {
     onNavigate: (view: string) => void
@@ -17,10 +18,11 @@ interface LandingProps {
 
 const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsConsent, isConnecting, publicKey }) => {
     const [showWalletSelector, setShowWalletSelector] = useState(false)
-    const [error, setError] = useState<string | null>(null)
     const [showWalletDropdown, setShowWalletDropdown] = useState(false)
     const dropdownRef = useRef<HTMLDivElement>(null)
+    const walletDialogRef = useRef<HTMLDivElement>(null)
     const configuredNetwork = getConfiguredNetwork()
+    useDialogFocus(showWalletSelector, walletDialogRef, { onClose: () => setShowWalletSelector(false) })
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -34,7 +36,6 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
 
     const handleConnectWallet = async () => {
         setShowWalletSelector(true)
-        setError(null)
     }
 
     const handleWalletSelected = async (pk: string) => {
@@ -54,10 +55,6 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
             if (onNeedsConsent) onNeedsConsent(pk)
             else await onConnectWallet()
         }
-    }
-
-    const handleWalletError = (errorMsg: string) => {
-        setError(errorMsg)
     }
 
     const handleDisconnect = async () => {
@@ -364,31 +361,27 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
             {showWalletSelector && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 flex items-center justify-center z-50 p-4">
                     <motion.div
+                        ref={walletDialogRef}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="wallet-dialog-title"
+                        tabIndex={-1}
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
                         className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full shadow-xl"
                     >
                         <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Select Wallet</h2>
+                            <h2 id="wallet-dialog-title" className="text-xl font-semibold text-gray-900 dark:text-white">Select Wallet</h2>
                             <button
-                                onClick={() => {
-                                    setShowWalletSelector(false)
-                                    setError(null)
-                                }}
+                                type="button"
+                                aria-label="Close wallet selection"
+                                onClick={() => setShowWalletSelector(false)}
                                 className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
                             >
-                                <X className="w-5 h-5" />
+                                <X className="w-5 h-5" aria-hidden="true" />
                             </button>
                         </div>
-                        {error && (
-                            <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-800 dark:text-red-300 text-sm">
-                                {error}
-                            </div>
-                        )}
-                        <WalletSelector
-                            onConnect={handleWalletSelected}
-                            onError={handleWalletError}
-                        />
+                        <WalletSelector onConnect={handleWalletSelected} />
                     </motion.div>
                 </div>
             )}
