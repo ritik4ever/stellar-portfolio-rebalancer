@@ -322,7 +322,7 @@ describe("WalletSelector", () => {
 
       await waitFor(() => {
         expect(mockOnError).toHaveBeenCalledWith(
-          "freighter is not installed. Please install it and refresh.",
+          "Freighter is not available. Make sure the extension is installed, enabled and unlocked, then select it again. There is no need to reload the page.",
         );
         expect(mockOnConnect).not.toHaveBeenCalled();
       });

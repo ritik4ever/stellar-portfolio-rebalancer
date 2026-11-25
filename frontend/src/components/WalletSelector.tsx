@@ -32,6 +32,12 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
     const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
     const mountedRef = useRef(true)
     const connectingRef = useRef(false)
+    const emptyStateRef = useRef<HTMLDivElement>(null)
+    // Only move focus to the first wallet when the selector itself owns focus (first
+    // render, or the user was on "Check again"); a late detection must never steal
+    // focus from something the user is typing in elsewhere on the page.
+    const autoFocusRef = useRef(true)
+    const availableCountRef = useRef(0)
 
     useEffect(() => {
         mountedRef.current = true
@@ -40,14 +46,55 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
         }
     }, [])
 
+    /**
+     * Re-reads which wallet extensions are present. Extensions inject themselves
+     * after page load and can be installed, enabled or unlocked while this is open,
+     * so a single read at mount is not enough. This never reloads the page, so
+     * nothing else the user has open is lost, and it is idempotent: repeating it
+     * cannot duplicate a connection.
+     */
+    const refreshWallets = (reason: 'manual' | 'auto') => {
+        const wallets = walletManager.getAvailableWallets()
+        const hadWallets = availableCountRef.current > 0
+        if (wallets.length > 0 && !hadWallets) {
+            autoFocusRef.current = emptyStateRef.current?.contains(document.activeElement) ?? false
+            setStatus(`${wallets.map(w => w.name).join(', ')} detected. Select a wallet to connect.`)
+        } else if (wallets.length === 0 && reason === 'manual') {
+            setStatus(
+                'Still no wallet found. Make sure the extension is installed, enabled and unlocked, then select Check again.',
+            )
+        }
+        availableCountRef.current = wallets.length
+        setAvailableWallets(wallets)
+        if (reason === 'manual') runChecks()
+    }
+
     useEffect(() => {
         const wallets = walletManager.getAvailableWallets()
+        availableCountRef.current = wallets.length
         setAvailableWallets(wallets)
         runChecks()
+        if (wallets.length > 0) return
+        // Extensions often inject a moment after load, and the user may return from
+        // installing one: poll briefly, and re-check when the window regains focus.
+        let tries = 0
+        const timer = window.setInterval(() => {
+            tries += 1
+            refreshWallets('auto')
+            if (availableCountRef.current > 0 || tries >= 10) window.clearInterval(timer)
+        }, 500)
+        const onFocus = () => {
+            if (availableCountRef.current === 0) refreshWallets('auto')
+        }
+        window.addEventListener('focus', onFocus)
+        return () => {
+            window.clearInterval(timer)
+            window.removeEventListener('focus', onFocus)
+        }
     }, [])
 
     useEffect(() => {
-        if (availableWallets.length > 0 && containerRef.current) {
+        if (availableWallets.length > 0 && containerRef.current && autoFocusRef.current) {
             const firstButton = containerRef.current.querySelector<HTMLButtonElement>('button')
             firstButton?.focus()
         }
@@ -136,7 +183,10 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
             if (error.code === 'USER_DECLINED') {
                 message = 'Connection was declined in your wallet, so nothing was connected. Select a wallet to try again.'
             } else if (error.code === 'WALLET_NOT_INSTALLED') {
-                message = `${error.walletType || 'Wallet'} is not installed. Please install it and refresh.`
+                message = `${walletName} is not available. Make sure the extension is installed, enabled and unlocked, then select it again. There is no need to reload the page.`
+                // The extension may have gone away since the list was built.
+                autoFocusRef.current = false
+                setTimeout(() => mountedRef.current && refreshWallets('auto'), 0)
             } else if (error.code === 'NETWORK_MISMATCH') {
                 message = allowed
                     ? `Your wallet is on a different network. This app only accepts ${allowed}: switch your wallet to ${allowed}, then select it again.`
@@ -163,12 +213,25 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
 
     if (availableWallets.length === 0) {
         return (
-            <div>
+            <div ref={emptyStateRef}>
                 <div className="p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800" role="alert">
                     <p className="text-yellow-800 dark:text-yellow-300 text-sm">
                         No Stellar wallets detected. Please install Freighter, Rabet, xBull, or Hana wallet extension.
                     </p>
+                    <p className="mt-2 text-yellow-800 dark:text-yellow-300 text-sm">
+                        Already installed? Enable and unlock it, then check again. You don&apos;t need to reload the page.
+                    </p>
+                    <button
+                        type="button"
+                        onClick={() => refreshWallets('manual')}
+                        className="mt-3 rounded-md bg-yellow-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-yellow-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-600 focus-visible:ring-offset-2"
+                    >
+                        Check again
+                    </button>
                 </div>
+                <p role="status" aria-live="polite" className="sr-only" data-testid="wallet-connect-status">
+                    {status}
+                </p>
                 <div className="mt-3 border-t border-gray-100 dark:border-gray-700 pt-3">
                     <button
                         type="button"
