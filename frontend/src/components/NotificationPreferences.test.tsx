@@ -1,5 +1,5 @@
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -130,6 +130,83 @@ describe('NotificationPreferences', () => {
 
         expect(await screen.findByText(/Email address is required when email notifications are enabled/i)).toBeTruthy()
         expect(postSpy).not.toHaveBeenCalled()
+    })
+
+    it('shows required-field validation immediately when clearing an enabled email and clears it when disabled', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({
+            preferences: {
+                emailEnabled: true,
+                emailAddress: 'user@example.com',
+                webhookEnabled: false,
+                webhookUrl: '',
+                telegramEnabled: false,
+                telegramChatId: '',
+                events: {
+                    rebalance: true,
+                    circuitBreaker: true,
+                    priceMovement: true,
+                    riskChange: true,
+                },
+                digestEnabled: false,
+                digestFrequency: 'realtime',
+            },
+        } as any)
+        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        const emailInput = await screen.findByLabelText('Email Address')
+        const saveBtn = screen.getByRole('button', { name: /save preferences/i })
+
+        expect(emailInput).toHaveAttribute('aria-required', 'true')
+        fireEvent.change(emailInput, { target: { value: '' } })
+
+        expect(screen.getByRole('alert')).toHaveTextContent(/Email address is required when email notifications are enabled/i)
+        expect(emailInput).toHaveAttribute('aria-invalid', 'true')
+        expect(saveBtn).toBeDisabled()
+
+        fireEvent.click(getEmailSwitch())
+        expect(screen.getByText(/0 of 3 notification channels enabled/i)).toBeTruthy()
+        expect(saveBtn).not.toBeDisabled()
+
+        fireEvent.click(saveBtn)
+        await waitFor(() => expect(postSpy).toHaveBeenCalled())
+    })
+
+    it('validates Telegram Chat ID when Telegram is the only enabled channel and blocks save when blank', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
+        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        expect(await screen.findByText('Notifications')).toBeTruthy()
+
+        fireEvent.click(screen.getByRole('switch', { name: /telegram notifications/i }))
+        expect(screen.getByText(/1 of 3 notification channels enabled: Telegram only/i)).toBeTruthy()
+
+        const telegramInput = screen.getByLabelText('Telegram Chat ID')
+        const saveBtn = screen.getByRole('button', { name: /save preferences/i })
+        expect(telegramInput).toHaveAttribute('aria-required', 'true')
+
+        fireEvent.change(telegramInput, { target: { value: '   ' } })
+        expect(screen.getByRole('alert')).toHaveTextContent(/Telegram Chat ID is required/i)
+        expect(telegramInput).toHaveAttribute('aria-invalid', 'true')
+        expect(saveBtn).toBeDisabled()
+        expect(postSpy).not.toHaveBeenCalled()
+
+        fireEvent.change(telegramInput, { target: { value: '123456789' } })
+        expect(saveBtn).not.toBeDisabled()
+        fireEvent.click(saveBtn)
+
+        await waitFor(() => {
+            expect(postSpy).toHaveBeenCalledWith(
+                ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
+                expect.objectContaining({
+                    emailEnabled: false,
+                    webhookEnabled: false,
+                    telegramEnabled: true,
+                    telegramChatId: '123456789',
+                })
+            )
+        })
     })
 
     it('saves preferences successfully', async () => {
@@ -430,180 +507,285 @@ describe('NotificationPreferences', () => {
         expect(deleteSpy).toHaveBeenCalled()
     })
 
-    // ── Edge and failure states (SPR-2026-075) ────────────────────────────
+    // ── Accessibility: channel states and failed saves (SPR-2026-073) ─────
 
-    const walletUserId = 'GD5DJQDDBKGAYNEAXU562HYGOOSYAEOO6AS53PZXBOZGCP5M2OPGMZV3'
+    describe('keyboard and screen-reader states (SPR-2026-073)', () => {
+        const basePreferences = {
+            emailEnabled: false, emailAddress: '', webhookEnabled: false, webhookUrl: '',
+            telegramEnabled: false, telegramChatId: '', digestEnabled: false, digestFrequency: 'realtime',
+            events: { rebalance: true, circuitBreaker: true, priceMovement: true, riskChange: true },
+        }
 
-    const allDisabledPreferences = {
-        emailEnabled: false,
-        emailAddress: '',
-        webhookEnabled: false,
-        webhookUrl: '',
-        telegramEnabled: false,
-        telegramChatId: '',
-        events: {
-            rebalance: true,
-            circuitBreaker: true,
-            priceMovement: true,
-            riskChange: true,
-        },
-        digestEnabled: false,
-        digestFrequency: 'realtime',
-    }
+        it('identifies the all-channels-disabled state to assistive technology', async () => {
+            vi.spyOn(api, 'get').mockResolvedValue({ preferences: { ...basePreferences } } as any)
+            renderWithQuery(<NotificationPreferences userId="user-1" />)
 
-    it('reflects effective channel settings when all notifications are disabled and allows saving event updates', async () => {
-        vi.spyOn(api, 'get').mockResolvedValue({ preferences: { ...allDisabledPreferences } } as any)
-        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+            const email = await screen.findByRole('switch', { name: 'Email notifications' })
+            const webhook = screen.getByRole('switch', { name: 'Webhook notifications' })
+            const telegram = screen.getByRole('switch', { name: 'Telegram notifications' })
+            for (const channelSwitch of [email, webhook, telegram]) {
+                expect(channelSwitch).toHaveAttribute('aria-checked', 'false')
+            }
+            expect(email).toHaveAccessibleDescription(/Receive notifications via email.*settings are unchanged/)
+            expect(webhook).toHaveAccessibleDescription(/HTTP POST.*Webhook delivery is off/)
+            expect(telegram).toHaveAccessibleDescription(/Telegram chat via bot.*settings are unchanged/)
 
-        renderWithQuery(<NotificationPreferences userId={walletUserId} />)
-        expect(await screen.findByText('Notifications')).toBeInTheDocument()
+            const channelStatus = screen.getByText(/0 of 3 notification channels enabled/)
+            expect(channelStatus).toHaveAttribute('role', 'status')
+            expect(channelStatus).toHaveTextContent('No notifications will be delivered with this selection.')
 
-        expect(getEmailSwitch()).toHaveAttribute('aria-checked', 'false')
-        expect(screen.getByRole('switch', { name: /webhook notifications/i })).toHaveAttribute('aria-checked', 'false')
-        expect(screen.getByRole('switch', { name: /telegram notifications/i })).toHaveAttribute('aria-checked', 'false')
-        expect(
-            screen.getByText(/0 of 3 notification channels enabled\. No notifications will be delivered with this selection\./i)
-        ).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /unsubscribe from all/i })).toBeDisabled()
-        expect(screen.getByRole('button', { name: /save preferences/i })).toBeDisabled()
-        expect(screen.getByText(/save at least one notification provider/i)).toBeInTheDocument()
+            const unsubscribe = screen.getByRole('button', { name: /unsubscribe from all/i })
+            expect(unsubscribe).toBeDisabled()
+            expect(unsubscribe).toHaveAccessibleDescription('All notification channels are off.')
 
-        // Toggle an event while all channels remain disabled and save
-        fireEvent.click(screen.getByRole('switch', { name: /rebalance alerts/i }))
-        const saveBtn = screen.getByRole('button', { name: /save preferences/i })
-        expect(saveBtn).toBeEnabled()
-        fireEvent.click(saveBtn)
-
-        await waitFor(() => {
-            expect(postSpy).toHaveBeenCalledTimes(1)
-            expect(postSpy).toHaveBeenCalledWith(
-                ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
-                expect.objectContaining({
-                    userId: walletUserId,
-                    emailEnabled: false,
-                    webhookEnabled: false,
-                    telegramEnabled: false,
-                    events: expect.objectContaining({ rebalance: false }),
-                })
-            )
+            const save = screen.getByRole('button', { name: 'Save Preferences' })
+            expect(save).toBeDisabled()
+            expect(save).toHaveAccessibleDescription(/0 of 3 notification channels enabled/)
+            expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull()
         })
-        expect(await screen.findByText(/preferences saved successfully/i)).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /unsubscribe from all/i })).toBeDisabled()
-        expect(screen.getByText(/save at least one notification provider/i)).toBeInTheDocument()
+
+        it('lets a keyboard user enable exactly one channel and hear the resulting state', async () => {
+            const user = userEvent.setup()
+            vi.spyOn(api, 'get').mockResolvedValue({ preferences: { ...basePreferences } } as any)
+            renderWithQuery(<NotificationPreferences userId="user-1" />)
+
+            const telegram = await screen.findByRole('switch', { name: 'Telegram notifications' })
+            telegram.focus()
+            await user.keyboard(' ')
+
+            expect(telegram).toHaveFocus()
+            expect(telegram).toHaveAttribute('aria-checked', 'true')
+            expect(telegram).toHaveAccessibleDescription(/Telegram notification changes are pending save/)
+            const channelStatus = screen.getByText(/1 of 3 notification channels enabled: Telegram only/)
+            expect(channelStatus).toHaveAttribute('role', 'status')
+            expect(channelStatus).toHaveTextContent('Changes take effect after saving')
+            expect(screen.getByRole('button', { name: /unsubscribe from all/i })).not.toHaveAccessibleDescription()
+
+            // The newly revealed field is the next stop in the tab order.
+            await user.tab()
+            expect(screen.getByLabelText('Telegram Chat ID')).toHaveFocus()
+        })
+
+        it('announces a failed save after an optimistic toggle and keeps focus on Save to retry', async () => {
+            const user = userEvent.setup()
+            vi.spyOn(api, 'get').mockResolvedValue({
+                preferences: { ...basePreferences, emailEnabled: true, emailAddress: 'user@example.com' },
+            } as any)
+            let rejectSave!: (reason: unknown) => void
+            const post = vi.spyOn(api, 'post')
+                .mockImplementationOnce(() => new Promise((_, reject) => { rejectSave = reject }) as any)
+                .mockResolvedValueOnce({ success: true } as any)
+            renderWithQuery(<NotificationPreferences userId="user-1" />)
+
+            const rebalance = await screen.findByRole('switch', { name: 'Rebalance alerts' })
+            expect(rebalance).toHaveAccessibleDescription('Notify when portfolio is rebalanced')
+            rebalance.focus()
+            await user.keyboard(' ')
+            expect(rebalance).toHaveAttribute('aria-checked', 'false')
+
+            const save = screen.getByRole('button', { name: 'Save Preferences' })
+            save.focus()
+            await user.keyboard('{Enter}')
+
+            // While pending, focus stays on the (aria-disabled) Save button.
+            const pendingSave = await screen.findByRole('button', { name: /saving preferences/i })
+            expect(pendingSave).toHaveFocus()
+            expect(pendingSave).toHaveAttribute('aria-disabled', 'true')
+            await user.keyboard('{Enter}')
+            expect(post).toHaveBeenCalledTimes(1)
+
+            rejectSave(new Error('Network down'))
+
+            const alert = await screen.findByRole('alert')
+            expect(alert).toHaveTextContent('Network down')
+            expect(alert).toHaveTextContent('Your changes are still shown but have not been saved.')
+            expect(alert).toHaveTextContent('Discard changes')
+
+            const retry = screen.getByRole('button', { name: 'Save Preferences' })
+            expect(retry).toHaveFocus()
+            expect(retry).not.toBeDisabled()
+            expect(retry).not.toHaveAttribute('aria-disabled')
+            expect(retry).toHaveAccessibleDescription(/Network down.*have not been saved/)
+            // The optimistic value is still visible and identified as unsaved.
+            expect(rebalance).toHaveAttribute('aria-checked', 'false')
+            expect(screen.getByText('Event notification changes are pending save.')).toHaveAttribute('role', 'status')
+
+            await user.keyboard('{Enter}')
+            expect((await screen.findByText('Preferences saved successfully')).closest('[role="status"]')).not.toBeNull()
+            expect(post).toHaveBeenCalledTimes(2)
+            // Save disables itself once saved; focus lands on the panel heading, not <body>.
+            await waitFor(() => expect(screen.getByRole('heading', { name: 'Notifications' })).toHaveFocus())
+            expect(screen.queryByRole('alert')).toBeNull()
+        })
+
+        it('lets a keyboard user abandon unsaved changes after a failed save', async () => {
+            const user = userEvent.setup()
+            vi.spyOn(api, 'get').mockResolvedValue({
+                preferences: { ...basePreferences, emailEnabled: true, emailAddress: 'user@example.com' },
+            } as any)
+            const post = vi.spyOn(api, 'post').mockRejectedValue(new Error('Network down'))
+            renderWithQuery(<NotificationPreferences userId="user-1" />)
+
+            const email = await screen.findByRole('switch', { name: 'Email notifications' })
+            email.focus()
+            await user.keyboard(' ')
+            expect(email).toHaveAttribute('aria-checked', 'false')
+            expect(screen.getByText(/0 of 3 notification channels enabled/)).toBeInTheDocument()
+
+            const save = screen.getByRole('button', { name: 'Save Preferences' })
+            save.focus()
+            await user.keyboard('{Enter}')
+            expect(await screen.findByRole('alert')).toHaveTextContent('have not been saved')
+            expect(save).toHaveFocus()
+
+            await user.tab({ shift: true })
+            const discard = screen.getByRole('button', { name: 'Discard changes' })
+            expect(discard).toHaveFocus()
+            await user.keyboard('{Enter}')
+
+            expect(email).toHaveAttribute('aria-checked', 'true')
+            expect(screen.getByText(/1 of 3 notification channels enabled: Email only/)).toBeInTheDocument()
+            expect(screen.queryByRole('alert')).toBeNull()
+            expect(screen.getByText(/Unsaved changes discarded/).closest('[role="status"]')).not.toBeNull()
+            expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull()
+            expect(screen.getByRole('button', { name: 'Save Preferences' })).toBeDisabled()
+            await waitFor(() => expect(screen.getByRole('heading', { name: 'Notifications' })).toHaveFocus())
+            expect(post).toHaveBeenCalledTimes(1)
+        })
+
+        it('exposes the selected digest frequency in a labelled group', async () => {
+            const user = userEvent.setup()
+            vi.spyOn(api, 'get').mockResolvedValue({ preferences: { ...basePreferences } } as any)
+            renderWithQuery(<NotificationPreferences userId="user-1" />)
+
+            const digest = await screen.findByRole('switch', { name: 'Digest mode' })
+            expect(digest).toHaveAccessibleDescription(/daily or weekly summary/)
+            await user.click(digest)
+
+            const group = screen.getByRole('group', { name: 'Digest Frequency' })
+            expect(group).toHaveAccessibleDescription('Receive one summary per day with all events.')
+            const daily = within(group).getByRole('button', { name: 'Daily' })
+            const weekly = within(group).getByRole('button', { name: 'Weekly' })
+            expect(daily).toHaveAttribute('aria-pressed', 'true')
+            expect(weekly).toHaveAttribute('aria-pressed', 'false')
+
+            weekly.focus()
+            await user.keyboard('{Enter}')
+            expect(weekly).toHaveAttribute('aria-pressed', 'true')
+            expect(daily).toHaveAttribute('aria-pressed', 'false')
+            expect(group).toHaveAccessibleDescription('Receive one summary per week with all events.')
+        })
     })
 
-    it('enforces effective channel settings when exactly one channel is enabled and saved', async () => {
-        vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
-        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+    // ── Responsive layout: 320px viewport & 200% text sizing (SPR-2026-079) ──
 
-        renderWithQuery(<NotificationPreferences userId={walletUserId} />)
-        expect(await screen.findByText('Notifications')).toBeInTheDocument()
+    describe('webhook settings at 320px viewport and 200% text sizing', () => {
+        const originalInnerWidth = window.innerWidth
+        const originalFontSize = document.documentElement.style.fontSize
 
-        const telegramSwitch = screen.getByRole('switch', { name: /telegram notifications/i })
-        fireEvent.click(telegramSwitch)
-
-        expect(telegramSwitch).toHaveAttribute('aria-checked', 'true')
-        expect(getEmailSwitch()).toHaveAttribute('aria-checked', 'false')
-        expect(screen.getByRole('switch', { name: /webhook notifications/i })).toHaveAttribute('aria-checked', 'false')
-        expect(
-            screen.getByText(/1 of 3 notification channels enabled: Telegram only\. Notifications will be delivered only through Telegram\./i)
-        ).toBeInTheDocument()
-        expect(
-            screen.getByText(/changes take effect after saving; test delivery uses saved settings until then/i)
-        ).toBeInTheDocument()
-        expect(screen.getByText(/save at least one notification provider/i)).toBeInTheDocument()
-
-        fireEvent.change(screen.getByLabelText('Telegram Chat ID'), { target: { value: '987654321' } })
-        fireEvent.click(screen.getByRole('button', { name: /save preferences/i }))
-
-        await waitFor(() => {
-            expect(postSpy).toHaveBeenCalledTimes(1)
-            expect(postSpy).toHaveBeenCalledWith(
-                ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
-                expect.objectContaining({
-                    userId: walletUserId,
-                    emailEnabled: false,
-                    webhookEnabled: false,
-                    telegramEnabled: true,
-                    telegramChatId: '987654321',
-                })
-            )
+        beforeEach(() => {
+            Object.defineProperty(window, 'innerWidth', {
+                writable: true,
+                configurable: true,
+                value: 320,
+            })
+            document.documentElement.style.fontSize = '200%'
         })
 
-        expect(await screen.findByText(/preferences saved successfully/i)).toBeInTheDocument()
-        expect(screen.queryByText(/unsaved changes/i)).toBeNull()
-        expect(screen.queryByText(/save at least one notification provider/i)).toBeNull()
-        expect(screen.getByRole('button', { name: /unsubscribe from all/i })).toBeEnabled()
-    })
-
-    it('recovers from save failure after an optimistic update and prevents duplicate submissions', async () => {
-        vi.spyOn(api, 'get').mockResolvedValue({ preferences: { ...allDisabledPreferences } } as any)
-
-        let rejectFirstSave!: (reason?: unknown) => void
-        const postSpy = vi
-            .spyOn(api, 'post')
-            .mockImplementationOnce(
-                () =>
-                    new Promise((_resolve, reject) => {
-                        rejectFirstSave = reject
-                    }) as any
-            )
-            .mockResolvedValueOnce({ success: true } as any)
-
-        renderWithQuery(<NotificationPreferences userId={walletUserId} />)
-        expect(await screen.findByText('Notifications')).toBeInTheDocument()
-
-        // Optimistic UI update: enable Email and enter an address
-        fireEvent.click(getEmailSwitch())
-        fireEvent.change(screen.getByLabelText('Email Address'), { target: { value: 'alerts@example.com' } })
-
-        expect(getEmailSwitch()).toHaveAttribute('aria-checked', 'true')
-        expect(screen.getByText(/1 of 3 notification channels enabled: Email only/i)).toBeInTheDocument()
-        expect(screen.getByText(/unsaved changes/i)).toBeInTheDocument()
-        expect(screen.getByText(/save at least one notification provider/i)).toBeInTheDocument()
-
-        // Rapid double-click while save is in flight must not submit twice
-        const saveBtn = screen.getByRole('button', { name: /save preferences/i })
-        fireEvent.click(saveBtn)
-        expect(await screen.findByText(/saving preferences\.\.\./i)).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /saving preferences/i })).toBeDisabled()
-        expect(getEmailSwitch()).toBeDisabled()
-        fireEvent.click(screen.getByRole('button', { name: /saving preferences/i }))
-        expect(postSpy).toHaveBeenCalledTimes(1)
-
-        // Fail the in-flight save and verify error recovery preserves edits without committing saved state
-        rejectFirstSave(new Error('Preference service unavailable'))
-
-        const alert = await screen.findByRole('alert')
-        expect(alert).toHaveTextContent(/preference service unavailable/i)
-        expect(getEmailSwitch()).toHaveAttribute('aria-checked', 'true')
-        expect(screen.getByLabelText('Email Address')).toHaveValue('alerts@example.com')
-        expect(screen.getByText(/unsaved changes/i)).toBeInTheDocument()
-        expect(screen.getByText(/save at least one notification provider/i)).toBeInTheDocument()
-
-        const retrySaveBtn = screen.getByRole('button', { name: /save preferences/i })
-        expect(retrySaveBtn).toBeEnabled()
-
-        // Retry succeeds, clears error, and activates the saved channel
-        fireEvent.click(retrySaveBtn)
-
-        await waitFor(() => {
-            expect(postSpy).toHaveBeenCalledTimes(2)
-            expect(postSpy).toHaveBeenLastCalledWith(
-                ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
-                expect.objectContaining({
-                    userId: walletUserId,
-                    emailEnabled: true,
-                    emailAddress: 'alerts@example.com',
-                    webhookEnabled: false,
-                    telegramEnabled: false,
-                })
-            )
+        afterEach(() => {
+            Object.defineProperty(window, 'innerWidth', {
+                writable: true,
+                configurable: true,
+                value: originalInnerWidth,
+            })
+            document.documentElement.style.fontSize = originalFontSize
         })
 
-        expect(await screen.findByText(/preferences saved successfully/i)).toBeInTheDocument()
-        expect(screen.queryByRole('alert')).toBeNull()
-        expect(screen.queryByText(/unsaved changes/i)).toBeNull()
-        expect(screen.queryByText(/save at least one notification provider/i)).toBeNull()
+        it('keeps webhook controls and endpoint status visible, wrapping, and operable without exposing secrets', async () => {
+            const secretUrl = 'https://receiver.example/hook?token=super-secret-value-12345'
+            const rotatedSecretUrl = 'https://receiver.example/rotated?token=another-secret-67890'
+            vi.spyOn(api, 'get').mockResolvedValue({
+                preferences: { ...webhookPreferences, webhookUrl: secretUrl },
+            } as any)
+            const post = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+
+            const { container } = renderWithQuery(<NotificationPreferences userId="user-1" />)
+
+            const webhookSwitch = await screen.findByRole('switch', { name: /webhook notifications/i })
+            const callbackInput = screen.getByLabelText('Callback URL')
+            const status = screen.getByText('Saved webhook endpoint active.')
+            const saveButton = screen.getByRole('button', { name: 'Save Preferences' })
+
+            // Controls and status remain visible and use wrapping/shrinking classes to prevent horizontal clipping
+            expect(webhookSwitch).toBeVisible()
+            expect(webhookSwitch.className).toContain('flex-shrink-0')
+            expect(webhookSwitch.parentElement?.className).toContain('flex-wrap')
+
+            expect(status).toBeVisible()
+            expect(status.className).toContain('break-words')
+
+            expect(callbackInput).toBeVisible()
+            expect(callbackInput).toHaveAttribute('type', 'password')
+            expect(callbackInput.className).toContain('w-full')
+            expect(callbackInput.className).toContain('min-w-0')
+
+            expect(saveButton).toBeVisible()
+            expect(saveButton.className).toContain('w-full')
+            expect(saveButton.className).toContain('flex-wrap')
+
+            // Secret token is never exposed in rendered text content
+            expect(container.textContent).not.toContain('super-secret-value-12345')
+            expect(container.textContent).not.toContain(secretUrl)
+
+            // Invalid URL state remains visible with wrapping error alert
+            fireEvent.change(callbackInput, { target: { value: 'invalid-url' } })
+            const alert = screen.getByRole('alert')
+            expect(alert).toBeVisible()
+            expect(alert.className).toContain('break-words')
+            expect(saveButton).toBeDisabled()
+
+            // Rotating to a valid URL keeps status visible without exposing the new secret and allows saving
+            fireEvent.change(callbackInput, { target: { value: rotatedSecretUrl } })
+            const pendingStatus = screen.getByText(/Replacement endpoint pending/)
+            expect(pendingStatus).toBeVisible()
+            expect(pendingStatus.className).toContain('break-words')
+            expect(container.textContent).not.toContain('another-secret-67890')
+            expect(saveButton).not.toBeDisabled()
+
+            fireEvent.click(saveButton)
+            expect(await screen.findByText('Saved webhook endpoint active.')).toBeVisible()
+            expect(post).toHaveBeenCalledWith(
+                ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
+                expect.objectContaining({ webhookUrl: rotatedSecretUrl })
+            )
+            expect(container.textContent).not.toContain('another-secret-67890')
+        })
+
+        it('keeps webhook delivery off state and save failure banner readable without horizontal clipping', async () => {
+            vi.spyOn(api, 'get').mockResolvedValue({
+                preferences: { ...webhookPreferences, webhookEnabled: false, webhookUrl: '' },
+            } as any)
+            vi.spyOn(api, 'post').mockRejectedValue(new Error('Network error'))
+
+            renderWithQuery(<NotificationPreferences userId="user-1" />)
+
+            const offStatus = await screen.findByText('Webhook delivery is off.')
+            expect(offStatus).toBeVisible()
+            expect(offStatus.className).toContain('break-words')
+
+            const webhookSwitch = screen.getByRole('switch', { name: /webhook notifications/i })
+            fireEvent.click(webhookSwitch)
+
+            const callbackInput = screen.getByLabelText('Callback URL')
+            fireEvent.change(callbackInput, { target: { value: 'https://receiver.example/new-hook' } })
+            fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }))
+
+            const errorAlert = await screen.findByRole('alert')
+            await waitFor(() => expect(errorAlert).toBeVisible())
+            expect(errorAlert.className).toContain('min-w-0')
+            expect(errorAlert).toHaveTextContent(
+                'Could not save webhook settings. Delivery still uses the previously saved settings.'
+            )
+        })
     })
 })

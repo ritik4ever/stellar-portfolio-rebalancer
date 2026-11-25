@@ -186,7 +186,7 @@ The Analytics page exposes this API through `frontend/src/components/HistoricalS
 - **Seven-day window:** the start and end dates both count, so `2028-02-27` through `2028-03-04` is exactly 7 days. A 6-day range is blocked next to the date fields.
 - **Leap day:** Feb 29 counts as a normal day when it is in the selectable range. The result states whether it was included or skipped. Impossible dates such as `2027-02-29` are rejected.
 - **Range and source alignment:** the result shows the requested range, evaluated range, and data source. Changing the range clears the previous result.
-- **Insufficient history:** a `HISTORICAL_DATA_UNAVAILABLE` response shows an alert with retry and dismiss actions. Synthetic prices are never substituted.
+- **Insufficient history:** a `HISTORICAL_DATA_UNAVAILABLE` response shows an alert with actionable recovery paths: **Retry simulation** (preserving the current date edits without duplicating in-flight requests), **Adjust dates** (focusing the start date field with existing edits intact), **Try last 7 days** (for ranges longer than 7 days, switching to the shortest valid window for review before running), and **Dismiss**. Synthetic prices are never substituted.
 - **Keyboard and screen readers:** status changes are announced, focus moves to the result or error, and Escape or Cancel abandons a running request. Cancelling stops the page from waiting, but the server may finish its run, so an immediate retry can return `409 CONFLICT`.
 - **Narrow screens:** controls stack and wrap at 320px and with 200% text sizing without horizontal page scrolling.
 

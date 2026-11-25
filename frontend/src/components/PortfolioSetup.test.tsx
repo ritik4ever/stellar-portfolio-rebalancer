@@ -781,3 +781,39 @@ describe('remainingAllocation', () => {
         expect(Math.abs(result)).toBeLessThan(0.01)
     })
 })
+
+// ── SPR-2026-034: Slippage control usable at narrow widths ──────────────────
+describe('PortfolioSetup – slippage control usable at narrow widths (SPR-2026-034)', () => {
+    beforeEach(() => {
+        cleanup()
+    })
+
+    it('renders slippage controls with min-w-0 and break-words to prevent clipping at narrow widths', () => {
+        renderSetup()
+        const slippageInput = screen.getByLabelText(/max slippage/i)
+        expect(slippageInput).toBeInTheDocument()
+        expect(slippageInput.className).toMatch(/min-w-0/)
+        expect(slippageInput.className).toMatch(/w-full/)
+
+        // The input parent container has min-w-0 to prevent horizontal overflow in narrow containers
+        expect(slippageInput.parentElement?.className).toMatch(/min-w-0/)
+
+        // Summary preview row carries flex-wrap and min-w-0
+        const maxSlippageSummary = screen.getByText('Max Slippage:')
+        expect(maxSlippageSummary).toBeInTheDocument()
+        const summaryRow = maxSlippageSummary.closest('div')
+        expect(summaryRow?.className).toMatch(/flex-wrap/)
+        expect(summaryRow?.className).toMatch(/min-w-0/)
+    })
+
+    it('remains operable and retains value when changed at simulated narrow viewport', () => {
+        renderSetup()
+        const slippageInput = screen.getByLabelText(/max slippage/i) as HTMLInputElement
+        fireEvent.change(slippageInput, { target: { value: '3.5' } })
+        expect(slippageInput.value).toBe('3.5')
+
+        // Summary reflects the confirmed value
+        const summaryContainer = screen.getByText('Max Slippage:').closest('div')
+        expect(summaryContainer).toHaveTextContent('3.5%')
+    })
+})

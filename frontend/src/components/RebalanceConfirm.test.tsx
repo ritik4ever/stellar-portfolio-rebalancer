@@ -1,301 +1,294 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
 // ---------------------------------------------------------------------------
-// Isolated doubles for wallet / API modules. These are hoisted by Vitest so
-// they are available before the component module is imported.
+// Query / mutation hook doubles (hoisted before the component is imported).
 // ---------------------------------------------------------------------------
-const mockWallet = {
-  address: '0xabc0000000000000000000000000000000000001',
-  connected: true,
-  signTransaction: vi.fn(),
-};
+const mockUseRebalancePlan = vi.fn()
+const mockUsePortfolioDetails = vi.fn()
+const mockMutateAsync = vi.fn()
+let mockRefetch: ReturnType<typeof vi.fn>
 
-vi.mock('../wallet', () => ({
-  useWallet: () => mockWallet,
-  getWallet: () => mockWallet,
-}));
-
-vi.mock('../api', () => ({
-  apiClient: {
-    post: vi.fn(),
-    get: vi.fn(),
-  },
-}));
-
-// ---------------------------------------------------------------------------
-// Query / mutation hook doubles.
-// ---------------------------------------------------------------------------
-const mockUseRebalancePlan = vi.fn();
-const mockMutateAsync = vi.fn();
-
-vi.mock('../hooks/useRebalancePlan', () => ({
+vi.mock('../hooks/queries/usePortfolioQuery', () => ({
   useRebalancePlan: (...args: unknown[]) => mockUseRebalancePlan(...args),
-}));
+  usePortfolioDetails: (...args: unknown[]) => mockUsePortfolioDetails(...args),
+}))
 
-vi.mock('../hooks/useExecuteRebalanceMutation', () => ({
+vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
   useExecuteRebalanceMutation: () => ({
     mutateAsync: mockMutateAsync,
     isPending: false,
   }),
-}));
+}))
 
-// Imported after mocks are registered.
-import RebalanceConfirm from './RebalanceConfirm';
+import RebalanceConfirm from './RebalanceConfirm'
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-const NOW = new Date('2026-04-01T12:00:00.000Z').getTime();
+const NOW = new Date('2026-04-01T12:00:00.000Z').getTime()
 
-function makeTrade(index: number, overrides: Record<string, unknown> = {}) {
-  return {
-    id: `trade-${index}`,
-    symbol: `ASSET${index}`,
-    side: index % 2 === 0 ? 'BUY' : 'SELL',
-    quantity: 10 + index,
-    quotedPrice: 100 + index,
-    estimatedFee: 0.5 + index * 0.1,
-    quoteTimestamp: NOW - index * 1000,
-    ...overrides,
-  };
+function makeTrades() {
+  return [
+    { asset: 'XLM', action: 'buy' as const, amount: 100 },
+    { asset: 'USDC', action: 'sell' as const, amount: 50 },
+  ]
 }
 
 function makePlan(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'plan-1',
-    trades: [],
-    estimatedFees: 0,
-    quoteTimestamp: NOW,
+    portfolioId: 'p1',
+    totalValue: 1000,
+    maxSlippagePercent: 1,
+    estimatedSlippageBps: 100,
+    estimatedFees: { xlm: 0.0005, usd: 0.0001, tradeCount: 2 },
+    boundary: {
+      reasonCode: 'TRADES_REQUIRED',
+      trades: makeTrades(),
+      quoteSnapshot: {
+        prices: {
+          XLM: { timestamp: NOW / 1000 },
+          USDC: { timestamp: NOW / 1000 - 60 },
+        },
+        feedMeta: { degraded: false, staleOrLimited: false },
+      },
+    },
     ...overrides,
-  };
+  }
 }
 
-function setPlan(plan: unknown) {
-  mockUseRebalancePlan.mockReturnValue({
+function planResult(plan: unknown, overrides: Record<string, unknown> = {}) {
+  return {
     data: plan,
     isLoading: false,
+    isFetching: false,
     isError: false,
     error: null,
-    refetch: vi.fn(),
-  });
+    refetch: mockRefetch,
+    ...overrides,
+  }
+}
+
+function detailsResult(tolerance: number | null) {
+  return {
+    data: tolerance == null ? undefined : { slippageTolerancePercent: tolerance },
+    isLoading: false,
+  }
+}
+
+function renderReview(overrides: Record<string, unknown> = {}) {
+  return render(
+    <RebalanceConfirm
+      portfolioId="p1"
+      open
+      onClose={vi.fn()}
+      onSuccess={vi.fn()}
+      {...overrides}
+    />,
+  )
 }
 
 beforeEach(() => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
-  vi.setSystemTime(NOW);
-  mockUseRebalancePlan.mockReset();
-  mockMutateAsync.mockReset();
-  mockWallet.signTransaction.mockReset();
-  setPlan(makePlan());
-});
+  mockUseRebalancePlan.mockReset()
+  mockUsePortfolioDetails.mockReset()
+  mockMutateAsync.mockReset()
+  mockRefetch = vi.fn().mockResolvedValue({ data: makePlan() })
+
+  mockUseRebalancePlan.mockReturnValue(planResult(makePlan()))
+  mockUsePortfolioDetails.mockReturnValue(detailsResult(1))
+  mockMutateAsync.mockResolvedValue({ ok: true })
+})
 
 afterEach(() => {
-  vi.useRealTimers();
-  vi.clearAllMocks();
-});
+  cleanup()
+  vi.clearAllMocks()
+})
 
-// ---------------------------------------------------------------------------
-// (1) Empty plan
-// ---------------------------------------------------------------------------
-describe('RebalanceConfirm — empty plan', () => {
-  it('renders the read-only preview, a Close button, and no Confirm button', () => {
-    setPlan(makePlan({ trades: [], estimatedFees: 0 }));
+describe('RebalanceConfirm — review and acknowledgement', () => {
+  it('renders every planned trade and gates confirmation on acknowledgement', async () => {
+    renderReview()
 
-    render(<RebalanceConfirm planId="plan-1" onClose={vi.fn()} />);
+    expect(screen.getByText(/Buy 100/)).toHaveTextContent(/XLM/)
+    expect(screen.getByText(/Sell 50/)).toHaveTextContent(/USDC/)
+    expect(screen.getByText(/estimated network fee/i)).toBeInTheDocument()
+    expect(screen.getByText(/maximum slippage: 1%/i)).toBeInTheDocument()
 
-    expect(screen.getByText(/no trades/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /close/i })).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /confirm/i }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('invokes onClose when Close is clicked', async () => {
-    const onClose = vi.fn();
-    setPlan(makePlan({ trades: [] }));
-
-    render(<RebalanceConfirm planId="plan-1" onClose={onClose} />);
-
-    await userEvent.click(screen.getByRole('button', { name: /close/i }));
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// (2) Many trades
-// ---------------------------------------------------------------------------
-describe('RebalanceConfirm — many trades', () => {
-  it('renders every quoted trade, the scroll hint, estimated fees, and oldest price age', () => {
-    const trades = Array.from({ length: 7 }, (_, i) => makeTrade(i));
-    const totalFees = trades.reduce((sum, t) => sum + t.estimatedFee, 0);
-    // Oldest quote is 6 seconds before NOW.
-    setPlan(
-      makePlan({
-        trades,
-        estimatedFees: totalFees,
-        quoteTimestamp: NOW - 6000,
-      }),
-    );
-
-    render(<RebalanceConfirm planId="plan-1" onClose={vi.fn()} />);
-
-    for (const trade of trades) {
-      expect(screen.getByText(trade.symbol)).toBeInTheDocument();
-    }
-
-    expect(screen.getByText(/scroll/i)).toBeInTheDocument();
-    expect(screen.getByText(/estimated fees/i)).toBeInTheDocument();
-    expect(screen.getByText(/\$5\.60/)).toBeInTheDocument();
-    // Oldest price age = 6s.
-    expect(screen.getByText(/6s ago/i)).toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// (3) Price age + quote change before approval
-// ---------------------------------------------------------------------------
-describe('RebalanceConfirm — price age and quote changes', () => {
-  it('updates the displayed price age as the 15s interval ticks', () => {
-    setPlan(
-      makePlan({
-        trades: [makeTrade(0)],
-        quoteTimestamp: NOW,
-      }),
-    );
-
-    render(<RebalanceConfirm planId="plan-1" onClose={vi.fn()} />);
-
-    expect(screen.getByText(/0s ago/i)).toBeInTheDocument();
-
-    act(() => {
-      vi.advanceTimersByTime(15000);
-    });
-
-    expect(screen.getByText(/15s ago/i)).toBeInTheDocument();
-  });
-
-  it('reflects a new quote timestamp and gates confirmation on re-acknowledgement', async () => {
-    const initialPlan = makePlan({
-      trades: [makeTrade(0, { quoteTimestamp: NOW })],
-      quoteTimestamp: NOW,
-    });
-    setPlan(initialPlan);
-
-    const { rerender } = render(
-      <RebalanceConfirm planId="plan-1" onClose={vi.fn()} />,
-    );
-
-    // Acknowledge the initial quote.
-    const ack = screen.getByRole('checkbox', { name: /acknowledge/i });
-    await userEvent.click(ack);
-    expect(ack).toBeChecked();
-
-    // Quote changes (e.g. prices refreshed) before approval.
-    const refreshedPlan = makePlan({
-      trades: [makeTrade(0, { quoteTimestamp: NOW - 3000 })],
-      quoteTimestamp: NOW - 3000,
-    });
-    setPlan(refreshedPlan);
-    rerender(<RebalanceConfirm planId="plan-1" onClose={vi.fn()} />);
-
-    // Age reflects the new quote.
-    expect(screen.getByText(/3s ago/i)).toBeInTheDocument();
-    // Acknowledgement is reset because the quote changed.
-    expect(
-      screen.getByRole('checkbox', { name: /acknowledge/i }),
-    ).not.toBeChecked();
-    // Confirm is disabled until re-acknowledged.
-    expect(screen.getByRole('button', { name: /confirm/i })).toBeDisabled();
+    const confirm = screen.getByRole('button', { name: /confirm rebalance/i })
+    expect(confirm).toBeDisabled()
 
     await userEvent.click(
-      screen.getByRole('checkbox', { name: /acknowledge/i }),
-    );
-    expect(screen.getByRole('button', { name: /confirm/i })).toBeEnabled();
-  });
-});
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
 
-// ---------------------------------------------------------------------------
-// (4) Submission failure
-// ---------------------------------------------------------------------------
-describe('RebalanceConfirm — submission failure', () => {
-  it('shows the alert, resets acknowledgement, and allows retry', async () => {
-    setPlan(
-      makePlan({
-        trades: [makeTrade(0)],
-        quoteTimestamp: NOW,
-      }),
-    );
-    mockMutateAsync.mockRejectedValueOnce(new Error('network down'));
+    expect(confirm).toBeEnabled()
+  })
 
-    render(<RebalanceConfirm planId="plan-1" onClose={vi.fn()} />);
+  it('shows a read-only close-only view when there are no trades', () => {
+    mockUseRebalancePlan.mockReturnValue(
+      planResult(
+        makePlan({
+          boundary: {
+            reasonCode: 'WITHIN_EVERY_THRESHOLD',
+            trades: [],
+            quoteSnapshot: {
+              prices: {},
+              feedMeta: { degraded: false, staleOrLimited: false },
+            },
+          },
+        }),
+      ),
+    )
+
+    renderReview()
+
+    expect(screen.getByText(/0 planned trades/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /close/i })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /confirm rebalance/i }),
+    ).not.toBeInTheDocument()
+  })
+})
+
+describe('RebalanceConfirm — slippage tolerance changes before approval', () => {
+  it('blocks confirmation and offers a refresh when the portfolio tolerance no longer matches the plan', async () => {
+    mockUsePortfolioDetails.mockReturnValue(detailsResult(2))
+
+    const { rerender } = renderReview()
+
+    expect(
+      screen.getByText(/slippage tolerance changed after this plan was quoted/i),
+    ).toBeInTheDocument()
 
     await userEvent.click(
-      screen.getByRole('checkbox', { name: /acknowledge/i }),
-    );
-    await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
+    expect(screen.getByRole('button', { name: /confirm rebalance/i })).toBeDisabled()
+
+    const refresh = screen.getByRole('button', { name: /refresh plan/i })
+    await userEvent.click(refresh)
+
+    expect(mockRefetch).toHaveBeenCalled()
+
+    // The refreshed plan reflects the new tolerance and unblocks confirmation.
+    mockUseRebalancePlan.mockReturnValue(planResult(makePlan({ maxSlippagePercent: 2 })))
+    rerender(
+      <RebalanceConfirm portfolioId="p1" open onClose={vi.fn()} onSuccess={vi.fn()} />,
+    )
+
+    expect(
+      screen.queryByText(/slippage tolerance changed after this plan was quoted/i),
+    ).not.toBeInTheDocument()
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
+    expect(screen.getByRole('button', { name: /confirm rebalance/i })).toBeEnabled()
+  })
+})
+
+describe('RebalanceConfirm — execution failure recovery', () => {
+  it('explains a slippage rejection and refreshes the quote for a safe retry', async () => {
+    const onSuccess = vi.fn()
+    mockMutateAsync.mockRejectedValueOnce(
+      new Error('Slippage tolerance exceeded: price moved before execution'),
+    )
+
+    renderReview({ onSuccess })
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /confirm rebalance/i }))
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(/network down/i);
-    });
-    expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('alert')).toHaveTextContent(/slippage tolerance exceeded/i)
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /prices moved beyond your slippage limit/i,
+    )
     expect(
-      screen.getByRole('checkbox', { name: /acknowledge/i }),
-    ).not.toBeChecked();
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    ).not.toBeChecked()
 
-    // Retry succeeds.
-    mockMutateAsync.mockResolvedValueOnce({ ok: true });
+    const { refetch } = mockUseRebalancePlan.mock.results[0].value
     await userEvent.click(
-      screen.getByRole('checkbox', { name: /acknowledge/i }),
-    );
-    await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
+      screen.getByRole('button', { name: /refresh quote and retry/i }),
+    )
+    expect(mockRefetch).toHaveBeenCalledTimes(1)
+
+    // The failure alert is cleared and the user can re-acknowledge and retry.
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /confirm rebalance/i }))
 
     await waitFor(() => {
-      expect(mockMutateAsync).toHaveBeenCalledTimes(2);
-    });
-  });
-});
+      expect(mockMutateAsync).toHaveBeenCalledTimes(2)
+      expect(onSuccess).toHaveBeenCalledTimes(1)
+    })
+  })
 
-// ---------------------------------------------------------------------------
-// (5) No duplicate submission
-// ---------------------------------------------------------------------------
-describe('RebalanceConfirm — no duplicate submission', () => {
-  it('calls mutateAsync only once on rapid double-click and shows in-flight status', async () => {
-    setPlan(
-      makePlan({
-        trades: [makeTrade(0)],
-        quoteTimestamp: NOW,
-      }),
-    );
+  it('keeps non-slippage failures reviewable and retryable', async () => {
+    mockMutateAsync.mockRejectedValueOnce(new Error('network down'))
 
-    let resolveSubmit: (value: unknown) => void = () => {};
+    renderReview()
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /confirm rebalance/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/network down/i)
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /review and re-acknowledge the planned trades to retry/i,
+    )
+    expect(screen.queryByRole('button', { name: /refresh quote and retry/i })).not.toBeInTheDocument()
+
+    mockMutateAsync.mockResolvedValueOnce({ ok: true })
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /confirm rebalance/i }))
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledTimes(2)
+    })
+  })
+})
+
+describe('RebalanceConfirm — duplicate submission guard', () => {
+  it('submits once on a rapid double-click and announces in-flight status', async () => {
+    let resolveSubmit: (value: unknown) => void = () => {}
     mockMutateAsync.mockImplementation(
       () =>
         new Promise((resolve) => {
-          resolveSubmit = resolve;
+          resolveSubmit = resolve
         }),
-    );
+    )
 
-    render(<RebalanceConfirm planId="plan-1" onClose={vi.fn()} />);
+    renderReview()
 
     await userEvent.click(
-      screen.getByRole('checkbox', { name: /acknowledge/i }),
-    );
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
 
-    const confirm = screen.getByRole('button', { name: /confirm/i });
-    fireEvent.click(confirm);
-    fireEvent.click(confirm);
+    const confirm = screen.getByRole('button', { name: /confirm rebalance/i })
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(/submitting/i);
-    });
-    expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('status')).toHaveTextContent(/submitting rebalance/i)
+    })
+    expect(mockMutateAsync).toHaveBeenCalledTimes(1)
 
     await act(async () => {
-      resolveSubmit({ ok: true });
-    });
+      resolveSubmit({ ok: true })
+    })
 
-    expect(mockMutateAsync).toHaveBeenCalledTimes(1);
-  });
-});
+    expect(mockMutateAsync).toHaveBeenCalledTimes(1)
+  })
+})

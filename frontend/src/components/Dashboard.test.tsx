@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Dashboard from './Dashboard'
 import { ApiClientError } from '../config/api'
@@ -20,6 +20,7 @@ const queryMocks = vi.hoisted(() => ({
     useRebalancePlan: vi.fn(),
     usePrices: vi.fn(),
     useExecuteRebalanceMutation: vi.fn(),
+    invalidateQueries: vi.fn(async () => undefined),
 }))
 
 vi.mock('../hooks/queries/usePortfolioQuery', async importOriginal => ({
@@ -44,6 +45,7 @@ vi.mock('../hooks/queries/usePortfolioQuery', async importOriginal => ({
 vi.mock('../hooks/queries/usePricesQuery', () => ({
     usePrices: queryMocks.usePrices,
     formatPriceFeedSummary: vi.fn(() => 'Live prices'),
+    priceKeys: { all: ['prices'] },
 }))
 
 vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
@@ -56,7 +58,7 @@ vi.mock('../context/ThemeContext', () => ({
 vi.mock('@tanstack/react-query', async importOriginal => ({
     ...await importOriginal<typeof import('@tanstack/react-query')>(),
     useQueryClient: vi.fn(() => ({
-        invalidateQueries: vi.fn(async () => undefined),
+        invalidateQueries: queryMocks.invalidateQueries,
     })),
 }))
 
@@ -157,6 +159,8 @@ describe('Dashboard', () => {
         queryMocks.useRebalancePlan.mockReturnValue({ data: null, isLoading: false, isError: false })
         queryMocks.usePrices.mockReturnValue({ data: { prices: {}, feedMeta: null }, isLoading: false })
         queryMocks.useExecuteRebalanceMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
+        queryMocks.invalidateQueries.mockReset()
+        queryMocks.invalidateQueries.mockResolvedValue(undefined)
     })
 
     it('renders onboarding CTA for an empty portfolio', async () => {
@@ -420,5 +424,74 @@ describe('Dashboard', () => {
 
         // Shows connected wallet header details
         expect(screen.getByText(/GABC\.\.\.TEST/)).toBeInTheDocument()
+    })
+
+    it('recovers from a halfway demo reset failure without duplicating completed steps', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
+
+        let priceAttempts = 0
+        queryMocks.invalidateQueries.mockImplementation(async ({ queryKey }: { queryKey: string[] }) => {
+            if (queryKey[0] === 'prices') {
+                priceAttempts += 1
+                if (priceAttempts === 1) {
+                    throw new Error('Price feed timeout')
+                }
+            }
+        })
+
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey={null} />)
+
+        const resetButtons = await screen.findAllByRole('button', { name: /reset demo portfolio/i })
+        fireEvent.click(resetButtons[0])
+
+        fireEvent.click(screen.getByRole('button', { name: /^Reset Demo$/i }))
+
+        const alertBanner = await screen.findByRole('alert')
+        expect(alertBanner).toHaveTextContent(/stopped halfway while refreshing demo price data/i)
+        expect(alertBanner).toHaveTextContent(/will not be duplicated/i)
+        expect(alertBanner).toHaveTextContent(/Price feed timeout/i)
+        expect(alertSpy).not.toHaveBeenCalled()
+
+        // Step 1 ran once, step 2 ran once and failed
+        expect(queryMocks.invalidateQueries).toHaveBeenCalledTimes(2)
+
+        // Retry remaining step only — portfolios must not be invalidated again
+        fireEvent.click(screen.getByRole('button', { name: /retry remaining steps/i }))
+
+        await waitFor(() => {
+            expect(screen.queryByRole('heading', { name: 'Reset Demo Portfolio' })).not.toBeInTheDocument()
+        })
+
+        const invalidatedKeys = queryMocks.invalidateQueries.mock.calls.map(call => call[0]?.queryKey?.[0])
+        expect(invalidatedKeys).toEqual(['portfolios', 'prices', 'prices'])
+
+        consoleError.mockRestore()
+        alertSpy.mockRestore()
+    })
+
+    it('preserves unrelated dashboard state when canceling after a demo reset failure', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        queryMocks.invalidateQueries.mockRejectedValueOnce(new Error('Network unavailable'))
+
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey={null} />)
+
+        // Switch to Analytics tab as unrelated user state
+        fireEvent.click(await screen.findByRole('button', { name: /analytics/i }))
+        expect(await screen.findByText('Performance Chart')).toBeInTheDocument()
+
+        const resetButtons = screen.getAllByRole('button', { name: /reset demo portfolio/i })
+        fireEvent.click(resetButtons[0])
+        fireEvent.click(screen.getByRole('button', { name: /^Reset Demo$/i }))
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(/Network unavailable/i)
+        expect(screen.getByRole('button', { name: /retry reset/i })).toBeInTheDocument()
+
+        // Cancel without refreshing the page — Analytics tab remains active
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+        expect(screen.queryByRole('heading', { name: 'Reset Demo Portfolio' })).not.toBeInTheDocument()
+        expect(screen.getByText('Performance Chart')).toBeInTheDocument()
+
+        consoleError.mockRestore()
     })
 })
