@@ -291,4 +291,24 @@ describe('RebalanceConfirm — duplicate submission guard', () => {
 
     expect(mockMutateAsync).toHaveBeenCalledTimes(1)
   })
+
+  it('explains the submit control state before and after acknowledgement', async () => {
+    renderReview()
+    expect(screen.getByText(/check the review box to enable confirm/i)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }))
+    expect(screen.getByText(/click confirm once/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /confirm rebalance/i })).toHaveAttribute('aria-describedby', 'rebalance-submit-hint')
+  })
+
+  it('treats a failed final execution status as an error and keeps the modal open', async () => {
+    const onSuccess = vi.fn()
+    const onClose = vi.fn()
+    mockMutateAsync.mockResolvedValue({ result: { status: 'failed', failureReason: 'Pool dry', txId: 'abc123' } })
+    renderReview({ onSuccess, onClose })
+    await userEvent.click(screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }))
+    await userEvent.click(screen.getByRole('button', { name: /confirm rebalance/i }))
+    expect(await screen.findByText(/Pool dry \(TX: abc123\)/)).toBeInTheDocument()
+    expect(onSuccess).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
 })
