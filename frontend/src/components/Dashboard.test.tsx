@@ -1,15 +1,16 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Dashboard from './Dashboard'
+import { ApiClientError } from '../config/api'
 
 // Dashboard calls useQueryClient() directly, so every render needs a provider.
 const renderWithClient = (ui: React.ReactElement) => {
     const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false } },
     })
-    return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+    return render(ui, { wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider> })
 }
 
 const queryMocks = vi.hoisted(() => ({
@@ -19,9 +20,12 @@ const queryMocks = vi.hoisted(() => ({
     useRebalancePlan: vi.fn(),
     usePrices: vi.fn(),
     useExecuteRebalanceMutation: vi.fn(),
+    invalidateQueries: vi.fn(async () => undefined),
 }))
 
-vi.mock('../hooks/queries/usePortfolioQuery', () => ({
+vi.mock('../hooks/queries/usePortfolioQuery', async importOriginal => ({
+    ...await importOriginal<typeof import('../hooks/queries/usePortfolioQuery')>(),
+    usePortfolioCostSummary: () => ({ data: null, isLoading: false }),
     useUserPortfolios: queryMocks.useUserPortfolios,
     usePortfolioDetails: queryMocks.usePortfolioDetails,
     useRebalanceEstimate: queryMocks.useRebalanceEstimate,
@@ -41,6 +45,7 @@ vi.mock('../hooks/queries/usePortfolioQuery', () => ({
 vi.mock('../hooks/queries/usePricesQuery', () => ({
     usePrices: queryMocks.usePrices,
     formatPriceFeedSummary: vi.fn(() => 'Live prices'),
+    priceKeys: { all: ['prices'] },
 }))
 
 vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
@@ -50,12 +55,14 @@ vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
 vi.mock('../context/ThemeContext', () => ({
     useTheme: vi.fn(() => ({ isDark: false })),
 }))
-vi.mock('@tanstack/react-query', () => ({
+vi.mock('@tanstack/react-query', async importOriginal => ({
+    ...await importOriginal<typeof import('@tanstack/react-query')>(),
     useQueryClient: vi.fn(() => ({
-        invalidateQueries: vi.fn(async () => undefined),
+        invalidateQueries: queryMocks.invalidateQueries,
     })),
 }))
 
+vi.mock('../hooks/usePortfolioLiveFeed', () => ({ usePortfolioLiveFeed: () => ({ connectionState: 'closed' }) }))
 vi.mock('./ThemeToggle', () => ({ default: () => <div>Theme Toggle</div> }))
 vi.mock('recharts', () => ({
     ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -69,9 +76,9 @@ vi.mock('recharts', () => ({
     CartesianGrid: () => <div />,
     Tooltip: () => <div />,
 }))
-vi.mock('./AssetCard', () => ({
-    default: ({ asset, isLoading }: { asset?: { name?: string }; isLoading?: boolean }) =>
-        isLoading ? <div>Asset Card Skeleton</div> : <div>Asset Card {asset?.name ?? 'Unknown'}</div>
+vi.mock('./AssetList', () => ({
+    default: ({ assets, isLoading }: { assets: { name: string }[]; isLoading?: boolean }) =>
+        isLoading ? <div>Asset Card Skeleton</div> : assets.map(asset => <div key={asset.name}>Asset Card {asset.name}</div>)
 }))
 vi.mock('./RebalanceHistory', () => ({
     default: ({ isLoading }: { isLoading?: boolean }) =>
@@ -111,7 +118,7 @@ vi.mock('../config/api', async () => {
     return {
         ...actual,
         API_CONFIG: { ...actual.API_CONFIG, USE_BROWSER_PRICES: false },
-        api: { delete: vi.fn(async () => undefined) },
+        api: { get: vi.fn(async () => ({ assets: [] })), delete: vi.fn(async () => undefined) },
         downloadPortfolioExport: vi.fn(async () => undefined),
     }
 })
@@ -152,6 +159,8 @@ describe('Dashboard', () => {
         queryMocks.useRebalancePlan.mockReturnValue({ data: null, isLoading: false, isError: false })
         queryMocks.usePrices.mockReturnValue({ data: { prices: {}, feedMeta: null }, isLoading: false })
         queryMocks.useExecuteRebalanceMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
+        queryMocks.invalidateQueries.mockReset()
+        queryMocks.invalidateQueries.mockResolvedValue(undefined)
     })
 
     it('renders onboarding CTA for an empty portfolio', async () => {
@@ -261,10 +270,7 @@ describe('Dashboard', () => {
 
         renderWithClient(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
 
-        expect(await screen.findByTestId('dashboard-value-skeleton')).toBeTruthy()
-        expect(screen.getByTestId('dashboard-allocation-skeleton')).toBeTruthy()
-        expect(screen.getAllByText('Asset Card Skeleton').length).toBeGreaterThan(0)
-        expect(screen.getByText('Rebalance History Skeleton')).toBeTruthy()
+        expect(await screen.findByRole('status')).toHaveTextContent('Loading portfolio data')
     })
 
     it('opens rebalance preview before confirming manual rebalance', async () => {
@@ -294,19 +300,15 @@ describe('Dashboard', () => {
             isLoading: false,
             isError: false,
         })
-        queryMocks.useRebalanceEstimate.mockReturnValue({
-            data: {
-                tradeCount: 2,
-                gasEstimateXlm: 0.02,
-                gasEstimateUsd: 0.01,
-                breakdown: [{ tradeId: 'trade-1', estimateXlm: 0.01 }],
-            },
-            isLoading: false,
-        })
         queryMocks.useRebalancePlan.mockReturnValue({
-            data: { maxSlippagePercent: 2, estimatedSlippageBps: 200 },
-            isLoading: false,
-            isError: false,
+            data: {
+                maxSlippagePercent: 2,
+                estimatedFees: { xlm: 0.02, usd: 0.01, tradeCount: 1 },
+                boundary: {
+                    trades: [{ asset: 'XLM', action: 'buy', amount: 10 }],
+                    quoteSnapshot: { feedMeta: {}, prices: { XLM: { timestamp: 1791648000 } } },
+                },
+            },
         })
         queryMocks.usePrices.mockReturnValue({
             data: {
@@ -318,11 +320,46 @@ describe('Dashboard', () => {
 
         renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
 
-        fireEvent.click(await screen.findByRole('button', { name: /review rebalance/i }))
-        expect(await screen.findByRole('dialog')).toBeTruthy()
-        expect(screen.getByRole('heading', { name: /estimated trades/i })).toBeTruthy()
-        expect(screen.getByRole('heading', { name: /preconditions/i })).toBeTruthy()
-        expect(screen.getByRole('button', { name: /confirm rebalance/i })).toBeTruthy()
+        const review = await screen.findByRole('button', { name: 'Review rebalance' })
+        review.focus()
+        fireEvent.click(review)
+        const dialog = await screen.findByRole('dialog')
+        expect(dialog).toHaveFocus()
+        expect(within(dialog).getByRole('heading', { name: '1 planned trade' })).toBeInTheDocument()
+        expect(within(dialog).getByRole('button', { name: 'Confirm rebalance' })).toBeDisabled()
+        fireEvent.keyDown(dialog, { key: 'Escape' })
+        expect(review).toHaveFocus()
+    })
+
+    it.each([403, 404])('focuses recovery when portfolio details return %s', async (status) => {
+        queryMocks.useUserPortfolios.mockReturnValue({ data: [{ id: 'p-1' }], isLoading: false })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            isError: true, error: new ApiClientError('Unavailable', status, 'UNAVAILABLE'),
+        })
+        const onNavigate = vi.fn()
+        renderWithClient(<Dashboard onNavigate={onNavigate} publicKey="GTEST" />)
+        expect(await screen.findByRole('heading', { name: 'Portfolio unavailable' })).toHaveFocus()
+        expect(screen.getByRole('button', { name: 'Reload portfolio list' })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Go to landing' }))
+        expect(onNavigate).toHaveBeenCalledWith('landing')
+    })
+
+    it('announces an unavailable balance while showing target allocations and supports retry', async () => {
+        const refetch = vi.fn().mockResolvedValue({ isSuccess: false })
+        queryMocks.useUserPortfolios.mockReturnValue({
+            data: [{ id: 'p-1', allocations: { XLM: 60, USDC: 40 } }], isLoading: false,
+        })
+        queryMocks.usePortfolioDetails.mockReturnValue({ isLoading: true })
+        const view = renderWithClient(<Dashboard onNavigate={vi.fn()} publicKey="GTEST" />)
+        expect(await screen.findByText(/Loading portfolio balances/)).toBeInTheDocument()
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            isError: true, error: new Error('Balances failed'), refetch,
+        })
+        view.rerender(<Dashboard onNavigate={vi.fn()} publicKey="GTEST" />)
+        expect((await screen.findByText(/Portfolio balances are unavailable/)).closest('[role=status]')).toBeInTheDocument()
+        expect(screen.getByText('60%')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Retry loading balances' }))
+        expect(refetch).toHaveBeenCalledOnce()
     })
 
     it('renders error fallback when portfolio fetching throws', async () => {
@@ -338,6 +375,123 @@ describe('Dashboard', () => {
         )
 
         expect(await screen.findByText(/dashboard failed to load/i)).toBeTruthy()
+        consoleError.mockRestore()
+    })
+
+    it('displays distinct demo mode indicators, simulated values, and operable reset modal at narrow widths', async () => {
+        queryMocks.useUserPortfolios.mockReturnValue({ data: [], isLoading: false })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            data: { id: 'demo', totalValue: 10000, dayChange: 0, assets: [] },
+            isLoading: false,
+        })
+        queryMocks.usePrices.mockReturnValue({ data: { prices: {}, feedMeta: null }, isLoading: false })
+
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey={null} />)
+
+        // Clear separation of demo mode
+        expect(await screen.findByText('Demo balance')).toBeInTheDocument()
+        expect(screen.getByText('Simulated $10,000')).toBeInTheDocument()
+
+        // Demo controls visible and operable
+        const resetButtons = screen.getAllByRole('button', { name: /reset demo portfolio/i })
+        expect(resetButtons.length).toBeGreaterThanOrEqual(1)
+
+        // Open demo reset modal
+        fireEvent.click(resetButtons[0])
+        expect(screen.getByRole('heading', { name: 'Reset Demo Portfolio' })).toBeInTheDocument()
+        expect(screen.getByText(/Real wallet balances and on-chain portfolios are not affected\./i)).toBeInTheDocument()
+
+        // Cancel modal
+        const cancelBtn = screen.getByRole('button', { name: 'Cancel' })
+        fireEvent.click(cancelBtn)
+        expect(screen.queryByRole('heading', { name: 'Reset Demo Portfolio' })).not.toBeInTheDocument()
+    })
+
+    it('displays distinct wallet balance badge and address when wallet is connected', async () => {
+        queryMocks.useUserPortfolios.mockReturnValue({ data: [{ id: 'live-1', name: 'Main' }], isLoading: false })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            data: { id: 'live-1', totalValue: 25000, dayChange: 1.5, assets: [] },
+            isLoading: false,
+        })
+        queryMocks.usePrices.mockReturnValue({ data: { prices: {}, feedMeta: null }, isLoading: false })
+
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABCD1234567890TEST" />)
+
+        // Live wallet balance badge is displayed
+        expect(await screen.findByText('Wallet balance')).toBeInTheDocument()
+        expect(screen.queryByText('Demo balance')).not.toBeInTheDocument()
+        expect(screen.queryByText('Simulated $10,000')).not.toBeInTheDocument()
+
+        // Shows connected wallet header details
+        expect(screen.getByText(/GABC\.\.\.TEST/)).toBeInTheDocument()
+    })
+
+    it('recovers from a halfway demo reset failure without duplicating completed steps', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
+
+        let priceAttempts = 0
+        queryMocks.invalidateQueries.mockImplementation(async ({ queryKey }: { queryKey: string[] }) => {
+            if (queryKey[0] === 'prices') {
+                priceAttempts += 1
+                if (priceAttempts === 1) {
+                    throw new Error('Price feed timeout')
+                }
+            }
+        })
+
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey={null} />)
+
+        const resetButtons = await screen.findAllByRole('button', { name: /reset demo portfolio/i })
+        fireEvent.click(resetButtons[0])
+
+        fireEvent.click(screen.getByRole('button', { name: /^Reset Demo$/i }))
+
+        const alertBanner = await screen.findByRole('alert')
+        expect(alertBanner).toHaveTextContent(/stopped halfway while refreshing demo price data/i)
+        expect(alertBanner).toHaveTextContent(/will not be duplicated/i)
+        expect(alertBanner).toHaveTextContent(/Price feed timeout/i)
+        expect(alertSpy).not.toHaveBeenCalled()
+
+        // Step 1 ran once, step 2 ran once and failed
+        expect(queryMocks.invalidateQueries).toHaveBeenCalledTimes(2)
+
+        // Retry remaining step only — portfolios must not be invalidated again
+        fireEvent.click(screen.getByRole('button', { name: /retry remaining steps/i }))
+
+        await waitFor(() => {
+            expect(screen.queryByRole('heading', { name: 'Reset Demo Portfolio' })).not.toBeInTheDocument()
+        })
+
+        const invalidatedKeys = queryMocks.invalidateQueries.mock.calls.map(call => call[0]?.queryKey?.[0])
+        expect(invalidatedKeys).toEqual(['portfolios', 'prices', 'prices'])
+
+        consoleError.mockRestore()
+        alertSpy.mockRestore()
+    })
+
+    it('preserves unrelated dashboard state when canceling after a demo reset failure', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        queryMocks.invalidateQueries.mockRejectedValueOnce(new Error('Network unavailable'))
+
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey={null} />)
+
+        // Switch to Analytics tab as unrelated user state
+        fireEvent.click(await screen.findByRole('button', { name: /^analytics section$/i }))
+        expect(await screen.findByText('Performance Chart')).toBeInTheDocument()
+
+        const resetButtons = screen.getAllByRole('button', { name: /reset demo portfolio/i })
+        fireEvent.click(resetButtons[0])
+        fireEvent.click(screen.getByRole('button', { name: /^Reset Demo$/i }))
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(/Network unavailable/i)
+        expect(screen.getByRole('button', { name: /retry reset/i })).toBeInTheDocument()
+
+        // Cancel without refreshing the page — Analytics tab remains active
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+        expect(screen.queryByRole('heading', { name: 'Reset Demo Portfolio' })).not.toBeInTheDocument()
+        expect(screen.getByText('Performance Chart')).toBeInTheDocument()
+
         consoleError.mockRestore()
     })
 })

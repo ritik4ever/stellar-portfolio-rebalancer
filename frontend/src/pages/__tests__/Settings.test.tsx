@@ -44,6 +44,27 @@ describe('Settings Page', () => {
     expect(screen.getByText('Import')).toBeInTheDocument();
   });
 
+  it.each([1, 50])('saves the inclusive %s%% boundary exactly', (threshold) => {
+    renderSettings();
+    const input = screen.getByRole('spinbutton', { name: /drift threshold/i });
+    fireEvent.change(input, { target: { value: String(threshold) } });
+    expect(screen.getByText('Saved threshold is 5%.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    expect(localStorage.getItem('user-rebalance-threshold')).toBe(String(threshold));
+    expect(screen.getByText(`Saved threshold is ${threshold}%.`)).toBeInTheDocument();
+  });
+
+  it.each(['', '0.99', '50.01'])('preserves the saved value while rejecting the edit %s', (draft) => {
+    localStorage.setItem('user-rebalance-threshold', '20');
+    renderSettings();
+    const input = screen.getByRole('spinbutton', { name: /drift threshold/i });
+    fireEvent.change(input, { target: { value: draft } });
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
+    expect(localStorage.getItem('user-rebalance-threshold')).toBe('20');
+    expect(screen.getByText('Saved threshold is 20%.')).toBeInTheDocument();
+  });
+
   describe('import validation', () => {
     function createFile(data: unknown): File {
       const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });

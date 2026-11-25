@@ -1,5 +1,6 @@
 import type { Portfolio, PriceFeedMeta, PricesMap } from '../types/index.js'
 import { Dec } from '../utils/decimal.js'
+import { evaluateRebalancePlanBoundary, normalizeRebalanceThreshold, type RebalancePlanBoundaryDecision } from './rebalanceBoundary.js'
 
 export interface RebalanceAssetPlan {
     asset: string
@@ -34,6 +35,7 @@ export interface RebalancePlan {
     projectedAllocations: Record<string, number>
     prices?: PricesMap
     priceFeedMeta: PriceFeedMeta
+    boundary: RebalancePlanBoundaryDecision
 }
 
 const BASE_FEE_STROOPS = 100
@@ -112,30 +114,45 @@ export function buildRebalancePlan(
     prices: PricesMap,
     priceFeedMeta: PriceFeedMeta
 ): RebalancePlan {
+    const quoteSnapshot: PricesMap = Object.fromEntries(
+        Object.entries(prices).map(([asset, quote]) => [asset, { ...quote }])
+    )
+    const feedSnapshot = { ...priceFeedMeta }
     const assetSymbols = Array.from(new Set([
         ...Object.keys(portfolio.allocations || {}),
         ...Object.keys(portfolio.balances || {})
     ])).sort()
-    const valuesByAsset: Record<string, number> = {}
-    const totalValue = assetSymbols.reduce((sum, asset) => {
-        const balance = portfolio.balances?.[asset] ?? 0
-        const price = prices[asset]?.price ?? 0
-        const value = Dec.mul(balance, price)
-        valuesByAsset[asset] = value
-        return Dec.add(sum, value)
-    }, 0)
+    const holdings = assetSymbols.map((asset) => {
+        const currentBalance = portfolio.balances?.[asset] ?? 0
+        const price = quoteSnapshot[asset]?.price ?? 0
+        return {
+            asset,
+            price,
+            currentBalance,
+            currentValue: Dec.mul(currentBalance, price),
+            targetAllocationPercent: portfolio.allocations?.[asset] ?? 0,
+        }
+    })
+    const totalValue = holdings.reduce((sum, { currentValue }) => Dec.add(sum, currentValue), 0)
     const slippageTolerancePercent = portfolio.slippageTolerancePercent ?? portfolio.slippageTolerance ?? 1
     const estimatedSlippageBps = Math.round(slippageTolerancePercent * 100)
 
+    const valuations = holdings.map((holding) => {
+        const currentAllocationPercent = Dec.percentage(holding.currentValue, totalValue)
+        return {
+            ...holding,
+            currentAllocationPercent,
+            driftPercent: Dec.drift(currentAllocationPercent, holding.targetAllocationPercent),
+        }
+    })
+    const threshold = normalizeRebalanceThreshold(portfolio.threshold)
+    const rebalanceRequired = valuations.some(({ driftPercent }) => driftPercent > threshold)
+
     let tradeCount = 0
-    const assets = assetSymbols.map((asset): RebalanceAssetPlan => {
-        const price = prices[asset]?.price ?? 0
-        const currentBalance = portfolio.balances?.[asset] ?? 0
-        const currentValue = valuesByAsset[asset] ?? 0
-        const targetAllocationPercent = portfolio.allocations?.[asset] ?? 0
-        const currentAllocationPercent = Dec.percentage(currentValue, totalValue)
+    const assets = valuations.map((valuation): RebalanceAssetPlan => {
+        const { price, currentValue, currentBalance, targetAllocationPercent } = valuation
         const targetValue = Dec.targetValue(totalValue, targetAllocationPercent)
-        const diffValue = Dec.sub(targetValue, currentValue)
+        const diffValue = rebalanceRequired ? Dec.sub(targetValue, currentValue) : 0
         const buyAmount = diffValue > MIN_TRADE_VALUE_USD && price > 0
             ? Dec.assetQtyFromValue(diffValue, price)
             : 0
@@ -153,21 +170,15 @@ export function buildRebalancePlan(
         if (action !== 'hold') tradeCount += 1
 
         return {
-            asset,
+            ...valuation,
             action,
-            currentBalance,
-            currentValue,
-            currentAllocationPercent,
-            targetAllocationPercent,
             targetValue,
-            driftPercent: Dec.drift(currentAllocationPercent, targetAllocationPercent),
             buyAmount,
             sellAmount,
             tradeValue: Math.abs(diffValue) > MIN_TRADE_VALUE_USD ? Math.abs(diffValue) : 0,
             projectedBalance,
             projectedValue,
-            projectedAllocationPercent: 0,
-            price
+            projectedAllocationPercent: 0
         }
     })
 
@@ -180,9 +191,9 @@ export function buildRebalancePlan(
 
     const perTradeFeeXlm = readBaseFeeXlm()
     const totalFeeXlm = Dec.roundStellar(perTradeFeeXlm * tradeCount)
-    const xlmPriceUsd = prices.XLM?.price ?? 0
+    const xlmPriceUsd = quoteSnapshot.XLM?.price ?? 0
 
-    return {
+    const plan: Omit<RebalancePlan, 'boundary'> = {
         portfolioId: portfolio.id,
         totalValue,
         maxSlippagePercent: slippageTolerancePercent,
@@ -195,7 +206,12 @@ export function buildRebalancePlan(
         },
         assets,
         projectedAllocations,
-        prices: Object.keys(prices).length > 0 ? prices : undefined,
-        priceFeedMeta
+        prices: Object.keys(quoteSnapshot).length > 0 ? quoteSnapshot : undefined,
+        priceFeedMeta: feedSnapshot
+    }
+
+    return {
+        ...plan,
+        boundary: evaluateRebalancePlanBoundary(plan, threshold)
     }
 }

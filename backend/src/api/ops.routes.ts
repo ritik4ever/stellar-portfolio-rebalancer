@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express'
 import { pricesQuerySchema } from './validation.js'
 import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
+import { evaluatePriceQuoteBoundary } from '../services/priceQuoteBoundary.js'
 import {
     riskManagementService,
     rebalanceHistoryService,
@@ -60,13 +61,15 @@ opsRouter.get('/health', async (_req: Request, res: Response) => {
     let redisStart = Date.now()
     try {
         const redisAvailable = await isRedisAvailable()
+        const isDemo = featureFlags.demoMode || process.env.DEMO_MODE === 'true' || process.env.NODE_ENV === 'test'
         deps.redis = {
-            status: redisAvailable ? 'ok' : 'down',
+            status: redisAvailable ? 'ok' : isDemo ? 'degraded' : 'down',
             latency_ms: Date.now() - redisStart,
             last_checked: checkedAt
         }
     } catch {
-        deps.redis = { status: 'down', latency_ms: Date.now() - redisStart, last_checked: checkedAt }
+        const isDemo = featureFlags.demoMode || process.env.DEMO_MODE === 'true' || process.env.NODE_ENV === 'test'
+        deps.redis = { status: isDemo ? 'degraded' : 'down', latency_ms: Date.now() - redisStart, last_checked: checkedAt }
     }
 
     const horizonUrl = process.env.STELLAR_HORIZON_URL
@@ -851,7 +854,7 @@ opsRouter.get('/prices', async (req: Request, res: Response) => {
             res.setHeader('X-Cache', 'BYPASS')
         }
 
-        return ok(res, payload)
+        return ok(res, { ...payload, boundary: evaluatePriceQuoteBoundary(payload) })
     } catch (error) {
         logger.error('[ERROR] Prices endpoint failed', { error: getErrorObject(error) })
 

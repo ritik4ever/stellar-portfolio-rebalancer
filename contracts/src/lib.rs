@@ -56,19 +56,16 @@ fn guard_ledger_timestamp(env: &Env) -> u64 {
 
 #[contractimpl]
 impl PortfolioRebalancer {
-    /// Validate that `reflector_address` behaves like a Reflector oracle by
-    /// making a lightweight read-only call (`base()`) and checking the result.
-    ///
-    /// This is a best-effort guard, not a full interface conformance check:
-    /// - A malicious contract could implement `base()` but return wrong data in
-    ///   `lastprice()`. Further operations (rebalance, preview) will detect
-    ///   missing or invalid price data at the point of use.
-    /// - The goal is to fail early when the address is clearly not a Reflector
-    ///   contract (e.g. a typo, an EOA, or a random contract).
+    
     pub fn initialize(env: Env, admin: Address, reflector_address: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(Error::AlreadyInitialized);
         }
+
+        // The address that becomes the contract admin must authorize the
+        // initialization. Otherwise any caller could choose the admin and the
+        // oracle source that protect all subsequent privileged operations.
+        admin.require_auth();
 
         
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
@@ -85,17 +82,14 @@ impl PortfolioRebalancer {
             .instance()
             .set(&DataKey::EmergencyStop, &false);
         env.storage().instance().set(&DataKey::Initialized, &true);
-        // A freshly initialized contract has no legacy storage to migrate,
-        // so it starts on the current schema directly.
+        
         env.storage()
             .instance()
             .set(&DataKey::SchemaVersion, &CURRENT_STORAGE_SCHEMA_VERSION);
         Ok(())
     }
 
-    /// Currently persisted storage schema version (see
-    /// `CURRENT_STORAGE_SCHEMA_VERSION`), advanced automatically by
-    /// `execute_upgrade` via `migrate_storage`.
+    
     pub fn storage_schema_version(env: Env) -> u32 {
         upgrade::current_schema_version(&env)
     }
@@ -104,17 +98,7 @@ impl PortfolioRebalancer {
         env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 
-    /// Step 1 of the two-step admin transfer: nominate `new_admin`.
-    ///
-    /// Admin-only. Nomination alone grants `new_admin` nothing — every
-    /// admin-gated entrypoint keeps checking `DataKey::Admin`, which is only
-    /// rewritten once `new_admin` calls [`accept_admin`] itself. This makes
-    /// an admin handover impossible to complete against an address that
-    /// cannot sign (a typo, a contract with no auth path, a lost key).
-    ///
-    /// Calling this again replaces any proposal still in flight, so the
-    /// current admin can retarget or effectively cancel a mistaken nomination
-    /// by proposing a different address.
+    
     pub fn propose_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
@@ -130,15 +114,7 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
-    /// Step 2 of the two-step admin transfer: the pending admin claims the role.
-    ///
     
-    /// authorize this call itself, which is what proves the incoming admin
-    /// controls the key. On success `DataKey::Admin` is rewritten, the
-    /// pending nomination is cleared, and the previous admin loses every
-    /// admin right immediately.
-    ///
-    /// Returns [`Error::NoPendingAdmin`] when no transfer is in flight.
     pub fn accept_admin(env: Env) -> Result<(), Error> {
         let pending_admin: Address = env
             .storage()
@@ -155,8 +131,7 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
-    /// The address nominated by [`propose_admin`] and still awaiting its
-    /// [`accept_admin`] call, or `None` when no transfer is in flight.
+    
     pub fn get_pending_admin(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::PendingAdmin)
     }
@@ -183,10 +158,7 @@ impl PortfolioRebalancer {
         )
     }
 
-    /// Create a portfolio with full strategy configuration.
-    /// `strategy` defaults to [`StrategyType::Threshold`] for callers that
-    /// do not pass explicit strategy parameters (backward compatible with
-    /// the original [`create_portfolio`] signature).
+    
     pub fn create_portfolio_with_strategy(
         env: Env,
         user: Address,
@@ -212,11 +184,7 @@ impl PortfolioRebalancer {
         )
     }
 
-    /// Admin-only: store a new named on-chain allocation template.
-    ///
-    /// Templates are on-chain data (persistent storage), not hardcoded
-    /// constants, so the set of available templates can grow over time
-    /// without a contract upgrade.
+   
     pub fn create_template(
         env: Env,
         name: String,
@@ -357,7 +325,7 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::UserPortfolioCount(user.clone()), &(user_count + 1));
-        portfolio::emit_portfolio_created(&env, portfolio_id, user);
+        portfolio::emit_portfolio_created(&env, portfolio_id, user, rebalance_threshold);
         Ok(portfolio_id)
     }
 
@@ -736,6 +704,14 @@ impl PortfolioRebalancer {
 
     pub fn set_circuit_breaker_config(env: Env, config: CircuitBreakerConfig) {
         require_admin(&env);
+        
+        if config.spike_threshold_bps == 0 || config.spike_threshold_bps > 10000 {
+            panic!("spike_threshold_bps must be between 1 and 10000");
+        }
+        if config.window_seconds < MIN_CIRCUIT_BREAKER_WINDOW_SECONDS || config.window_seconds > MAX_CIRCUIT_BREAKER_WINDOW_SECONDS {
+            panic!("window_seconds must be between {} and {}", MIN_CIRCUIT_BREAKER_WINDOW_SECONDS, MAX_CIRCUIT_BREAKER_WINDOW_SECONDS);
+        }
+        
         env.storage()
             .instance()
             .set(&DataKey::CircuitBreakerConfig, &config);
@@ -746,11 +722,20 @@ impl PortfolioRebalancer {
             .instance()
             .get(&DataKey::CircuitBreakerConfig)
             .unwrap_or(CircuitBreakerConfig {
-                spike_threshold_bps: 500,
-                window_seconds: 3600,
+                spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+                window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
             })
     }
 
+    /// Updates target allocations for an existing portfolio and emits `("portfolio", "alloc_upd")`.
+    ///
+    /// # Target-weight invariant & event alignment (SPR-2026-194):
+    /// - Validates that asset weights satisfy `MIN_TARGET_WEIGHT_BPS..=MAX_TARGET_WEIGHT_BPS` (`1..=10,000` bps)
+    ///   and sum strictly to `TARGET_WEIGHT_SUM_BPS` (`10,000` bps / 100.00%).
+    /// - Rejection (under-allocation, over-allocation, zero weight, or unauthorized caller) fails atomically
+    ///   before storage mutation, emitting NO `alloc_upd` event and preserving stored weights and funds.
+    /// - On success, writes the updated portfolio to storage and emits `("portfolio", "alloc_upd")` once
+    ///   with `(portfolio_id, old_allocations, new_allocations)`.
     pub fn update_allocations(
         env: Env,
         portfolio_id: u64,
@@ -778,13 +763,7 @@ impl PortfolioRebalancer {
             .persistent()
             .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
 
-        env.events().publish(
-            (
-                symbol_short!("portfolio"),
-                Symbol::new(&env, "alloc_upd"),
-            ),
-            (portfolio_id, old_allocations, new_allocations),
-        );
+        portfolio::emit_allocation_updated(&env, portfolio_id, old_allocations, new_allocations);
 
         Ok(())
     }
@@ -1155,6 +1134,10 @@ impl PortfolioRebalancer {
             return Err(Error::InvalidAssetThreshold);
         }
         
+        if window_seconds < MIN_CIRCUIT_BREAKER_WINDOW_SECONDS || window_seconds > MAX_CIRCUIT_BREAKER_WINDOW_SECONDS {
+            return Err(Error::InvalidAssetThreshold);
+        }
+        
         portfolio.circuit_breaker_config = CircuitBreakerConfig {
             spike_threshold_bps,
             window_seconds,
@@ -1281,13 +1264,24 @@ impl PortfolioRebalancer {
 
     fn load_portfolio(env: &Env, portfolio_id: u64) -> Result<Portfolio, Error> {
         // Try V2 (strategy-aware) first.
-        if let Some(p) = env.storage().persistent().get(&DataKey::PortfolioV2(portfolio_id)) {
+        let v2_key = DataKey::PortfolioV2(portfolio_id);
+        if let Some(p) = env.storage().persistent().get(&v2_key) {
+            env.storage().persistent().extend_ttl(
+                &v2_key,
+                PORTFOLIO_TTL_RENEWAL_THRESHOLD_LEDGERS,
+                PORTFOLIO_TTL_EXTEND_TO_LEDGERS,
+            );
             return Ok(p);
         }
         // Fall back: attempt migration from legacy (pre-strategy) storage.
         if let Some(legacy) =
             env.storage().persistent().get::<DataKey, LegacyPortfolio>(&DataKey::Portfolio(portfolio_id))
         {
+            env.storage().persistent().extend_ttl(
+                &DataKey::Portfolio(portfolio_id),
+                PORTFOLIO_TTL_RENEWAL_THRESHOLD_LEDGERS,
+                PORTFOLIO_TTL_EXTEND_TO_LEDGERS,
+            );
             let portfolio: Portfolio = legacy.into();
             env.storage()
                 .persistent()
@@ -1539,6 +1533,11 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
+        env.storage().persistent().extend_ttl(
+            &DataKey::PortfolioV2(portfolio_id),
+            PORTFOLIO_TTL_RENEWAL_THRESHOLD_LEDGERS,
+            PORTFOLIO_TTL_EXTEND_TO_LEDGERS,
+        );
 
         let record = RebalanceRecord {
             timestamp: current_time,
@@ -1557,14 +1556,22 @@ impl PortfolioRebalancer {
         if let Some(admin) = override_admin {
             portfolio::emit_cooldown_override(env, portfolio_id, admin, current_time);
         }
-        portfolio::emit_portfolio_rebalanced(env, portfolio_id, current_time);
-
         let snapshot = NavSnapshot {
             usd_nav: total_value,
             sequence: env.ledger().sequence(),
             timestamp: current_time,
         };
         nav::save_nav_snapshot(env, portfolio_id, &snapshot)?;
+
+        portfolio::emit_portfolio_rebalanced(env, portfolio_id, current_time);
+        portfolio::emit_rebalance_committed(
+            env,
+            portfolio_id,
+            current_time,
+            &trades,
+            &portfolio.current_balances,
+            total_fee_paid,
+        );
 
         Ok(())
     }

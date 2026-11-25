@@ -112,7 +112,7 @@ reads or writes it.
 | Constant | Current value | Location |
 |---|---|---|
 | `CONTRACT_VERSION` | `1` | `contracts/src/types.rs` |
-| `CONTRACT_EVENT_SCHEMA_VERSION` | `1` | `contracts/src/types.rs` |
+| `CONTRACT_EVENT_SCHEMA_VERSION` | `2` | `contracts/src/types.rs` |
 | Backend schema version | `1` | `backend/src/config/contractEventSchema.ts` |
 | Frontend schema version | `1` | `frontend/src/lib/contractCapabilities.ts` |
 

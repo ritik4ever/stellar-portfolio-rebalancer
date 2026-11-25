@@ -113,7 +113,7 @@ export const Modal: React.FC<ModalProps> = ({ open, title, description, onClose,
       <div className="absolute inset-0 bg-black/60 dark:bg-black/70" aria-hidden onClick={onClose} />
       <div
         ref={modalRef}
-        className="relative w-full max-w-md rounded-xl bg-white dark:bg-gray-800 p-6 shadow-xl"
+        className="relative w-full max-w-md rounded-xl bg-white dark:bg-gray-800 p-4 sm:p-6 shadow-xl overflow-x-hidden"
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
@@ -123,7 +123,7 @@ export const Modal: React.FC<ModalProps> = ({ open, title, description, onClose,
         {title && <h2 id={titleId} className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h2>}
         {description && <p id={descriptionId} className="mt-1 text-sm text-gray-600 dark:text-gray-400">{description}</p>}
         <div className="mt-4">{children}</div>
-        {footer && <div className="mt-6 flex justify-end gap-3">{footer}</div>}
+        {footer && <div className="mt-6 flex flex-wrap justify-end gap-2">{footer}</div>}
       </div>
     </div>
   )

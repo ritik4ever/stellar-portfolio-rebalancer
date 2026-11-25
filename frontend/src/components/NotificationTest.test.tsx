@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { NotificationTest } from './NotificationTest'
-import { api } from '../config/api'
+import { api, ApiClientError } from '../config/api'
 
 function renderWithQuery(ui: React.ReactElement) {
     const client = new QueryClient({
@@ -81,7 +81,7 @@ describe('NotificationTest', () => {
         expect(screen.getByRole('button', { name: /retry rebalance test/i })).toBeTruthy()
     })
 
-    it('shows webhook delivery destination when webhook is configured', async () => {
+    it('reports webhook delivery without showing the callback URL', async () => {
         vi.spyOn(api, 'post').mockResolvedValue({
             message: 'Sent',
             sentTo: { email: null, webhook: 'https://hooks.example.com/notify' },
@@ -92,7 +92,8 @@ describe('NotificationTest', () => {
 
         fireEvent.click(screen.getByRole('button', { name: /^test circuit breaker$/i }))
 
-        expect(await screen.findByText(/https:\/\/hooks\.example\.com\/notify/i)).toBeTruthy()
+        expect(await screen.findByText(/Saved webhook endpoint/)).toBeTruthy()
+        expect(screen.queryByText('https://hooks.example.com/notify')).toBeNull()
     })
 
     it('shows Re-test label after a result is already present', async () => {
@@ -215,6 +216,55 @@ describe('NotificationTest', () => {
         fireEvent.click(screen.getByRole('button', { name: /test all notification types/i }))
 
         expect(await screen.findByText(/test notification failed/i)).toBeTruthy()
+    })
+
+    // ── Accessibility: outcome announcements (SPR-2026-078) ───────────────
+
+    it('announces a non-2xx test delivery failure as an alert', async () => {
+        vi.spyOn(api, 'post').mockRejectedValue(
+            new ApiClientError('Webhook endpoint responded with status 500', 500, 'HTTP_ERROR')
+        )
+
+        renderWithQuery(<NotificationTest userId="user-1" />)
+
+        fireEvent.click(screen.getByRole('button', { name: /^test rebalance$/i }))
+
+        const alert = await screen.findByRole('alert')
+        expect(alert).toHaveTextContent(/webhook endpoint responded with status 500/i)
+        expect(screen.getByRole('button', { name: /retry rebalance test/i })).toBeTruthy()
+    })
+
+    it('announces a successful test result as a polite status, not an alert', async () => {
+        vi.spyOn(api, 'post').mockResolvedValue({
+            message: 'Test notification sent successfully',
+            sentTo: { email: 'user@example.com', webhook: null },
+            timestamp: '2026-01-01T12:00:00.000Z',
+        } as any)
+
+        renderWithQuery(<NotificationTest userId="user-1" />)
+
+        fireEvent.click(screen.getByRole('button', { name: /^test rebalance$/i }))
+
+        const status = await screen.findByRole('status', { name: /rebalance test result/i })
+        expect(status).toHaveTextContent(/test notification sent successfully/i)
+        expect(screen.queryByRole('alert')).toBeNull()
+    })
+
+    it('announces a per-event failure from test-all as an alert', async () => {
+        const ts = new Date().toISOString()
+        vi.spyOn(api, 'post').mockResolvedValue({
+            results: [
+                { eventType: 'rebalance', success: false, error: 'Endpoint returned 502', sentTo: null, timestamp: ts },
+                { eventType: 'circuitBreaker', success: true, sentTo: { email: 'u@e.com', webhook: null }, timestamp: ts },
+            ],
+        } as any)
+
+        renderWithQuery(<NotificationTest userId="user-1" />)
+
+        fireEvent.click(screen.getByRole('button', { name: /test all notification types/i }))
+
+        const alert = await screen.findByRole('alert')
+        expect(alert).toHaveTextContent(/endpoint returned 502/i)
     })
 
     it('clears mutation banners and result cards when clearing results', async () => {

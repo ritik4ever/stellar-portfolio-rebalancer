@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, Env, Map, Symbol};
 use crate::reflector::ReflectorClient;
-use crate::types::{CircuitBreakerConfig, DataKey, Error, PauseReason};
+use crate::types::{CircuitBreakerConfig, DataKey, Error, PauseReason, MIN_CIRCUIT_BREAKER_WINDOW_SECONDS};
 
 pub fn check_volatility(
     env: &Env,
@@ -9,7 +9,7 @@ pub fn check_volatility(
     current_prices: &Map<Address, i128>,
 ) -> Result<(), Error> {
     for (asset, current_price) in current_prices.iter() {
-        if config.window_seconds < 60 {
+        if config.window_seconds < MIN_CIRCUIT_BREAKER_WINDOW_SECONDS {
             return Err(Error::InvalidThreshold);
         }
         
