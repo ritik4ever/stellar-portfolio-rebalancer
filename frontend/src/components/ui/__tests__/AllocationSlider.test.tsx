@@ -1,8 +1,11 @@
 import React from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { AllocationSlider } from '../AllocationSlider'
 
 describe('AllocationSlider', () => {
+  afterEach(cleanup)
+
   it('renders correctly with initial value', () => {
     render(<AllocationSlider label="Stock" value={50} onChange={() => {}} />)
     expect(screen.getByLabelText('Stock')).toBeInTheDocument()
@@ -10,7 +13,7 @@ describe('AllocationSlider', () => {
   })
 
   it('handles regular arrow keys to increment/decrement value', () => {
-    const handleChange = jest.fn()
+    const handleChange = vi.fn()
     render(<AllocationSlider label="Stock" value={50} onChange={handleChange} step={1} />)
     
     const slider = screen.getByRole('slider')
@@ -25,7 +28,7 @@ describe('AllocationSlider', () => {
   })
 
   it('handles Shift + arrow keys for larger increments', () => {
-    const handleChange = jest.fn()
+    const handleChange = vi.fn()
     render(<AllocationSlider label="Stock" value={50} onChange={handleChange} step={1} />)
     
     const slider = screen.getByRole('slider')

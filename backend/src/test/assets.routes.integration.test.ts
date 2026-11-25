@@ -10,6 +10,7 @@ let app: Express
 let testDbPath: string
 let adminKp: Keypair
 const envBackup: NodeJS.ProcessEnv = { ...process.env }
+const origFetch = global.fetch
 
 function makeAdminHeaders(kp: Keypair) {
     const msg = Date.now().toString()
@@ -22,6 +23,21 @@ function makeAdminHeaders(kp: Keypair) {
 }
 
 beforeAll(async () => {
+    global.fetch = vi.fn().mockImplementation(async (input: any) => {
+        const urlStr = String(input)
+        const idMatch = urlStr.match(/ids=([^&]+)/)
+        const ids = idMatch ? decodeURIComponent(idMatch[1]).split(',') : ['stellar', 'bitcoin', 'ethereum', 'usd-coin']
+        const data: Record<string, any> = {}
+        for (const id of ids) {
+            data[id] = { usd: 1.0 }
+        }
+        return {
+            ok: true,
+            status: 200,
+            json: async () => data,
+        }
+    }) as any
+
     const testDir = join(tmpdir(), `stellar-assets-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
     mkdirSync(testDir, { recursive: true })
     testDbPath = join(testDir, 'assets-test.db')
@@ -52,6 +68,7 @@ beforeAll(async () => {
 }, 60_000)
 
 afterAll(() => {
+    global.fetch = origFetch
     vi.unstubAllEnvs()
     process.env = envBackup
     if (testDbPath) {

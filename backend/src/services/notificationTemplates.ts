@@ -6,9 +6,11 @@ import type { NotificationEventKey } from './notificationPreferences.js'
 
 export interface RebalanceData {
   portfolioId: string
-  trades: number
-  gasUsed: string
-  trigger: string
+  trades?: number
+  gasUsed?: string
+  trigger?: string
+  status?: 'completed' | 'failed'
+  failureReason?: string
 }
 
 export interface CircuitBreakerData {
@@ -61,9 +63,13 @@ const templates: {
   riskChange: TemplateEntry<RiskChangeData>
 } = {
   rebalance: {
-    title: () => 'Portfolio Rebalanced',
-    message: (d) =>
-      `Your portfolio has been rebalanced. ${d.trades} trade${d.trades !== 1 ? 's' : ''} executed with ${d.gasUsed} gas used.`,
+    title: (d) => (d.status === 'failed' ? 'Portfolio Rebalance Failed' : 'Portfolio Rebalanced'),
+    message: (d) => {
+      if (d.status === 'failed') {
+        return `Rebalance failed for portfolio ${d.portfolioId}: ${d.failureReason || 'Execution error'}.`
+      }
+      return `Your portfolio has been rebalanced. ${d.trades ?? 0} trade${d.trades !== 1 ? 's' : ''} executed with ${d.gasUsed ?? '0 XLM'} gas used.`
+    },
   },
   circuitBreaker: {
     title: () => 'Circuit Breaker Triggered',

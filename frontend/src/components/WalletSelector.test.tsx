@@ -322,7 +322,7 @@ describe("WalletSelector", () => {
 
       await waitFor(() => {
         expect(mockOnError).toHaveBeenCalledWith(
-          "freighter is not installed. Please install it and refresh.",
+          "Freighter is not available. Make sure the extension is installed, enabled and unlocked, then select it again. There is no need to reload the page.",
         );
         expect(mockOnConnect).not.toHaveBeenCalled();
       });
@@ -343,7 +343,7 @@ describe("WalletSelector", () => {
 
       await waitFor(() => {
         expect(mockOnError).toHaveBeenCalledWith(
-          "Connection was declined. Please approve in your wallet.",
+          "Connection was declined in your wallet, so nothing was connected. Select a wallet to try again.",
         );
         expect(mockOnConnect).not.toHaveBeenCalled();
       });
@@ -364,7 +364,7 @@ describe("WalletSelector", () => {
 
       await waitFor(() => {
         expect(mockOnError).toHaveBeenCalledWith(
-          "Network mismatch. Please check your wallet network settings.",
+          "Your wallet is on a different network. This app only accepts Testnet: switch your wallet to Testnet, then select it again.",
         );
         expect(mockOnConnect).not.toHaveBeenCalled();
       });
@@ -385,7 +385,7 @@ describe("WalletSelector", () => {
 
       await waitFor(() => {
         expect(mockOnError).toHaveBeenCalledWith(
-          "Connection timed out. Please try again.",
+          "Connection timed out before your wallet responded, so nothing was connected. Select a wallet to try again.",
         );
         expect(mockOnConnect).not.toHaveBeenCalled();
       });
@@ -426,7 +426,7 @@ describe("WalletSelector", () => {
       // Should immediately show connecting state
       await waitFor(() => {
         expect(screen.getByText("Connecting...")).toBeTruthy();
-        expect(freighterButton).toBeDisabled();
+        expect(freighterButton).toHaveAttribute("aria-disabled", "true");
       });
     });
 
@@ -443,7 +443,7 @@ describe("WalletSelector", () => {
       fireEvent.click(freighterButton!);
 
       await waitFor(() => {
-        expect(freighterButton).not.toBeDisabled();
+        expect(freighterButton).not.toHaveAttribute("aria-disabled");
         expect(screen.queryByText("Connecting...")).not.toBeInTheDocument();
       });
     });
@@ -461,7 +461,7 @@ describe("WalletSelector", () => {
       fireEvent.click(freighterButton!);
 
       await waitFor(() => {
-        expect(freighterButton).not.toBeDisabled();
+        expect(freighterButton).not.toHaveAttribute("aria-disabled");
         expect(screen.queryByText("Connecting...")).not.toBeInTheDocument();
       });
     });
@@ -555,9 +555,10 @@ describe("WalletSelector", () => {
 
       // Only freighter button should be disabled (toggle stays enabled)
       await waitFor(() => {
-        expect(freighterButton).toBeDisabled();
+        expect(freighterButton).toHaveAttribute("aria-disabled", "true");
       });
-      expect(rabetButton).not.toBeDisabled();
+      // one wallet request at a time: the others are inert until it settles
+      expect(rabetButton).toHaveAttribute("aria-disabled", "true");
       expect(toggleBtn).not.toBeDisabled();
     });
   });

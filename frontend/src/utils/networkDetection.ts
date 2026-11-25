@@ -1,5 +1,19 @@
 export type StellarNetwork = 'testnet' | 'mainnet' | 'standalone' | 'futurenet' | 'unknown'
 
+/** Human-readable network names shown in prompts, banners and announcements. */
+export const NETWORK_LABELS: Record<StellarNetwork, string> = {
+  testnet: 'Testnet',
+  mainnet: 'Mainnet (Public)',
+  standalone: 'Standalone / Sandbox',
+  futurenet: 'Futurenet',
+  unknown: 'Unknown',
+}
+
+export function networkLabel(network: StellarNetwork | string | null | undefined): string {
+  if (!network) return NETWORK_LABELS.unknown
+  return NETWORK_LABELS[network as StellarNetwork] ?? network
+}
+
 export interface NetworkDetectionResult {
   configuredNetwork: StellarNetwork
   walletNetwork: StellarNetwork | null
