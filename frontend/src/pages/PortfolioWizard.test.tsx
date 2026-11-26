@@ -11,7 +11,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import PortfolioWizard from './PortfolioWizard';
 import { api } from '../config/api';
 import { clearWizardDraft, saveWizardDraft, loadWizardDraft } from '../utils/wizardDraft';
+import { walletManager } from '../utils/walletManager';
 import i18n from '../i18n';
+import userEvent from '@testing-library/user-event';
 
 // Mock framer-motion to simplify DOM structure
 vi.mock('framer-motion', () => ({
@@ -223,6 +225,144 @@ describe('PortfolioWizard Page', () => {
     expect(screen.queryByText(/language changed while editing/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /next/i })).toBeEnabled();
     await i18n.changeLanguage('en');
+  });
+
+  it('covers keyboard focus, names, and announcements for a decimal comma locale and high-precision token amount', async () => {
+    renderWizard();
+    fireEvent.change(screen.getByLabelText(/rebalancing strategy/i), { target: { value: 'dca' } });
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: /next/i }));
+
+    const amountInput = screen.getByLabelText('DCA Amount');
+    expect(amountInput).toHaveAttribute('inputmode', 'decimal');
+
+    // Switch to German (decimal comma locale)
+    await i18n.changeLanguage('de');
+
+    // Enter high-precision amount (7 decimal places / stroop)
+    fireEvent.change(amountInput, { target: { value: '0,0000001' } });
+    expect(screen.getByText(/formatted \(de\): 0,0000001/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Localized amount: 0,0000001')).toBeInTheDocument();
+
+    // Enter large amount with decimals
+    fireEvent.change(amountInput, { target: { value: '1234,5678' } });
+    expect(screen.getByText(/formatted \(de\): 1\.234,5678/i)).toBeInTheDocument();
+
+    // Verify accessible description includes helper and formatted display
+    expect(amountInput).toHaveAttribute(
+      'aria-describedby',
+      expect.stringContaining('dca-amount-help')
+    );
+    expect(amountInput).toHaveAttribute(
+      'aria-describedby',
+      expect.stringContaining('dca-amount-localized-display')
+    );
+
+    // Verify review summary displays DCA schedule with accessible label
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    expect(screen.getByLabelText(/dca schedule: 1234\.5678 every 7 days/i)).toBeInTheDocument();
+
+    await i18n.changeLanguage('en');
+  });
+
+  it('manages keyboard focus, alerts, and live announcements during a locale change during edit', async () => {
+    renderWizard();
+    fireEvent.change(screen.getByLabelText(/rebalancing strategy/i), { target: { value: 'dca' } });
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: /next/i }));
+
+    const amountInput = screen.getByLabelText('DCA Amount');
+    fireEvent.focus(amountInput);
+    fireEvent.change(amountInput, { target: { value: '500.25' } });
+
+    // Locale change during edit
+    await i18n.changeLanguage('de');
+
+    // Screen reader alert & live region announcement
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/language changed while editing/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/language changed to de while editing/i);
+    expect(amountInput).toHaveAttribute('aria-invalid', 'true');
+    expect(amountInput).toHaveAttribute(
+      'aria-describedby',
+      expect.stringContaining('dca-amount-locale-review')
+    );
+
+    // Confirm amount button is keyboard operable and restores focus
+    const confirmBtn = screen.getByRole('button', { name: /confirm amount/i });
+    expect(confirmBtn).toBeInTheDocument();
+    confirmBtn.focus();
+    expect(confirmBtn).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/dca amount confirmed/i);
+    expect(amountInput).toHaveFocus();
+    expect(amountInput).toHaveAttribute('aria-invalid', 'false');
+
+    await i18n.changeLanguage('en');
+  });
+
+  it('allows keyboard and screen-reader users to abandon the wizard flow', async () => {
+    const { onNavigate } = renderWizard();
+
+    // Abandon via header button with keyboard
+    const headerAbandonBtn = screen.getByRole('button', { name: /abandon wizard and return to dashboard/i });
+    expect(headerAbandonBtn).toBeInTheDocument();
+    headerAbandonBtn.focus();
+    expect(headerAbandonBtn).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    expect(onNavigate).toHaveBeenCalledWith('dashboard');
+
+    // Abandon via footer Cancel button with keyboard
+    const cancelBtn = screen.getByRole('button', { name: /cancel and abandon wizard/i });
+    expect(cancelBtn).toBeInTheDocument();
+    cancelBtn.focus();
+    expect(cancelBtn).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    expect(onNavigate).toHaveBeenCalledTimes(2);
+  });
+
+  it('announces localized amount in polite live region during ordinary edits', async () => {
+    renderWizard();
+    fireEvent.change(screen.getByLabelText(/rebalancing strategy/i), { target: { value: 'dca' } });
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: /next/i }));
+
+    const amountInput = screen.getByLabelText('DCA Amount');
+    fireEvent.change(amountInput, { target: { value: '150.5' } });
+    expect(screen.getByRole('status')).toHaveTextContent(/dca amount: 150\.5/i);
+  });
+
+  it('aborts portfolio creation if user cancels while wallet signature is pending', async () => {
+    mockMutateAsync.mockResolvedValue({ id: 'dca-portfolio' });
+    let resolveSign: (val: any) => void;
+    const signSpy = vi.spyOn(walletManager, 'signTransaction').mockImplementation(() => {
+      return new Promise((resolve) => {
+        resolveSign = resolve;
+      });
+    });
+
+    try {
+      const { onNavigate } = renderWizard();
+      for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: /next/i }));
+
+      const signButton = screen.getByRole('button', { name: /sign with freighter/i });
+      fireEvent.click(signButton);
+      expect(signButton).toHaveAttribute('aria-busy', 'true');
+
+      // Cancel while wallet signing is pending using keyboard
+      const cancelBtn = screen.getByRole('button', { name: /cancel and abandon wizard/i });
+      cancelBtn.focus();
+      expect(cancelBtn).toHaveFocus();
+      await userEvent.keyboard('{Enter}');
+      expect(onNavigate).toHaveBeenCalledWith('dashboard');
+
+      // Resolve signing after user has cancelled
+      resolveSign!('mock-signature');
+      await waitFor(() => {
+        expect(mockMutateAsync).not.toHaveBeenCalled();
+      });
+    } finally {
+      signSpy.mockRestore();
+    }
   });
 
   it('explains decimal-comma boundaries and submits the canonical seven-place amount', async () => {
