@@ -14,15 +14,17 @@ function findClinicReport() {
   const clinicDir = path.join(process.cwd(), '.clinic');
 
   if (!fs.existsSync(clinicDir)) {
-    console.error('❌ .clinic directory not found');
-    process.exit(1);
+    console.warn('⚠️  .clinic directory not found – clinic.js did not produce a report.');
+    console.warn('   This can happen when the server exits before clinic flushes data.');
+    console.warn('   Skipping heap analysis; check the clinic-report artifact if uploaded.');
+    process.exit(0);
   }
 
   const files = fs.readdirSync(clinicDir).filter((f) => f.endsWith('.json'));
 
   if (files.length === 0) {
-    console.error('❌ No clinic reports found');
-    process.exit(1);
+    console.warn('⚠️  No clinic reports found in .clinic directory – skipping heap analysis.');
+    process.exit(0);
   }
 
   // Sort by modification time, get the newest

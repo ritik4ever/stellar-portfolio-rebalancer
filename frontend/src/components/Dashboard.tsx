@@ -1,12 +1,13 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap, Copy, Share2, Settings, WalletCards } from 'lucide-react'
+import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Copy, Share2, Settings, WalletCards } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import LanguageSelector from './LanguageSelector'
 import { useTheme } from '../context/ThemeContext'
 import AssetList from './AssetList'
 import RebalanceHistory from './RebalanceHistory'
+import RebalanceConfirm from './RebalanceConfirm'
 import PerformanceChart from './PerformanceChart'
 import AllocationHistory from './AllocationHistory'
 import NotificationPreferences from './NotificationPreferences'
@@ -17,11 +18,10 @@ import ExportPDF from './ExportPDF'
 
 import { API_CONFIG } from '../config/api'
 import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
-import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
+import { useUserPortfolios, usePortfolioDetails, isUnavailablePortfolio, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
 import { dashboardCopy } from '../content/uiCopy'
 import { buildPortfolioCloneDraft, savePortfolioCloneDraft } from '../utils/portfolioCloneDraft'
 import { usePrices, formatPriceFeedSummary, priceKeys } from '../hooks/queries/usePricesQuery'
-import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, ENDPOINTS } from '../config/api'
 import { logout as authLogout } from '../services/authService'
@@ -31,6 +31,7 @@ import { downloadPortfolioExport } from '../config/api'
 import { usePortfolioLiveFeed } from '../hooks/usePortfolioLiveFeed'
 import { DriftGaugeGrid, type DriftGaugeAsset } from './DriftGauge'
 import { trackEvent } from '../analytics'
+import { useDialogFocus } from '../hooks/useDialogFocus'
 import PriceCandlestick, { type RebalanceEvent as CandlestickRebalanceEvent } from './PriceCandlestick'
 
 interface DashboardProps {
@@ -42,9 +43,17 @@ type DashboardPriceRow = { price?: number; change?: number;[key: string]: unknow
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications'>('overview')
+    // Polite screen-reader announcements for navigation and wallet-state changes.
+    const [navAnnouncement, setNavAnnouncement] = useState('')
+    const selectTab = useCallback((tab: 'overview' | 'analytics' | 'notifications', label: string) => {
+        setActiveTab(tab)
+        setNavAnnouncement(`${label} section shown`)
+    }, [])
+    const [reviewPortfolioId, setReviewPortfolioId] = useState<string | null>(null)
     const [rebalanceNotice, setRebalanceNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
     const [candlestickAsset, setCandlestickAsset] = useState<string>('XLM')
 
+    const headingRef = useRef<HTMLHeadingElement>(null)
     const { isDark } = useTheme()
     const queryClient = useQueryClient()
 
@@ -64,6 +73,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         data: portfolioDetails,
         isLoading: detailsLoading,
         isError: detailsLoadError,
+        isFetching: detailsFetching,
         error: detailsError,
         refetch: refetchPortfolioDetails,
     } = usePortfolioDetails(latestPortfolioId)
@@ -76,10 +86,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         isError: pricesLoadError,
         refetch: refetchPrices,
     } = usePrices()
-    const { data: rebalanceEstimate } = useRebalanceEstimate(latestPortfolioId)
     const { data: costSummary, isLoading: costSummaryLoading } = usePortfolioCostSummary(latestPortfolioId)
-
-    const executeRebalanceMutation = useExecuteRebalanceMutation(latestPortfolioId)
 
     const demoData = {
         id: 'demo',
@@ -100,14 +107,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         ETH: { price: 4200, change: -1.50 }
     }
 
-    const portfolioData = publicKey ? (portfolioDetails || (portfolios && portfolios.length > 0 ? portfolios[portfolios.length - 1] : null)) : demoData
+    const portfolioUnavailable = Boolean(latestPortfolioId && isUnavailablePortfolio(detailsError))
+    const balancesPending = Boolean(latestPortfolioId && detailsLoading)
+    const balancesFailed = Boolean(latestPortfolioId && detailsLoadError && !portfolioDetails)
+    const balancesUnavailable = balancesPending || balancesFailed
+    const portfolioSummary = portfolios?.[portfolios.length - 1]
+    const portfolioData = publicKey
+        ? (portfolioDetails ? { ...portfolioSummary, ...portfolioDetails } : portfolioSummary)
+        : demoData
     const priceRows = priceBundle?.prices ?? {}
     const hasLivePriceRows = typeof priceRows === 'object' && Object.keys(priceRows).length > 0
     const prices: Record<string, DashboardPriceRow> = hasLivePriceRows
         ? (priceRows as Record<string, DashboardPriceRow>)
         : demoPrices
 
-    const loading = publicKey ? (portfoliosLoading || (latestPortfolioId ? detailsLoading : false) || (API_CONFIG.USE_BROWSER_PRICES ? false : pricesLoading)) : false
+    const loading = publicKey ? (portfoliosLoading || (!latestPortfolioId && !API_CONFIG.USE_BROWSER_PRICES && pricesLoading)) : false
     const routeDataUnavailable = Boolean(
         publicKey &&
         portfoliosLoadError &&
@@ -115,18 +129,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         (!portfolios || portfolios.length === 0)
     )
 
-    const allocationData = portfolioData?.allocations?.map((alloc: any, index: number) => ({
+    const allocations = portfolioData?.allocations
+    const allocationData = Array.isArray(allocations) ? allocations.map((alloc: any, index: number) => ({
         name: alloc.asset,
         value: alloc.target || alloc.percentage,
         amount: alloc.amount || 0,
         color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'][index] || '#6B7280'
-    })) || []
+    })) : []
 
     if (portfolioData?.allocations && typeof portfolioData.allocations === 'object' && !Array.isArray(portfolioData.allocations)) {
         const allocationsArray = Object.entries(portfolioData.allocations).map(([asset, percentage], index) => ({
             name: asset,
             value: percentage as number,
-            amount: (portfolioData.totalValue || 10000) * (percentage as number) / 100,
+            amount: (balancesUnavailable ? 0 : (portfolioData.totalValue ?? 0)) * (percentage as number) / 100,
             color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'][index] || '#6B7280'
         }))
         allocationData.splice(0, allocationData.length, ...allocationsArray)
@@ -150,7 +165,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             typeof (portfolioData as any)?.threshold === 'number'
                 ? (portfolioData as any).threshold
                 : 5 // sane default
-        return { name: asset.name, target: asset.value, current, threshold }
+        const rawTimestamp = (prices as Record<string, any>)?.[asset.name]?.timestamp
+        const asOfMs = typeof rawTimestamp === 'number' && Number.isFinite(rawTimestamp)
+            ? (rawTimestamp < 1e12 ? rawTimestamp * 1000 : rawTimestamp)
+            : priceBundle?.feedMeta?.resolvedAtMs
+        return { name: asset.name, target: asset.value, current, threshold, asOf: asOfMs }
     })
 
     const missingPriceAssets = allocationData.filter((asset: any) => {        const row = prices[asset.name]
@@ -173,10 +192,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const feedMeta = priceBundle?.feedMeta
     const showPriceQualityNote = feedMeta?.degraded || hasPartialPriceData || feedMeta?.staleOrLimited
 
-    const estimateXlm = rebalanceEstimate?.gasEstimateXlm ?? 0
-    const estimateUsd = rebalanceEstimate?.gasEstimateUsd ?? 0
-    const hasHighGasWarning = rebalanceEstimate?.gasWarning || estimateXlm > 0.5
-
     const refreshData = useCallback(async () => {
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
@@ -194,24 +209,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         await refreshData()
     }, [refetchPortfolioDetails, refetchPortfolios, refetchPrices, refreshData])
 
-    const executeRebalance = useCallback(async () => {
-        try {
-            const result = await executeRebalanceMutation.mutateAsync()
-            trackEvent('rebalance_executed', { portfolioId: latestPortfolioId ?? 'unknown' })
-            setRebalanceNotice({
-                type: 'success',
-                message: `Rebalance executed successfully. Gas used: ${result.result?.gasUsed || 'N/A'}`,
-            })
-        } catch (error: any) {
-            console.error('Rebalance failed:', error)
-            const msg = error.message ?? 'Rebalance failed. Please try again.'
-            const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
-            setRebalanceNotice({
-                type: 'error',
-                message: isSlippage ? `Slippage too high: ${msg}` : msg,
-            })
-        }
-    }, [executeRebalanceMutation])
+    const handleRebalanceSuccess = (result: { txId?: string; result?: { gasUsed?: string } }) => {
+        trackEvent('rebalance_executed', { portfolioId: latestPortfolioId ?? 'unknown' })
+        const txIdPart = result.txId ? ` · TX: ${result.txId}` : ''
+        setRebalanceNotice({
+            type: 'success',
+            message: `Rebalance executed successfully. Gas used: ${result.result?.gasUsed || 'N/A'}${txIdPart}`,
+        })
+    }
 
     const dismissRebalanceNotice = useCallback(() => {
         setRebalanceNotice(null)
@@ -223,24 +228,110 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         return () => clearTimeout(timer)
     }, [rebalanceNotice])
 
+    type DemoResetStep = 'portfolios' | 'prices'
     const [showDemoResetConfirm, setShowDemoResetConfirm] = useState(false)
     const [resettingDemo, setResettingDemo] = useState(false)
+    const [demoResetError, setDemoResetError] = useState<{
+        failedStep: DemoResetStep
+        completedSteps: DemoResetStep[]
+        message: string
+    } | null>(null)
+    const demoResetInFlightRef = React.useRef(false)
+
+    const closeDemoResetModal = useCallback(() => {
+        if (resettingDemo) return
+        setShowDemoResetConfirm(false)
+        setDemoResetError(null)
+    }, [resettingDemo])
+
+    // Dialog focus management for the demo reset confirmation.
+    const demoResetDialogRef = useRef<HTMLDivElement>(null)
+    const demoResetInitialFocusRef = useRef<HTMLButtonElement>(null)
+    const mobileRefreshRef = useRef<HTMLButtonElement>(null)
+    useDialogFocus(showDemoResetConfirm, demoResetDialogRef, {
+        onClose: closeDemoResetModal,
+        initialFocusRef: demoResetInitialFocusRef,
+        fallbackFocusRef: mobileRefreshRef,
+    })
+
+    // The demo reset only applies without a wallet. If a wallet connects (or
+    // disconnects) while the dialog or the action bar is in use, close the
+    // dialog that no longer applies and announce what changed, instead of
+    // leaving a dead dialog or silently re-labelled controls.
+    const prevHasWalletRef = useRef(Boolean(publicKey))
+    useEffect(() => {
+        const hasWallet = Boolean(publicKey)
+        if (prevHasWalletRef.current === hasWallet) return
+        prevHasWalletRef.current = hasWallet
+        if (hasWallet) {
+            setShowDemoResetConfirm(false)
+            setDemoResetError(null)
+            setNavAnnouncement('Wallet connected. Portfolio actions updated.')
+        } else {
+            setNavAnnouncement('Wallet disconnected. Showing the demo portfolio.')
+        }
+    }, [publicKey])
+
+    // Refreshing swaps the whole dashboard for the loading screen, which unmounts
+    // the control the user just activated. Put keyboard focus back on a Refresh
+    // control once the dashboard returns, rather than leaving it on <body>.
+    const desktopRefreshRef = useRef<HTMLButtonElement>(null)
+    const restoreRefreshFocusRef = useRef(false)
+    const handleRefreshClick = useCallback(() => {
+        restoreRefreshFocusRef.current = true
+        return refreshData()
+    }, [refreshData])
+    useEffect(() => {
+        if (loading || !restoreRefreshFocusRef.current) return
+        restoreRefreshFocusRef.current = false
+        if (document.activeElement && document.activeElement !== document.body) return
+        const candidates = [mobileRefreshRef.current, desktopRefreshRef.current]
+        const visible = candidates.find(el => el && el.offsetParent !== null)
+        ;(visible ?? candidates.find(Boolean))?.focus()
+    }, [loading])
 
     const resetDemoPortfolio = useCallback(async () => {
-        if (publicKey) return
+        if (publicKey || demoResetInFlightRef.current) return
+        demoResetInFlightRef.current = true
         setResettingDemo(true)
+
+        const completed: DemoResetStep[] = demoResetError ? [...demoResetError.completedSteps] : []
+        const steps: { id: DemoResetStep; run: () => Promise<void> }[] = [
+            {
+                id: 'portfolios',
+                run: () => queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
+            },
+            {
+                id: 'prices',
+                run: () => queryClient.invalidateQueries({ queryKey: priceKeys.all }),
+            },
+        ]
+
         try {
-            await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
-            await queryClient.invalidateQueries({ queryKey: priceKeys.all })
+            for (const step of steps) {
+                if (completed.includes(step.id)) continue
+                try {
+                    await step.run()
+                    completed.push(step.id)
+                } catch (error) {
+                    console.error(`Demo reset failed at step "${step.id}":`, error)
+                    const detail = error instanceof Error && error.message ? error.message : 'Unexpected error'
+                    setDemoResetError({
+                        failedStep: step.id,
+                        completedSteps: [...completed],
+                        message: detail,
+                    })
+                    return
+                }
+            }
+            setDemoResetError(null)
             await new Promise(resolve => setTimeout(resolve, 500))
             setShowDemoResetConfirm(false)
-        } catch (error) {
-            console.error('Demo reset failed:', error)
-            alert('Failed to reset demo portfolio. Please refresh the page.')
         } finally {
+            demoResetInFlightRef.current = false
             setResettingDemo(false)
         }
-    }, [publicKey, queryClient])
+    }, [demoResetError, publicKey, queryClient])
 
     const disconnectWallet = async () => {
         if (publicKey) {
@@ -391,18 +482,37 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         { date: '1/3', value: 10100 },
         { date: '1/4', value: 10800 },
         { date: '1/5', value: 11200 },
-        { date: '1/6', value: portfolioData?.totalValue || 10000 }
+        { date: '1/6', value: portfolioData?.totalValue ?? 0 }
     ]
 
     const walletType = StellarWallet.getWalletType()
     const contractAddress = 'CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I'
+
+    if (portfolioUnavailable) {
+        return (
+            <RouteErrorState
+                title="Portfolio unavailable"
+                message="This portfolio was deleted or you no longer have access."
+                detail="Reload the portfolio list to find another portfolio, or return to the landing page."
+                onRetry={() => {
+                    void refetchPortfolios()
+                    void refetchPortfolioDetails()
+                }}
+                onBack={() => onNavigate('landing')}
+                retryLabel="Reload portfolio list"
+                backLabel="Go to landing"
+                loading={portfoliosLoading}
+                focusHeading
+            />
+        )
+    }
 
     if (loading) {
         return (
             <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500 mx-auto"></div>
-                    <p className="mt-4 text-gray-600 dark:text-gray-400">Loading portfolio data...</p>
+                    <p role="status" className="mt-4 text-gray-600 dark:text-gray-400">Loading portfolio data...</p>
                 </div>
             </div>
         )
@@ -433,10 +543,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
+            {latestPortfolioId && reviewPortfolioId === latestPortfolioId && !balancesUnavailable && (
+                <RebalanceConfirm
+                    key={latestPortfolioId}
+                    portfolioId={latestPortfolioId}
+                    open
+                    onClose={() => setReviewPortfolioId(null)}
+                    onSuccess={handleRebalanceSuccess}
+                />
+            )}
             {rebalanceNotice && (
-                <div className="fixed right-4 top-4 z-50 max-w-md rounded-lg border bg-white dark:bg-gray-800 shadow-lg p-3">
-                    <div className={`text-sm ${rebalanceNotice.type === 'success' ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>
+                <div className="fixed inset-x-3 top-3 sm:inset-x-auto sm:right-4 sm:top-4 z-50 sm:max-w-md rounded-lg border bg-white dark:bg-gray-800 shadow-lg p-3 break-words min-w-0">
+                    <div role="status" className={`text-sm ${rebalanceNotice.type === 'success' ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>
                         {rebalanceNotice.message}
                     </div>
                     <button
@@ -449,21 +568,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             )}
 
             {/* Header */}
-            <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center">
+            <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-3 sm:px-6 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 min-w-0">
+                    <div className="flex items-center min-w-0">
                         <button
                             type="button"
                             onClick={() => onNavigate('landing')}
-                            className="mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                            className="mr-3 sm:mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors flex-shrink-0"
                             aria-label={dashboardCopy.goToLanding}
                         >
                             <ArrowLeft className="w-5 h-5" aria-hidden />
                         </button>
-                        <div>
-                            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{dashboardCopy.title}</h1>
+                        <div className="min-w-0">
+                            <h1 ref={headingRef} tabIndex={-1} className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white break-words">{dashboardCopy.title}</h1>
                             {publicKey ? (
-                                <div className="flex items-center space-x-4 mt-1">
+                                <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-1">
                                     <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
                                         <span className="capitalize font-medium">{walletType} Wallet</span>
                                         <span>{publicKey.slice(0, 4)}...{publicKey.slice(-4)}</span>
@@ -489,7 +608,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </div>
                     </div>
 
-                    <div className="flex items-center space-x-4">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-4 min-w-0">
                         <button
                             type="button"
                             onClick={() => onNavigate('analytics')}
@@ -517,7 +636,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </button>
                         <ThemeToggle />
                         <LanguageSelector />
-                        <div className="flex items-center space-x-2">
+                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
                             {publicKey && portfolioData?.id && portfolioData.id !== 'demo' ? (
                                 <>
                                     <button onClick={() => exportFromApi('json')}
@@ -591,19 +710,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             </>
                         ) : (
                             <>
-                                <button onClick={() => onNavigate('landing')}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
+                                <button type="button" onClick={() => onNavigate('landing')}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap min-w-0">
                                     Connect Wallet
                                 </button>
-                                <button onClick={() => setShowDemoResetConfirm(true)}
-                                    className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1">
-                                    <RefreshCw className="w-4 h-4" />
-                                    Reset Demo
+                                <button type="button" onClick={() => setShowDemoResetConfirm(true)}
+                                    aria-label="Reset demo portfolio"
+                                    className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1 whitespace-nowrap min-w-0">
+                                    <RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />
+                                    <span>Reset Demo</span>
                                 </button>
                             </>
                         )}
-                        <button onClick={refreshData} disabled={loading}
-                            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50">
+                        <button ref={desktopRefreshRef} type="button" onClick={handleRefreshClick} disabled={loading}
+                            aria-label="Refresh data"
+                            className="p-2 min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50 flex-shrink-0">
                             <RefreshCw className={`w-5 h-5 ${loading ? 'motion-safe:animate-spin' : ''}`} aria-hidden />
                         </button>
                     </div>
@@ -712,24 +833,57 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
             {/* Demo reset confirmation modal */}
             {showDemoResetConfirm && (
-                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
-                        <div className="flex items-center gap-2 mb-4">
-                            <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0" />
-                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Reset Demo Portfolio</h2>
+                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-3 sm:p-4">
+                    <div
+                        ref={demoResetDialogRef}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="demo-reset-title"
+                        aria-describedby="demo-reset-description"
+                        aria-busy={resettingDemo}
+                        tabIndex={-1}
+                        className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-4 sm:p-6 min-w-0 max-h-[90vh] overflow-y-auto"
+                    >
+                        <div className="flex items-center gap-2 mb-4 min-w-0">
+                            <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0" aria-hidden />
+                            <h2 id="demo-reset-title" className="text-xl font-semibold text-gray-900 dark:text-white break-words">Reset Demo Portfolio</h2>
                         </div>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
-                            This will reset the demo portfolio to its default state with $10,000 total value and 40% XLM / 60% USDC allocation.
+                        <p id="demo-reset-description" className="text-gray-600 dark:text-gray-400 text-sm mb-6 break-words">
+                            This will reset the demo portfolio to its default state with $10,000 total value and 40% XLM / 60% USDC allocation. Real wallet balances and on-chain portfolios are not affected.
                         </p>
-                        <div className="flex justify-end gap-3">
-                            <button onClick={() => setShowDemoResetConfirm(false)} disabled={resettingDemo}
-                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50">Cancel</button>
-                            <button onClick={resetDemoPortfolio} disabled={resettingDemo}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2">
+                        {demoResetError && (
+                            <div
+                                role="alert"
+                                className="mb-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40 p-3 text-sm text-red-800 dark:text-red-200"
+                            >
+                                <p className="font-medium">
+                                    {demoResetError.completedSteps.length > 0
+                                        ? 'Demo reset stopped halfway while refreshing demo price data.'
+                                        : 'Demo reset failed while resetting demo portfolio data.'}
+                                </p>
+                                <p className="mt-1 text-xs text-red-700 dark:text-red-300">
+                                    {demoResetError.completedSteps.length > 0
+                                        ? 'Demo portfolio data was already reset and will not be duplicated if you retry. You can retry the remaining step or cancel without reloading the page.'
+                                        : 'You can retry resetting or cancel without reloading the page.'}
+                                </p>
+                                <p className="mt-1 text-xs text-red-600 dark:text-red-400 break-words">
+                                    Details: {demoResetError.message}
+                                </p>
+                            </div>
+                        )}
+                        <p role="status" className="sr-only">{resettingDemo ? 'Resetting demo portfolio' : ''}</p>
+                        {/* aria-disabled (not disabled) while resetting so keyboard focus stays inside the dialog. */}
+                        <div className="flex flex-wrap justify-end gap-2 sm:gap-3">
+                            <button type="button" onClick={closeDemoResetModal} aria-disabled={resettingDemo}
+                                className={`px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm ${resettingDemo ? 'opacity-50 cursor-not-allowed' : ''}`}>Cancel</button>
+                            <button ref={demoResetInitialFocusRef} type="button" onClick={resetDemoPortfolio} aria-disabled={resettingDemo}
+                                className={`px-4 py-2 text-white rounded-lg font-medium transition-colors flex items-center gap-2 text-sm ${resettingDemo ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
                                 {resettingDemo ? (
-                                    <><RefreshCw className="w-4 h-4 animate-spin" />Resetting...</>
+                                    <><RefreshCw className="w-4 h-4 motion-safe:animate-spin flex-shrink-0" aria-hidden />Resetting...</>
+                                ) : demoResetError ? (
+                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />{demoResetError.completedSteps.length > 0 ? 'Retry Remaining Steps' : 'Retry Reset'}</>
                                 ) : (
-                                    <><RefreshCw className="w-4 h-4" />Reset Demo</>
+                                    <><RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />Reset Demo</>
                                 )}
                             </button>
                         </div>
@@ -740,26 +894,32 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             {/* Price Ticker Banner */}
             <PriceTicker />
 
-            <div className="p-6 max-w-7xl mx-auto">
-                {/* Tab Navigation */}
+            <div className="p-4 sm:p-6 w-full max-w-7xl mx-auto min-w-0">
+                {/* Section navigation. Wraps instead of overflowing at 320px / large text; each
+                    control keeps a 44px touch target and exposes the current section. */}
                 <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
-                    <nav className="flex space-x-8" aria-label="Dashboard sections">
-                        <button onClick={() => setActiveTab('overview')}
-                            className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'overview'
-                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
-                            }`}>Overview</button>
-                        <button onClick={() => setActiveTab('analytics')}
-                            className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'analytics'
-                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
-                            }`}>Analytics</button>
-                        <button onClick={() => setActiveTab('notifications')}
-                            className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'notifications'
-                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
-                            }`}>Notifications</button>
+                    <nav className="flex flex-wrap gap-x-6 gap-y-1" aria-label="Dashboard sections">
+                        {([
+                            ['overview', 'Overview'],
+                            ['analytics', 'Analytics'],
+                            ['notifications', 'Notifications'],
+                        ] as const).map(([tab, label]) => (
+                            <button
+                                key={tab}
+                                type="button"
+                                onClick={() => selectTab(tab, label)}
+                                aria-current={activeTab === tab ? 'page' : undefined}
+                                // The header also has an "Analytics" link to the full page; qualify the
+                                // in-page section so the two controls are never announced identically.
+                                aria-label={`${label} section`}
+                                className={`min-h-[44px] py-3 px-1 border-b-2 font-medium text-sm ${activeTab === tab
+                                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
+                                }`}
+                            >{label}</button>
+                        ))}
                     </nav>
+                    <p role="status" aria-live="polite" className="sr-only">{navAnnouncement}</p>
                 </div>
 
                 {/* Debug Info */}
@@ -774,12 +934,36 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     </div>
                 )}
 
+                <div role="status">
+                    {balancesPending && <p>Loading portfolio balances. Target allocations can be viewed while balances load.</p>}
+                    {balancesFailed && <p>Portfolio balances are unavailable. You can still review target allocations.</p>}
+                </div>
+                {balancesFailed && (
+                    <button type="button" aria-disabled={detailsFetching}
+                        onClick={async event => {
+                            if (detailsFetching) return
+                            const retryButton = event.currentTarget
+                            const result = await refetchPortfolioDetails()
+                            if (result.isSuccess && (document.activeElement === retryButton || document.activeElement === document.body)) {
+                                headingRef.current?.focus()
+                            }
+                        }}
+                        className="rounded px-3 py-2 text-blue-700 focus-visible:ring-2 dark:text-blue-300">
+                        {detailsFetching ? 'Retrying balances…' : 'Retry loading balances'}
+                    </button>
+                )}
+
                 {/* Overview Tab */}
                 {activeTab === 'overview' && (
                     <div className="grid lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-2 space-y-6">
                             {/* Portfolio Value Chart */}
-                            {loading ? (
+                            {balancesUnavailable ? (
+                                <div className="rounded-xl bg-white p-6 dark:bg-gray-800">
+                                    <h2 className="font-semibold">Portfolio value</h2>
+                                    <p>{balancesPending ? 'Loading balances…' : 'Balance data unavailable'}</p>
+                                </div>
+                            ) : loading ? (
                                 <div data-testid="dashboard-value-skeleton" aria-busy="true" className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
                                     <div className="flex items-center justify-between mb-6">
                                         <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
@@ -795,11 +979,22 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     <div className="h-64 bg-gray-200 dark:bg-gray-700 rounded" />
                                 </div>
                             ) : (
-                                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-                                    <div className="flex items-center justify-between mb-6">
-                                        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Portfolio Value</h2>
-                                        <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
-                                            <span>Last updated: just now</span>
+                                <div className="bg-white dark:bg-gray-800 rounded-xl p-4 sm:p-6 shadow-sm min-w-0">
+                                    <div className="flex flex-wrap items-center justify-between gap-2 mb-6 min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2 min-w-0">
+                                            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Portfolio Value</h2>
+                                            {!publicKey || portfolioData?.id === 'demo' ? (
+                                                <span className="px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                                    Demo balance
+                                                </span>
+                                            ) : (
+                                                <span className="px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wide bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                                    Wallet balance
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500 dark:text-gray-400 min-w-0">
+                                            <span className="whitespace-nowrap">Last updated: just now</span>
                                             <span className={`px-2 py-1 rounded text-xs ${feedMeta?.degraded || hasPartialPriceData
                                                 ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200'
                                                 : feedMeta?.staleOrLimited
@@ -819,19 +1014,24 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                                     : 'Price feed may be stale or rate-limited; confirm against an exchange if trading.'}
                                         </p>
                                     )}
-                                    <div className="mb-4">
-                                        <div className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
-                                            ${portfolioData?.totalValue?.toLocaleString() || '0'}
+                                    <div className="mb-4 min-w-0">
+                                        <div className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white flex flex-wrap items-center gap-2 min-w-0 break-words">
+                                            <span>${portfolioData?.totalValue?.toLocaleString() || '0'}</span>
+                                            {(!publicKey || portfolioData?.id === 'demo') && (
+                                                <span className="text-xs font-normal text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded">
+                                                    Simulated $10,000
+                                                </span>
+                                            )}
                                             {liveFeedState === 'connected' && (
-                                                <span className="ml-3 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400">
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400">
                                                     <span className="w-1.5 h-1.5 mr-1.5 bg-red-500 rounded-full animate-pulse"></span>
                                                     LIVE
                                                 </span>
                                             )}
                                         </div>
-                                        <div className="flex items-center mt-1">
-                                            <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
-                                            <span className="text-green-500 font-medium">+{portfolioData?.dayChange || 0}%</span>
+                                        <div className="flex flex-wrap items-center mt-1 text-sm">
+                                            <TrendingUp className="w-4 h-4 text-green-500 mr-1 flex-shrink-0" />
+                                            <span className="text-green-600 dark:text-green-400 font-medium">+{portfolioData?.dayChange || 0}%</span>
                                             <span className="text-gray-500 dark:text-gray-400 ml-2">Today</span>
                                         </div>
                                     </div>
@@ -855,7 +1055,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             )}
 
                             {/* Asset Cards — drag to reorder, order persisted per portfolio */}
-                            <AssetList
+                            {!balancesUnavailable && <AssetList
                                 portfolioId={portfolioData?.id ?? 'demo'}
                                 assets={allocationData}
                                 prices={Object.fromEntries(
@@ -874,7 +1074,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     ])
                                 )}
                                 isLoading={loading}
-                            />
+                            />}
 
                             {/* Rebalance History */}
                             <RebalanceHistory portfolioId={portfolioData?.id || null} isLoading={loading} />
@@ -882,7 +1082,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
                         <div className="space-y-6">
                             {/* Rebalance Alert */}
-                            {portfolioData?.needsRebalance && (
+                            {portfolioData?.needsRebalance && !balancesUnavailable && (
                                 <motion.div
                                     initial={false}
                                     animate={{ opacity: 1, scale: 1 }}
@@ -896,17 +1096,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         <span className="font-medium text-orange-800 dark:text-orange-300">{dashboardCopy.rebalanceNeeded}</span>
                                     </div>
                                     <p className="text-sm text-orange-700 dark:text-orange-400 mb-2">{dashboardCopy.driftMessage}</p>
-                                    <p className="text-sm text-orange-700 dark:text-orange-400 mb-2 font-medium">
-                                        Estimated gas: {estimateXlm.toFixed(2)} XLM (~${estimateUsd.toFixed(3)})
-                                    </p>
-                                    <p className="text-xs text-orange-600 dark:text-orange-400 mb-3">
-                                        {rebalanceEstimate?.tradeCount ?? 0} estimated trade{(rebalanceEstimate?.tradeCount ?? 0) === 1 ? '' : 's'} @ {(rebalanceEstimate?.gasPerTradeXlm ?? 0).toFixed(4)} XLM/trade
-                                    </p>
-                                    {hasHighGasWarning && (
-                                        <p className="text-xs text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/40 rounded px-2 py-1 mb-3">
-                                            Warning: estimated gas is unusually high ({'>'}0.5 XLM). Consider reducing trade count.
-                                        </p>
-                                    )}
                                 </motion.div>
                             )}
 
@@ -952,7 +1141,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             </div>
 
                             {/* Drift Gauges — live allocation drift per asset */}
-                            {driftGaugeAssets.length > 0 && (
+                            {!balancesUnavailable && driftGaugeAssets.length > 0 && (
                                 <DriftGaugeGrid assets={driftGaugeAssets} title="Live Allocation Drift" />
                             )}
 
@@ -994,21 +1183,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         {allocationData.length > 0 && (
                                             <>
                                                 {(portfolioData as any)?.slippageTolerancePercent != null && (
-                                                    <p className="text-xs text-orange-600 dark:text-orange-400 mb-4">
+                                                    <p className="text-xs text-orange-600 dark:text-orange-400 mb-4 break-words min-w-0">
                                                         Max slippage: {(portfolioData as any).slippageTolerancePercent}% — trades beyond this will be rejected
                                                     </p>
                                                 )}
-                                                <button onClick={executeRebalance}
-                                                    disabled={executeRebalanceMutation.isPending || !publicKey || portfolioData?.id === 'demo'}
+                                                <button type="button" onClick={() => setReviewPortfolioId(latestPortfolioId)}
+                                                    disabled={balancesUnavailable || !publicKey || !latestPortfolioId}
                                                     className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2">
-                                                    {executeRebalanceMutation.isPending ? (
-                                                        <><RefreshCw className="w-4 h-4 mr-2 motion-safe:animate-spin" aria-hidden />{dashboardCopy.rebalancing}</>
-                                                    ) : (
-                                                        dashboardCopy.executeRebalance
-                                                    )}
+                                                    Review rebalance
                                                 </button>
                                                 {(portfolioData as any)?.slippageTolerance != null && (
-                                                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center">
+                                                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center break-words min-w-0">
                                                         Max slippage: {(portfolioData as any).slippageTolerance}% — trades above this will be rejected
                                                     </p>
                                                 )}
@@ -1069,67 +1254,79 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         <NotificationPreferences userId={publicKey} />
                     </div>
                 )}
+                {activeTab === 'notifications' && !publicKey && (
+                    <p className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 text-sm text-gray-600 dark:text-gray-300">
+                        Connect a wallet to manage notification preferences.
+                    </p>
+                )}
             </div>
 
-            {/* Sticky Mobile Action Bar */}
-            <div className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 md:hidden z-40">
-                <div className="flex items-center justify-between max-w-sm mx-auto">
-                    <div className="text-center">
-                        <div className="text-xs text-gray-500 dark:text-gray-400">Total Value</div>
-                        <div className="text-lg font-bold text-gray-900 dark:text-white">
-                            ${portfolioData?.totalValue?.toLocaleString() || '10,000'}
+            {/* Sticky and in-flow so enlarged text cannot cover dashboard content. */}
+            <div role="region" aria-label="Portfolio quick actions" className="mobile-action-bar sticky bottom-0 mt-auto bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-3 py-2 sm:p-4 md:hidden z-40">
+                <div className="flex flex-wrap items-center justify-between gap-2 max-w-sm mx-auto min-w-0">
+                    <div className="text-left min-w-0">
+                        <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                            <span>Total Value</span>
+                            {(!publicKey || portfolioData?.id === 'demo') && (
+                                <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold uppercase bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                    Demo
+                                </span>
+                            )}
                         </div>
-                        <div className={`text-xs flex items-center justify-center gap-1 ${(portfolioData?.dayChange || 0) >= 0
+                        <div id="mobile-total-value" className="text-base sm:text-lg font-bold text-gray-900 dark:text-white break-words">
+                            {balancesUnavailable ? 'Balance unavailable' : `$${portfolioData?.totalValue?.toLocaleString() ?? '0'}`}
+                        </div>
+                        <div className={`text-xs flex items-center gap-1 ${(portfolioData?.dayChange || 0) >= 0
                             ? 'text-green-600 dark:text-green-400'
                             : 'text-red-600 dark:text-red-400'
                         }`}>
-                            {(portfolioData?.dayChange || 0) >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingUp className="w-3 h-3 rotate-180" />}
-                            {Math.abs(portfolioData?.dayChange || 0.85).toFixed(2)}%
+                            {(portfolioData?.dayChange || 0) >= 0 ? <TrendingUp className="w-3 h-3 flex-shrink-0" aria-hidden /> : <TrendingUp className="w-3 h-3 rotate-180 flex-shrink-0" aria-hidden />}
+                            <span className="sr-only">{(portfolioData?.dayChange || 0) >= 0 ? 'Up' : 'Down'} today:</span>
+                            <span>{Math.abs(portfolioData?.dayChange || 0.85).toFixed(2)}%</span>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                        {portfolioData?.needsRebalance ? (
-                            <button onClick={executeRebalance}
-                                disabled={executeRebalanceMutation.isPending || portfolioData?.id === 'demo'}
-                                className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1">
-                                {executeRebalanceMutation.isPending ? (
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
-                                ) : (
-                                    <Zap className="w-4 h-4" />
-                                )}
-                                Rebalance
+                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                        {latestPortfolioId ? (
+                            <button type="button" onClick={() => setReviewPortfolioId(latestPortfolioId)}
+                                aria-label="Review rebalance on mobile"
+                                disabled={balancesUnavailable}
+                                aria-describedby={balancesUnavailable ? 'mobile-total-value' : undefined}
+                                className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white px-3 sm:px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors flex items-center gap-1">
+                                Review rebalance
                             </button>
                         ) : (
                             <div className="flex items-center gap-1 text-green-600 dark:text-green-400 text-sm">
-                                <CheckCircle className="w-4 h-4" />
-                                <span className="hidden sm:inline">Balanced</span>
+                                <CheckCircle className="w-4 h-4 flex-shrink-0" aria-hidden />
+                                <span className="sr-only sm:not-sr-only">Balanced</span>
                             </div>
                         )}
 
                         {publicKey ? (
-                            <button onClick={() => onNavigate('setup')}
-                                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1">
-                                <Plus className="w-4 h-4" />
-                                <span className="hidden sm:inline">New</span>
+                            <button type="button" onClick={() => onNavigate('setup')}
+                                aria-label="New portfolio"
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 min-h-[44px] min-w-[44px] justify-center rounded-lg text-sm transition-colors flex items-center gap-1">
+                                <Plus className="w-4 h-4 flex-shrink-0" aria-hidden />
+                                <span className="hidden sm:inline" aria-hidden>New</span>
                             </button>
                         ) : (
-                            <button onClick={() => setShowDemoResetConfirm(true)}
-                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors">
-                                <RefreshCw className="w-4 h-4" />
-                                <span className="hidden sm:inline">Reset</span>
+                            <button type="button" onClick={() => setShowDemoResetConfirm(true)}
+                                aria-label="Reset demo data"
+                                aria-haspopup="dialog"
+                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-2.5 sm:px-3 py-2 min-h-[44px] rounded-lg text-sm transition-colors flex items-center gap-1">
+                                <RefreshCw className="w-4 h-4 flex-shrink-0" aria-hidden />
+                                <span aria-hidden>Reset</span>
                             </button>
                         )}
 
-                        <button onClick={refreshData} disabled={loading}
-                            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50">
+                        <button ref={mobileRefreshRef} type="button" onClick={handleRefreshClick} disabled={loading}
+                            aria-label="Refresh portfolio data"
+                            className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50 flex-shrink-0">
                             <RefreshCw className={`w-5 h-5 ${loading ? 'motion-safe:animate-spin' : ''}`} aria-hidden />
                         </button>
                     </div>
                 </div>
             </div>
-
-            <div className="h-20 md:hidden"></div>
         </div>
     )
 }

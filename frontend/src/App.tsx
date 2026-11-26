@@ -49,6 +49,7 @@ import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
 import OnboardingChecklist from './components/OnboardingChecklist'
 import { useNetworkDetection } from './hooks/useNetworkDetection'
+import { networkLabel } from './utils/networkDetection'
 import { NetworkSwitchModal } from './components/NetworkSwitchModal'
 
 function App() {
@@ -74,15 +75,36 @@ function App() {
     
     // Network detection and confirmation
     const {
+        configuredNetwork,
         walletNetwork,
         pendingWalletNetwork,
         confirmNetworkSwitch,
         cancelNetworkSwitch
     } = useNetworkDetection()
-    
+
+    // The switch dialog unmounts on confirm/cancel, so the outcome is announced
+    // from here, where the live region survives it.
+    const [networkAnnouncement, setNetworkAnnouncement] = useState('')
+
     const handleConfirmNetworkSwitch = async () => {
+        if (pendingWalletNetwork) {
+            const label = networkLabel(pendingWalletNetwork)
+            const allowed = configuredNetwork !== 'unknown' && pendingWalletNetwork !== configuredNetwork
+                ? ` This app only accepts ${networkLabel(configuredNetwork)}; transactions will fail until your wallet is back on it.`
+                : ''
+            setNetworkAnnouncement(`Network switch confirmed. The app now treats your wallet as being on ${label}.${allowed}`)
+        }
         confirmNetworkSwitch()
         await queryClient.invalidateQueries()
+    }
+
+    const handleCancelNetworkSwitch = () => {
+        if (pendingWalletNetwork && walletNetwork) {
+            setNetworkAnnouncement(
+                `Network switch cancelled. The app keeps ${networkLabel(walletNetwork)}; your wallet remains on ${networkLabel(pendingWalletNetwork)}.`,
+            )
+        }
+        cancelNetworkSwitch()
     }
     
     const [apiCompatibility, setApiCompatibility] = useState<ApiCompatibilityResult | null>(null)
@@ -384,12 +406,16 @@ function App() {
                     }
                 }}
             />
+            <p role="status" aria-live="polite" className="sr-only" data-testid="network-switch-announcement">
+                {networkAnnouncement}
+            </p>
             {pendingWalletNetwork && walletNetwork && (
                 <NetworkSwitchModal
                     currentNetwork={walletNetwork}
                     pendingNetwork={pendingWalletNetwork}
+                    configuredNetwork={configuredNetwork}
                     onConfirm={handleConfirmNetworkSwitch}
-                    onCancel={cancelNetworkSwitch}
+                    onCancel={handleCancelNetworkSwitch}
                 />
             )}
             <Onboarding />

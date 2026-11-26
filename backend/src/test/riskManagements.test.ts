@@ -41,18 +41,20 @@ const feedSeries = (
     dataset: Record<string, Array<{ price: number, change: number, timestamp: number }>>
 ): PricesMap => {
     const assets = Object.keys(dataset)
-    const length = dataset[assets[0]].length
+    const length = Math.max(...assets.map(asset => dataset[asset].length))
     let latest: PricesMap = {}
 
     for (let i = 0; i < length; i++) {
         const prices: PricesMap = {}
         assets.forEach(asset => {
             const point = dataset[asset][i]
-            prices[asset] = {
-                price: point.price,
-                change: point.change,
-                timestamp: point.timestamp,
-                source: 'external'
+            if (point) {
+                prices[asset] = {
+                    price: point.price,
+                    change: point.change,
+                    timestamp: point.timestamp,
+                    source: 'external'
+                }
             }
         })
         latest = prices
@@ -428,6 +430,27 @@ describe('RiskManagementService.checkCVaRVaRThresholdsAndAutoPause', () => {
         expect(mockNotify).not.toHaveBeenCalled()
     })
 
+    it('does not auto-pause when one asset has sparse points at the evaluation window boundary', async () => {
+        const service = new RiskManagementService()
+
+        const prices = feedSeries(service, {
+            BTC: buildSeries(100, Array.from({ length: 120 }, (_, i) => (i % 2 === 0 ? 0.18 : -0.18))),
+            ETH: buildSeries(60, Array.from({ length: 120 }, (_, i) => (i % 2 === 0 ? 0.17 : -0.17))),
+            // 30 snapshots => 29 returns, forcing sampleSize below MIN_RETURNS_FOR_STATS.
+            USDC: buildSeries(1, Array.from({ length: 30 }, () => 0.0001)),
+        })
+
+        const result = await service.checkCVaRVaRThresholdsAndAutoPause(
+            PORTFOLIO_ID, ALLOCATIONS, prices, USER_ID
+        )
+
+        expect(result.riskMetrics.sampleSize).toBe(29)
+        expect(result.breached).toBe(false)
+        expect(result.paused).toBe(false)
+        expect(mockUpdatePortfolio).not.toHaveBeenCalled()
+        expect(mockNotify).not.toHaveBeenCalled()
+    })
+
     it('respects custom configurable thresholds passed to the constructor', async () => {
         // Very tight custom thresholds: any positive VaR/CVaR will trigger a breach
         const service = new RiskManagementService({ var95: 0.0001, cvar95: 0.0001 })
@@ -494,5 +517,24 @@ describe('RiskManagementService.checkCVaRVaRThresholdsAndAutoPause', () => {
         expect(result.paused).toBe(true)
         // updatePortfolio was NOT called because the portfolio wasn't found
         expect(mockUpdatePortfolio).not.toHaveBeenCalled()
+    })
+
+    it('avoids duplicate persistence and notification when portfolio is already paused', async () => {
+        const service = new RiskManagementService()
+        const prices = buildHighVolSeries(service)
+
+        mockGetPortfolio.mockResolvedValueOnce({
+            id: PORTFOLIO_ID,
+            riskPausedUntil: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+        })
+
+        const result = await service.checkCVaRVaRThresholdsAndAutoPause(
+            PORTFOLIO_ID, ALLOCATIONS, prices, USER_ID
+        )
+
+        expect(result.breached).toBe(true)
+        expect(result.paused).toBe(true)
+        expect(mockUpdatePortfolio).not.toHaveBeenCalled()
+        expect(mockNotify).not.toHaveBeenCalled()
     })
 })

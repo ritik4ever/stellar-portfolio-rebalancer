@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react'
-import { StellarNetwork, detectWalletNetwork } from '../utils/networkDetection'
+import { StellarNetwork, detectWalletNetwork, NETWORK_LABELS } from '../utils/networkDetection'
 import { getAdapter } from '../utils/walletAdapters'
 
 interface NetworkMismatchBannerProps {
@@ -7,14 +7,6 @@ interface NetworkMismatchBannerProps {
   walletNetwork: StellarNetwork | null
   walletType?: string
   onDismiss?: () => void
-}
-
-const NETWORK_LABELS: Record<StellarNetwork, string> = {
-  testnet: 'Testnet',
-  mainnet: 'Mainnet (Public)',
-  standalone: 'Standalone / Sandbox',
-  futurenet: 'Futurenet',
-  unknown: 'Unknown',
 }
 
 const NETWORK_PASSPHRASES: Record<StellarNetwork, string> = {
