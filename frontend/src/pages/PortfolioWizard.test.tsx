@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import PortfolioWizard from './PortfolioWizard';
 import { api } from '../config/api';
 import { clearWizardDraft, saveWizardDraft, loadWizardDraft } from '../utils/wizardDraft';
+import { walletManager } from '../utils/walletManager';
 import i18n from '../i18n';
 import userEvent from '@testing-library/user-event';
 
@@ -289,6 +290,7 @@ describe('PortfolioWizard Page', () => {
     const confirmBtn = screen.getByRole('button', { name: /confirm amount/i });
     expect(confirmBtn).toBeInTheDocument();
     confirmBtn.focus();
+    expect(confirmBtn).toHaveFocus();
     await userEvent.keyboard('{Enter}');
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -302,17 +304,65 @@ describe('PortfolioWizard Page', () => {
   it('allows keyboard and screen-reader users to abandon the wizard flow', async () => {
     const { onNavigate } = renderWizard();
 
-    // Abandon via header button
+    // Abandon via header button with keyboard
     const headerAbandonBtn = screen.getByRole('button', { name: /abandon wizard and return to dashboard/i });
     expect(headerAbandonBtn).toBeInTheDocument();
-    fireEvent.click(headerAbandonBtn);
+    headerAbandonBtn.focus();
+    expect(headerAbandonBtn).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
     expect(onNavigate).toHaveBeenCalledWith('dashboard');
 
-    // Abandon via footer Cancel button
+    // Abandon via footer Cancel button with keyboard
     const cancelBtn = screen.getByRole('button', { name: /cancel and abandon wizard/i });
     expect(cancelBtn).toBeInTheDocument();
-    fireEvent.click(cancelBtn);
+    cancelBtn.focus();
+    expect(cancelBtn).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
     expect(onNavigate).toHaveBeenCalledTimes(2);
+  });
+
+  it('announces localized amount in polite live region during ordinary edits', async () => {
+    renderWizard();
+    fireEvent.change(screen.getByLabelText(/rebalancing strategy/i), { target: { value: 'dca' } });
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: /next/i }));
+
+    const amountInput = screen.getByLabelText('DCA Amount');
+    fireEvent.change(amountInput, { target: { value: '150.5' } });
+    expect(screen.getByRole('status')).toHaveTextContent(/dca amount: 150\.5/i);
+  });
+
+  it('aborts portfolio creation if user cancels while wallet signature is pending', async () => {
+    mockMutateAsync.mockResolvedValue({ id: 'dca-portfolio' });
+    let resolveSign: (val: any) => void;
+    const signSpy = vi.spyOn(walletManager, 'signTransaction').mockImplementation(() => {
+      return new Promise((resolve) => {
+        resolveSign = resolve;
+      });
+    });
+
+    try {
+      const { onNavigate } = renderWizard();
+      for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: /next/i }));
+
+      const signButton = screen.getByRole('button', { name: /sign with freighter/i });
+      fireEvent.click(signButton);
+      expect(signButton).toHaveAttribute('aria-busy', 'true');
+
+      // Cancel while wallet signing is pending using keyboard
+      const cancelBtn = screen.getByRole('button', { name: /cancel and abandon wizard/i });
+      cancelBtn.focus();
+      expect(cancelBtn).toHaveFocus();
+      await userEvent.keyboard('{Enter}');
+      expect(onNavigate).toHaveBeenCalledWith('dashboard');
+
+      // Resolve signing after user has cancelled
+      resolveSign!('mock-signature');
+      await waitFor(() => {
+        expect(mockMutateAsync).not.toHaveBeenCalled();
+      });
+    } finally {
+      signSpy.mockRestore();
+    }
   });
 
   it('explains decimal-comma boundaries and submits the canonical seven-place amount', async () => {

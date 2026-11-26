@@ -107,6 +107,8 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   const [announcement, setAnnouncement] = useState<string | null>(null);
   const dcaAmountInputRef = useRef<HTMLInputElement>(null);
   const confirmAmountButtonRef = useRef<HTMLButtonElement>(null);
+  const signingCancelledRef = useRef<boolean>(false);
+  const isSubmitting = createPortfolioMutation.isPending;
 
   
   const [error, setError] = useState<string | null>(null);
@@ -206,6 +208,9 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     setAmountEditLanguage(language);
     if (amountNeedsReview) {
       setAnnouncement('DCA amount updated.');
+    } else if (num !== null) {
+      const formatted = num.toLocaleString(language || undefined, { maximumFractionDigits: 7, useGrouping: true });
+      setAnnouncement(`DCA amount: ${formatted}`);
     }
   };
 
@@ -280,6 +285,14 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   };
 
  
+  const handleAbandon = () => {
+    if (isSubmitting) return;
+    if (isSigning) {
+      signingCancelledRef.current = true;
+    }
+    onNavigate('dashboard');
+  };
+
   const handleSignAndSubmit = async () => {
     if (!publicKey) {
       setError('Please connect your Freighter wallet to sign the transaction.');
@@ -288,6 +301,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
 
     setIsSigning(true);
     setError(null);
+    signingCancelledRef.current = false;
 
     try {
       
@@ -296,6 +310,10 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
         await walletManager.signTransaction(mockXdr);
       } catch (signErr: any) {
         console.warn('Freighter sign bypassed or failed, proceeding with fallback logic', signErr);
+      }
+
+      if (signingCancelledRef.current) {
+        return;
       }
 
       
@@ -316,6 +334,10 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
           strategyConfig: { dcaAmount, dcaIntervalDays, dcaStartDate },
         } : {}),
       });
+
+      if (signingCancelledRef.current) {
+        return;
+      }
 
       if (portfolio && portfolio.id) {
         setCreatedId(portfolio.id);
@@ -342,7 +364,9 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
       }
 
     } catch (err: any) {
-      setError(err.message || 'An error occurred while creating your portfolio.');
+      if (!signingCancelledRef.current) {
+        setError(err.message || 'An error occurred while creating your portfolio.');
+      }
     } finally {
       setIsSigning(false);
     }
@@ -376,9 +400,11 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
         <div className="max-w-4xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-3">
             <button 
-              onClick={() => onNavigate('dashboard')}
+              type="button"
+              onClick={handleAbandon}
+              disabled={isSubmitting}
               aria-label="Abandon wizard and return to dashboard"
-              className="shrink-0 p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="shrink-0 p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <ArrowLeft className="w-5 h-5" aria-hidden="true" />
             </button>
@@ -919,7 +945,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                 <button
                   type="button"
                   onClick={handleBack}
-                  disabled={step === 1}
+                  disabled={step === 1 || isSigning || isSubmitting}
                   aria-label="Go back to previous step"
                   className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-transparent font-semibold rounded-xl text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
@@ -927,9 +953,10 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                 </button>
                 <button
                   type="button"
-                  onClick={() => onNavigate('dashboard')}
+                  onClick={handleAbandon}
+                  disabled={isSubmitting}
                   aria-label="Cancel and abandon wizard"
-                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 font-semibold rounded-xl text-sm transition-colors text-gray-600 dark:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed font-semibold rounded-xl text-sm transition-colors text-gray-600 dark:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400"
                 >
                   Cancel
                 </button>
@@ -937,15 +964,16 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
 
               {step === reviewStep ? (
                 <button
+                  type="button"
                   onClick={handleSignAndSubmit}
-                  disabled={!canGoForward() || isSigning}
-                  aria-busy={isSigning}
-                  aria-label={isSigning ? 'Signing transaction with Freighter' : 'Sign with Freighter'}
+                  disabled={!canGoForward() || isSigning || isSubmitting}
+                  aria-busy={isSigning || isSubmitting}
+                  aria-label={isSigning ? 'Signing transaction with Freighter' : isSubmitting ? 'Creating portfolio' : 'Sign with Freighter'}
                   className="inline-flex max-w-full flex-wrap items-center justify-center gap-1.5 px-3 sm:px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-300 dark:disabled:bg-blue-800/50 disabled:cursor-not-allowed font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/10 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  {isSigning ? (
+                  {isSigning || isSubmitting ? (
                     <>
-                      <RefreshCw className="w-4 h-4 animate-spin" aria-hidden="true" /> Signing...
+                      <RefreshCw className="w-4 h-4 animate-spin" aria-hidden="true" /> {isSigning ? 'Signing...' : 'Creating...'}
                     </>
                   ) : (
                     <>
@@ -955,8 +983,9 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={handleNext}
-                  disabled={!canGoForward()}
+                  disabled={!canGoForward() || isSigning || isSubmitting}
                   className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-300 dark:disabled:bg-blue-800/50 disabled:cursor-not-allowed font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/10 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   Next <ChevronRight className="w-4 h-4" aria-hidden="true" />
