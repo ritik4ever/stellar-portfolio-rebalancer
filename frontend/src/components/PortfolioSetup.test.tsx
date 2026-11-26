@@ -6,6 +6,7 @@ import {
   fireEvent,
   cleanup,
   waitFor,
+  within,
 } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import PortfolioSetup from './PortfolioSetup'
@@ -834,6 +835,29 @@ describe('PortfolioSetup mobile action bar (SPR-2026-089)', () => {
     expect(buttons.length).toBe(2)
     for (const button of buttons) {
       expect(button.className).toMatch(/\bmin-h-11\b/)
+    }
+  })
+})
+
+describe('PortfolioSetup mobile action bar boundary (SPR-2026-086)', () => {
+  it('explains the exact 100% boundary next to the Create control at enlarged text sizes', () => {
+    const originalFontSize = document.documentElement.style.fontSize
+    document.documentElement.style.fontSize = '200%'
+
+    try {
+      const { container } = renderSetup('GABCD1234567890TESTKEY1234567890')
+      const bar = container.querySelector('.mobile-action-bar') as HTMLElement
+      const boundary = within(bar).getByText(/exactly 100%/i)
+      const create = within(bar).getByRole('button', { name: 'Create' })
+
+      expect(boundary).toHaveClass('break-words')
+      expect(create).toHaveAttribute('aria-describedby', 'mobile-allocation-boundary')
+      expect(create).toHaveAccessibleDescription(/exactly 100%/i)
+      expect(within(bar).getByRole('button', { name: 'Back to dashboard' })).toBeInTheDocument()
+      expect(bar).toHaveClass('sticky')
+      expect(bar.querySelectorAll('.flex-wrap').length).toBeGreaterThanOrEqual(2)
+    } finally {
+      document.documentElement.style.fontSize = originalFontSize
     }
   })
 })

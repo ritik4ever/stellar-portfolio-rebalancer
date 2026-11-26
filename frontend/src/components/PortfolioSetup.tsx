@@ -1593,13 +1593,21 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               <div className="text-xs text-gray-500 dark:text-gray-400">
                 {allocations.length} asset{allocations.length !== 1 ? "s" : ""}
               </div>
+              <p
+                id="mobile-allocation-boundary"
+                className="mt-1 text-xs text-gray-500 dark:text-gray-400 break-words"
+              >
+                Allocations must total exactly 100% before Create is available.
+              </p>
             </div>
 
             {/* Action Buttons */}
             <div className="flex flex-wrap items-center gap-2">
               {/* Back Button */}
               <button
+                type="button"
                 onClick={() => onNavigate("dashboard")}
+                aria-label="Back to dashboard"
                 className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 min-h-11 rounded-lg text-sm transition-colors flex items-center gap-1"
               >
                 <ArrowLeft className="w-4 h-4" />
@@ -1615,6 +1623,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   !isValidTotal ||
                   createPortfolioMutation.isPending
                 }
+                aria-describedby="mobile-allocation-boundary"
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white px-4 py-2 min-h-11 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
               >
                 {createPortfolioMutation.isPending ? (
