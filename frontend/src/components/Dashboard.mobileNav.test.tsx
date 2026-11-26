@@ -127,13 +127,6 @@ function renderDashboard(ui: React.ReactElement) {
 const bar = () => within(screen.getByRole('region', { name: 'Portfolio quick actions' }))
 const sectionNav = () => within(screen.getByRole('navigation', { name: 'Dashboard sections' }))
 
-/** Pin the rendered height of the fixed bar (jsdom has no layout). */
-function mockBarHeight(height: number) {
-    return vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
-        return this.classList.contains('mobile-action-bar') ? height : 0
-    })
-}
-
 describe('Dashboard mobile portfolio navigation (SPR-2026-088)', () => {
     beforeEach(() => {
         cleanup()
@@ -154,11 +147,11 @@ describe('Dashboard mobile portfolio navigation (SPR-2026-088)', () => {
             renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
 
             const nav = sectionNav()
-            expect(nav.getByRole('button', { name: 'Overview section' })).toHaveAttribute('aria-current', 'true')
+            expect(nav.getByRole('button', { name: 'Overview section' })).toHaveAttribute('aria-current', 'page')
             expect(nav.getByRole('button', { name: 'Analytics section' })).not.toHaveAttribute('aria-current')
 
             await user.click(nav.getByRole('button', { name: 'Analytics section' }))
-            expect(nav.getByRole('button', { name: 'Analytics section' })).toHaveAttribute('aria-current', 'true')
+            expect(nav.getByRole('button', { name: 'Analytics section' })).toHaveAttribute('aria-current', 'page')
             expect(nav.getByRole('button', { name: 'Overview section' })).not.toHaveAttribute('aria-current')
         })
 
@@ -210,7 +203,7 @@ describe('Dashboard mobile portfolio navigation (SPR-2026-088)', () => {
             view.rerender(<Dashboard onNavigate={vi.fn()} publicKey={null} />)
             expect(screen.queryByText('Notification Preferences')).not.toBeInTheDocument()
             expect(screen.getByText('Connect a wallet to manage notification preferences.')).toBeInTheDocument()
-            expect(sectionNav().getByRole('button', { name: 'Notifications section' })).toHaveAttribute('aria-current', 'true')
+            expect(sectionNav().getByRole('button', { name: 'Notifications section' })).toHaveAttribute('aria-current', 'page')
         })
     })
 
@@ -288,24 +281,17 @@ describe('Dashboard mobile portfolio navigation (SPR-2026-088)', () => {
             target.remove()
         })
 
-        it('reserves room for the bar at larger text sizes and for focus scrolling', () => {
-            mockBarHeight(220)
+        it('keeps the bar in the page flow so enlarged text grows without a fixed-height spacer', () => {
             const view = renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
 
-            const spacer = view.container.querySelector('div.md\\:hidden[aria-hidden="true"]') as HTMLElement
-            expect(spacer).toBeTruthy()
-            expect(spacer.style.height).toBe('220px')
-            expect(document.documentElement.style.scrollPaddingBottom).toBe('220px')
+            const barElement = view.container.querySelector('.mobile-action-bar') as HTMLElement
+            expect(barElement).toHaveClass('sticky')
+            expect(barElement).not.toHaveClass('fixed')
+            expect(view.container.querySelector('div.md\\:hidden[aria-hidden="true"]')).toBeNull()
+            expect(document.documentElement.style.scrollPaddingBottom).toBe('')
 
             view.unmount()
             expect(document.documentElement.style.scrollPaddingBottom).toBe('')
-        })
-
-        it('never shrinks the spacer below the original 80px', () => {
-            mockBarHeight(40)
-            const view = renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
-            const spacer = view.container.querySelector('div.md\\:hidden[aria-hidden="true"]') as HTMLElement
-            expect(spacer.style.height).toBe('80px')
         })
     })
 

@@ -443,7 +443,7 @@ describe('Mobile portfolio navigation (SPR-2026-090)', () => {
             expect(tabs.map((tab) => tab.textContent)).toEqual(['Overview', 'Analytics', 'Notifications'])
             for (const tab of tabs) {
                 expect(tab).toBeVisible()
-                expect(tab.className).toMatch(/\bmin-h-\[44px\]\b/)
+                expect(tab.className.split(' ')).toContain('min-h-[44px]')
             }
 
             expect(tabs[0]).toHaveAttribute('aria-current', 'page')
@@ -482,7 +482,7 @@ describe('Mobile portfolio navigation (SPR-2026-090)', () => {
             expect(buttons.length).toBeGreaterThan(0)
             for (const button of buttons) {
                 expect(button).toBeVisible()
-                expect(button.className).toMatch(/\bmin-h-\[44px\]\b/)
+                expect(button.className.split(' ')).toContain('min-h-[44px]')
             }
         })
     })
