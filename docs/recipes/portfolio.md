@@ -15,6 +15,14 @@ the field (for example, `0,0000001` in German); do not enter grouping separators
 The wizard validates the value without rounding and sends the corresponding
 canonical numeric token amount, e.g. `0.0000001`.
 
+## Keyboard and screen-reader accessibility for localized amount display
+
+The DCA schedule editor in the portfolio wizard includes keyboard and screen-reader support:
+- **Accessible names and descriptions**: The DCA amount input is associated with an accessible label, input helper guidance, and live formatted representation via `aria-describedby`.
+- **Decimal comma and high-precision token amounts**: High-precision token values (up to 7 decimal places / stroop precision) are formatted with locale-sensitive decimal and grouping separators (such as decimal comma in German `de`).
+- **Locale change announcements and focus management**: When language changes while editing the amount, an assertive alert and polite live-region announcement notify screen-reader users, and the field signals `aria-invalid="true"`. Keyboard users can review the amount, correct it, or activate **Confirm amount** to confirm and restore focus to the input.
+- **Completing or abandoning the flow**: Keyboard users can traverse the flow using Tab and Enter, review scheduled amounts in canonical and localized formats, submit the transaction, or abandon the wizard at any time via the **Cancel** button or top **Abandon wizard** control.
+
 ## Create a Portfolio
 
 ```bash
