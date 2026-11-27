@@ -205,7 +205,7 @@ describe('POST /api/auth/login', () => {
 
         // Sign with the wrong key
         const wrongKp = Keypair.random()
-        const fakeSig = wrongKp.sign(Buffer.from('not-the-real-challenge')).toString('base64')
+        const fakeSig = Buffer.from(wrongKp.sign(Buffer.from('not-the-real-challenge'))).toString('base64')
 
         const res = await request(app)
             .post('/api/auth/login')
@@ -217,7 +217,7 @@ describe('POST /api/auth/login', () => {
 
     it('returns 401 when no challenge has been issued for the address', async () => {
         const kp = Keypair.random() // never requested a challenge
-        const fakeSig = kp.sign(Buffer.from('stellar-rebalancer:auth:nochallenge')).toString('base64')
+        const fakeSig = Buffer.from(kp.sign(Buffer.from('stellar-rebalancer:auth:nochallenge'))).toString('base64')
 
         const res = await request(app)
             .post('/api/auth/login')
