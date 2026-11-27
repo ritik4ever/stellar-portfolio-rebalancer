@@ -119,6 +119,27 @@ aws logs tail /aws/lambda/<name_prefix>-redis-rotation --since 1h
 
 Look for any `ERROR` entries.  A successful rotation ends with a `finishSecret` invocation that returns without error.
 
+### 1f. Classify the notification worker rotation outcome
+
+Run the rotation smoke check to confirm the notification worker is using the active key and to get a result signal instead of interpreting raw logs:
+
+```bash
+ROTATION_ACTIVE_KEY="$NEW_KEY" \
+ROTATION_PREVIOUS_KEY="$OLD_KEY" \
+ROTATION_WORKER_KEY="$WORKER_KEY" \
+  node deployment/rotation-smoke.mjs
+```
+
+Set `ROTATION_OVERLAP_OPEN=false` once the previous key is no longer accepted. The JSON report prints only key fingerprints and distinguishes:
+
+| `outcome` | Meaning | `ownerAction` |
+|-----------|---------|----------------|
+| `success` | The worker uses the active key. | none |
+| `transient_delay` | The worker still holds the previous key while the overlap window is open. | `wait_for_worker_credential_refresh` - wait for the background refresh or call `POST /api/ops/credentials/refresh`. |
+| `blocked` | The worker holds the previous key after the overlap closed, an unknown key, or the inputs are invalid. | `restart_notification_worker`, or `fix_rotation_inputs` for invalid input. |
+
+Exit codes: `0` success, `1` stale worker (transient delay or blocked), `2` invalid input. If `ownerAction` is `restart_notification_worker`, restart the notification worker and re-run this check. If `ownerAction` is `fix_rotation_inputs`, correct the reported inputs and re-run this check. Do not revoke the previous key until the check returns `outcome: success`.
+
 ---
 
 ## 2. Manually trigger a rotation
