@@ -482,4 +482,167 @@ describe('contractEventIndexer', () => {
 
         safeScValToNativeSpy.mockRestore()
     })
+
+    // ── Sync outcome observability (#2103) ──────────────────────────────────
+
+    const outcomeEvent = {
+        contractId: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEWCEUNYQZ2QZ2QZ2QZ2QZ2QZ2QZ2Q',
+        topic: ['topic1', 'topic2'],
+        value: 'mock-value',
+        ledgerClosedAt: '2023-01-01T00:00:00Z',
+        txHash: '0x123',
+        ledger: 1000,
+        pagingToken: 'token-1'
+    } as unknown as SorobanRpc.Api.EventResponse
+
+    function mockOutcomeNative() {
+        return vi.spyOn(contractEventIndexerService as any, 'safeScValToNative').mockImplementation(((val: unknown) => {
+            if (val === 'topic1') return 'portfolio'
+            if (val === 'topic2') return 'rebalance_executed'
+            if (val === 'mock-value') return ['portfolio-123', 'user-abc']
+            return undefined
+        }) as any)
+    }
+
+    it('reports success outcome with source and counts', async () => {
+        const spy = mockOutcomeNative()
+        ;(contractEventIndexerService as any).consecutiveFailures = 0
+        rpcServerMock.getEvents.mockResolvedValueOnce({ events: [outcomeEvent], latestLedger: 1000 })
+
+        await contractEventIndexerService.syncOnce()
+
+        const outcome = contractEventIndexerService.getStatus().lastSyncOutcome
+        expect(outcome).toMatchObject({
+            source: 'onchain',
+            outcome: 'success',
+            reason: 'ingested',
+            ingested: 1,
+            duplicatesSkipped: 0,
+        })
+        spy.mockRestore()
+    })
+
+    it('flags a replayed page as already recorded without ingesting', async () => {
+        const spy = mockOutcomeNative()
+        ;(contractEventIndexerService as any).consecutiveFailures = 0
+        rpcServerMock.getEvents
+            .mockResolvedValueOnce({ events: [outcomeEvent], latestLedger: 1000 })
+            .mockResolvedValueOnce({ events: [], latestLedger: 1000 })
+            .mockResolvedValueOnce({ events: [outcomeEvent], latestLedger: 1000 })
+            .mockResolvedValueOnce({ events: [], latestLedger: 1000 })
+
+        await contractEventIndexerService.syncOnce()
+        await contractEventIndexerService.syncOnce()
+
+        const outcome = contractEventIndexerService.getStatus().lastSyncOutcome
+        expect(outcome).toMatchObject({
+            outcome: 'success',
+            reason: 'replayed_page_already_recorded',
+            ingested: 0,
+        })
+        expect(outcome?.duplicatesSkipped).toBeGreaterThanOrEqual(1)
+        spy.mockRestore()
+    })
+
+    it('reports delayed when the page cap leaves backlog', async () => {
+        const spy = mockOutcomeNative()
+        ;(contractEventIndexerService as any).consecutiveFailures = 0
+        ;(contractEventIndexerService as any).pageLimit = 1
+        ;(contractEventIndexerService as any).maxPagesPerSync = 1
+        rpcServerMock.getEvents.mockResolvedValueOnce({ events: [outcomeEvent], latestLedger: 1000 })
+
+        await contractEventIndexerService.syncOnce()
+
+        expect(contractEventIndexerService.getStatus().lastSyncOutcome).toMatchObject({
+            outcome: 'delayed',
+            reason: 'page_cap_reached_backlog_remaining',
+        })
+        ;(contractEventIndexerService as any).pageLimit = 100
+        ;(contractEventIndexerService as any).maxPagesPerSync = 10
+        spy.mockRestore()
+    })
+
+    it('reports delayed on a transient RPC failure and blocked after repeated failures', async () => {
+        ;(contractEventIndexerService as any).consecutiveFailures = 0
+        rpcServerMock.getLatestLedger.mockRejectedValue(new Error('rpc down'))
+        ;(contractEventIndexerService as any).rpcCallWithRetry = (fn: () => Promise<unknown>) => fn()
+
+        await contractEventIndexerService.syncOnce()
+        expect(contractEventIndexerService.getStatus().lastSyncOutcome).toMatchObject({
+            outcome: 'delayed',
+            reason: 'rpc_failure_retrying',
+        })
+
+        for (let i = 0; i < 5; i++) await contractEventIndexerService.syncOnce()
+        const outcome = contractEventIndexerService.getStatus().lastSyncOutcome
+        expect(outcome).toMatchObject({ outcome: 'blocked', reason: 'rpc_failures_exceeded_threshold' })
+        expect(JSON.stringify(outcome)).not.toContain('rpc down')
+        ;(contractEventIndexerService as any).consecutiveFailures = 0
+        delete (contractEventIndexerService as any).rpcCallWithRetry
+    })
+
+    it('reports blocked on contract event schema mismatch', async () => {
+        process.env.CONTRACT_EVENT_SCHEMA_VERSION = String(BACKEND_CONTRACT_EVENT_SCHEMA_VERSION + 1)
+
+        await contractEventIndexerService.syncOnce()
+
+        expect(contractEventIndexerService.getStatus().lastSyncOutcome).toMatchObject({
+            source: 'onchain',
+            outcome: 'blocked',
+            reason: 'contract_event_schema_mismatch',
+        })
+    })
+
+    it('reports blocked with malformed_events_skipped precedence when malformedSkipped > 0', async () => {
+        const spy = vi.spyOn(contractEventIndexerService as any, 'safeScValToNative').mockImplementation(((val: unknown) => {
+            if (val === 'topic1') return 'portfolio'
+            if (val === 'topic2') return 'rebalance_executed'
+            if (val === 'bad-value') throw new Error('corrupt scval')
+            return undefined
+        }) as any)
+        ;(contractEventIndexerService as any).consecutiveFailures = 0
+        ;(contractEventIndexerService as any).pageLimit = 1
+        ;(contractEventIndexerService as any).maxPagesPerSync = 1
+        const badEvent = { ...outcomeEvent, value: 'bad-value', txHash: '0xbad', pagingToken: 'token-bad' }
+        rpcServerMock.getEvents.mockResolvedValueOnce({ events: [badEvent], latestLedger: 1000 })
+
+        await contractEventIndexerService.syncOnce()
+
+        expect(contractEventIndexerService.getStatus().lastSyncOutcome).toMatchObject({
+            outcome: 'blocked',
+            reason: 'malformed_events_skipped',
+            malformedSkipped: 1,
+            ingested: 0,
+        })
+        ;(contractEventIndexerService as any).pageLimit = 100
+        ;(contractEventIndexerService as any).maxPagesPerSync = 10
+        spy.mockRestore()
+    })
+
+    it('classifies database write failures separately from RPC failures and preserves per-pass counters', async () => {
+        const spy = mockOutcomeNative()
+        ;(contractEventIndexerService as any).consecutiveFailures = 0
+        const eventPage1 = { ...outcomeEvent, txHash: '0x111', pagingToken: 'token-p1' }
+        const eventPage2 = { ...outcomeEvent, txHash: '0x222', pagingToken: 'token-p2' }
+        rpcServerMock.getEvents
+            .mockResolvedValueOnce({ events: [eventPage1], latestLedger: 1000 })
+            .mockResolvedValueOnce({ events: [eventPage2], latestLedger: 1001 })
+        const dbMock = databaseService as any
+        dbMock.recordRebalanceEvent
+            .mockReturnValueOnce({ id: 'ev-p1' })
+            .mockImplementationOnce(() => {
+                throw new Error('sqlite busy')
+            })
+
+        await contractEventIndexerService.syncOnce()
+
+        expect(contractEventIndexerService.getStatus().lastSyncOutcome).toMatchObject({
+            outcome: 'delayed',
+            reason: 'db_write_failure_retrying',
+            ingested: 1,
+            pagesRead: 2,
+        })
+        ;(contractEventIndexerService as any).consecutiveFailures = 0
+        spy.mockRestore()
+    })
 })

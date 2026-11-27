@@ -158,6 +158,23 @@ const failedServices = Object.entries(status.services)
 - Overall `system.status` is "degraded" if any critical service is unhealthy
 - Errors are logged but don't crash the endpoint (returns available information)
 
+### On-Chain Indexer Sync Outcome
+
+`contractEventIndexerService.getStatus().lastSyncOutcome` (also logged as `[CHAIN-INDEXER] Sync outcome`) describes the most recent sync pass. It contains `source` (`onchain`), `outcome`, a stable `reason` code, `at`, `ingested`, `duplicatesSkipped`, `malformedSkipped`, `pagesRead`, `cursor`, `latestLedger` and `consecutiveFailures`. It never includes RPC URLs, credentials or raw error text.
+
+| `outcome` | `reason` | Meaning |
+|-----------|----------|---------|
+| `success` | `ingested` / `no_new_events` | Pass completed, caught up |
+| `success` | `replayed_page_already_recorded` | Indexer re-read a page it already recorded; nothing new ingested (`duplicatesSkipped` > 0) |
+| `delayed` | `page_cap_reached_backlog_remaining` | Per-sync page cap hit with a full page; the rest is picked up on the next poll |
+| `delayed` | `indexer_lagging_chain_tip` | Indexed ledger is behind the tip by more than the gap threshold |
+| `delayed` | `rpc_failure_retrying` | RPC failure; still below the backoff threshold |
+| `delayed` | `db_write_failure_retrying` | Database write failure; still below the backoff threshold |
+| `blocked` | `malformed_events_skipped` | One or more events failed parsing and were skipped (`malformedSkipped` > 0) |
+| `blocked` | `rpc_failures_exceeded_threshold` | 5+ consecutive RPC failures; operator action likely needed |
+| `blocked` | `db_write_failures_exceeded_threshold` | 5+ consecutive database write failures; operator action likely needed |
+| `blocked` | `contract_event_schema_mismatch` | Declared contract event schema differs from the backend's; no events are ingested |
+
 ## Testing
 
 ### Example Request / Response
