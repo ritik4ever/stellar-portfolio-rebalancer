@@ -236,11 +236,13 @@ class WebhookProvider implements NotificationProvider {
           }
         },
       );
-    } catch {
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       const deadLetterItem: DeadLetterItem = {
         id: randomBytes(16).toString('hex'),
         payload: webhookPayload,
-        errorMessage: 'Exhausted all webhook retry attempts',
+        errorMessage,
         attemptsExhausted: policy.maxAttempts,
         timestamp: new Date().toISOString(),
         webhookUrl,
@@ -248,6 +250,9 @@ class WebhookProvider implements NotificationProvider {
         eventType: payload.eventType,
       };
       await webhookDeadLetterQueue.push(deadLetterItem);
+      throw new Error(
+        `Webhook delivery failed after ${policy.maxAttempts} attempt(s): ${errorMessage}`,
+      );
     }
   }
 }
@@ -690,7 +695,10 @@ export class NotificationService {
   /**
    * Send notification to user
    */
-  async notify(payload: NotificationPayload): Promise<void> {
+  async notify(
+    payload: NotificationPayload,
+    options: { throwOnProviderError?: boolean } = {},
+  ): Promise<void> {
     const preferences = this.getPreferencesForPortfolio(
       payload.userId,
       payload.portfolioId,
@@ -705,12 +713,14 @@ export class NotificationService {
       return;
     }
 
+    const providerErrors: string[] = [];
     const promises = this.providers.map(async (provider) => {
       try {
         await provider.send(payload, preferences);
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
+        providerErrors.push(`${provider.constructor.name}: ${errorMessage}`);
         logger.error("Provider failed to send notification", {
           provider: provider.constructor.name,
           userId: payload.userId,
@@ -721,6 +731,9 @@ export class NotificationService {
     });
 
     await Promise.allSettled(promises);
+    if (options.throwOnProviderError && providerErrors.length > 0) {
+      throw new Error(`Test notification delivery failed: ${providerErrors.join('; ')}`);
+    }
   }
 
   /**
@@ -970,7 +983,7 @@ export class NotificationService {
       timestamp,
     };
 
-    await this.notify(payload);
+    await this.notify(payload, { throwOnProviderError: true });
 
     return {
       message: "Test notification sent",

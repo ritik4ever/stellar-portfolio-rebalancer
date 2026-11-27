@@ -313,6 +313,38 @@ describe("NotificationService", () => {
   });
 
   describe("WebhookProvider - failure handling", () => {
+    it("reports failed webhook delivery from a test notification", async () => {
+      getPrefsSpy.mockReturnValue({
+        userId: "webhook-user",
+        emailEnabled: false,
+        webhookEnabled: true,
+        webhookUrl: "https://hooks.example/notify",
+        events: { rebalance: true, circuitBreaker: true, priceMovement: true, riskChange: true },
+      });
+
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 502 }));
+
+      const service = new NotificationService({
+        email: {
+          maxAttempts: 1,
+          initialBackoffMs: 1,
+          maxBackoffMs: 1,
+          backoffMultiplier: 1,
+        },
+        webhook: {
+          maxAttempts: 1,
+          initialBackoffMs: 1,
+          maxBackoffMs: 1,
+          backoffMultiplier: 1,
+          requestTimeoutMs: 5000,
+        },
+      });
+
+      await expect(service.sendTestNotification("webhook-user")).rejects.toThrow(
+        /Webhook delivery failed after 1 attempt\(s\): Webhook responded with status 502/,
+      );
+    });
+
     it("retries webhook delivery with exponential backoff before failing", async () => {
       process.env.WEBHOOK_RETRY_COUNT = "1";
       process.env.WEBHOOK_RETRY_DELAY = "1000";

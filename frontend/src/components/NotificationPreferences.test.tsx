@@ -230,6 +230,62 @@ describe('NotificationPreferences', () => {
         expect(await screen.findByText(/Preferences saved successfully/i)).toBeTruthy()
     })
 
+    it('keeps unsaved preference edits while retrying a failed webhook test', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({
+            preferences: {
+                emailEnabled: false,
+                emailAddress: '',
+                webhookEnabled: true,
+                webhookUrl: 'https://hooks.example.com/notify',
+                telegramEnabled: false,
+                telegramChatId: '',
+                events: {
+                    rebalance: true,
+                    circuitBreaker: true,
+                    priceMovement: true,
+                    riskChange: true,
+                },
+                digestEnabled: false,
+                digestFrequency: 'realtime',
+            },
+        } as any)
+        const postSpy = vi.spyOn(api, 'post')
+            .mockRejectedValueOnce(new Error('HTTP 502: Webhook test failed'))
+            .mockResolvedValueOnce({
+                message: 'Webhook accepted',
+                sentTo: { email: null, webhook: 'https://hooks.example.com/notify', telegram: null },
+                timestamp: new Date().toISOString(),
+            } as any)
+            .mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        expect(await screen.findByText('Notifications')).toBeTruthy()
+
+        const riskChangeSwitch = screen.getByRole('switch', { name: /risk level change alerts/i })
+        fireEvent.click(riskChangeSwitch)
+        fireEvent.click(screen.getByRole('button', { name: /^test rebalance$/i }))
+
+        expect(await screen.findByText(/webhook test failed/i)).toBeTruthy()
+        expect(screen.getByRole('button', { name: /retry rebalance test/i })).toBeTruthy()
+        expect(riskChangeSwitch).toHaveAttribute('aria-checked', 'false')
+        expect((screen.getByRole('button', { name: /save preferences/i }) as HTMLButtonElement).disabled).toBe(false)
+
+        fireEvent.click(screen.getByRole('button', { name: /retry rebalance test/i }))
+        expect(await screen.findByText('Webhook accepted')).toBeTruthy()
+        expect(riskChangeSwitch).toHaveAttribute('aria-checked', 'false')
+        expect(postSpy).toHaveBeenCalledTimes(2)
+
+        fireEvent.click(screen.getByRole('button', { name: /save preferences/i }))
+        await waitFor(() => {
+            expect(postSpy).toHaveBeenLastCalledWith(
+                ENDPOINTS.NOTIFICATIONS_SUBSCRIBE,
+                expect.objectContaining({
+                    events: expect.objectContaining({ riskChange: false }),
+                })
+            )
+        })
+    })
+
     it('calls mutation with correct payload when email preference is toggled', async () => {
         vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
         const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)

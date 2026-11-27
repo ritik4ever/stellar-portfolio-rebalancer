@@ -292,6 +292,14 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                                                     <span className="break-words min-w-0">{result.message}</span>
                                                 </div>
 
+                                                {!result.success && (
+                                                    <p className="mt-1 ml-5 text-xs text-gray-600">
+                                                        If this is a webhook test, verify its URL and that
+                                                        the endpoint returns a 2xx response. Save any
+                                                        corrections before retrying.
+                                                    </p>
+                                                )}
+
                                                 {result.success &&
                                                     (result.sentTo.email ||
                                                         result.sentTo.webhook ||

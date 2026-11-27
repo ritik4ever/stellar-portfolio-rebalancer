@@ -78,6 +78,7 @@ describe('NotificationTest', () => {
         fireEvent.click(screen.getByRole('button', { name: /^test rebalance$/i }))
 
         expect(await screen.findByText(/smtp connection refused/i)).toBeTruthy()
+        expect(screen.getByText(/verify its url and that the endpoint returns a 2xx response/i)).toBeTruthy()
         expect(screen.getByRole('button', { name: /retry rebalance test/i })).toBeTruthy()
     })
 
