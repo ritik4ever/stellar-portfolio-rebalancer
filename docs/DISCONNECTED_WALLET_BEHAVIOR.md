@@ -92,6 +92,14 @@ soroban contract invoke \
 | Can I set up unattended rebalancing? | Yes, by delegating stewardship to an automation contract or hot wallet via `transfer_stewardship`. |
 | How do I revoke a delegation? | Call `transfer_stewardship` from the current steward address, passing your wallet address as `new_steward`. |
 
+## Demo mode vs. connected wallet boundary
+
+When no wallet is connected, the frontend dashboard runs in **Demo mode** with a fixed simulated **$10,000** portfolio (**40% XLM / 60% USDC**):
+
+- **Demo → Connected wallet**: Connecting a wallet replaces the simulated `$10,000` demo view with your real on-chain wallet balances and saved portfolios. Demo balances are never merged with real funds.
+- **Connected wallet → Demo**: Clicking **Disconnect** clears the active wallet session and returns to the landing page. Viewing the dashboard without a wallet shows the isolated `$10,000` simulated demo portfolio again without modifying on-chain balances.
+- **Rebalancing**: On-chain rebalancing is disabled in Demo mode; connect a wallet and select a saved portfolio to submit trades.
+
 ## Related docs
 
 - [Wallet FAQ](wallet-faq.md) – connecting wallets and signing transactions

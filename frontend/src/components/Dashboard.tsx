@@ -601,9 +601,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     </div>
                                 </div>
                             ) : (
-                                <span className="text-sm bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300 px-2 py-1 rounded mt-1 inline-block">
-                                    {dashboardCopy.demoMode}
-                                </span>
+                                <div className="mt-1 space-y-1">
+                                    <span className="text-sm bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300 px-2 py-1 rounded inline-block">
+                                        {dashboardCopy.demoMode}
+                                    </span>
+                                    <p
+                                        id="demo-mode-boundary-note"
+                                        className="text-xs text-gray-600 dark:text-gray-400 max-w-xl"
+                                    >
+                                        {dashboardCopy.demoBoundarySummary} {dashboardCopy.demoSwitchToWalletNote}
+                                    </p>
+                                </div>
                             )}
                         </div>
                     </div>
@@ -703,15 +711,27 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
                                     {dashboardCopy.createPortfolio}
                                 </button>
-                                <button onClick={disconnectWallet}
-                                    className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-3 py-2 text-sm transition-colors">
+                                <button
+                                    type="button"
+                                    onClick={disconnectWallet}
+                                    title={dashboardCopy.walletSwitchToDemoNote}
+                                    aria-describedby="wallet-disconnect-boundary-note"
+                                    className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-3 py-2 text-sm transition-colors"
+                                >
                                     Disconnect
                                 </button>
+                                <span id="wallet-disconnect-boundary-note" className="sr-only">
+                                    {dashboardCopy.walletSwitchToDemoNote}
+                                </span>
                             </>
                         ) : (
                             <>
-                                <button type="button" onClick={() => onNavigate('landing')}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap min-w-0">
+                                <button
+                                    type="button"
+                                    onClick={() => onNavigate('landing')}
+                                    aria-describedby="demo-mode-boundary-note"
+                                    className="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap min-w-0"
+                                >
                                     Connect Wallet
                                 </button>
                                 <button type="button" onClick={() => setShowDemoResetConfirm(true)}
@@ -1189,6 +1209,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                                 )}
                                                 <button type="button" onClick={() => setReviewPortfolioId(latestPortfolioId)}
                                                     disabled={balancesUnavailable || !publicKey || !latestPortfolioId}
+                                                    aria-describedby={!publicKey || portfolioData?.id === 'demo' ? 'demo-rebalance-boundary' : undefined}
                                                     className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2">
                                                     Review rebalance
                                                 </button>
@@ -1198,9 +1219,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                                     </p>
                                                 )}
                                                 {(!publicKey || portfolioData?.id === 'demo') && (
-                                                    <p className="text-xs text-orange-600 dark:text-orange-400 mt-2 text-center">
-                                                        {!publicKey ? 'Connect wallet to execute rebalance' : 'Create a real portfolio to enable rebalancing'}
-                                                    </p>
+                                                    <div id="demo-rebalance-boundary" className="text-xs text-orange-600 dark:text-orange-400 mt-2 text-center space-y-1">
+                                                        <p>
+                                                            {!publicKey ? 'Connect wallet to execute rebalance' : 'Create a real portfolio to enable rebalancing'}
+                                                        </p>
+                                                        {!publicKey && (
+                                                            <p className="text-gray-600 dark:text-gray-400">
+                                                                {dashboardCopy.demoRebalanceBlocked}
+                                                            </p>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </>
                                         )}

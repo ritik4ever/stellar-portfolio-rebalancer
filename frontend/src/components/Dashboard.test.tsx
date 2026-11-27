@@ -405,6 +405,16 @@ describe('Dashboard', () => {
         const cancelBtn = screen.getByRole('button', { name: 'Cancel' })
         fireEvent.click(cancelBtn)
         expect(screen.queryByRole('heading', { name: 'Reset Demo Portfolio' })).not.toBeInTheDocument()
+
+        // Mode-switching boundary explanation near Connect Wallet and rebalance controls
+        const connectWalletBtn = screen.getByRole('button', { name: 'Connect Wallet' })
+        expect(connectWalletBtn).toHaveAttribute('aria-describedby', 'demo-mode-boundary-note')
+        expect(
+            screen.getByText(/Simulated \$10,000 portfolio \(40% XLM \/ 60% USDC\)\./i),
+        ).toBeInTheDocument()
+        expect(
+            screen.getByText(/Switching to a connected wallet replaces the simulated \$10,000 demo balance with your real on-chain balances\./i),
+        ).toBeInTheDocument()
     })
 
     it('displays distinct wallet balance badge and address when wallet is connected', async () => {
@@ -422,8 +432,13 @@ describe('Dashboard', () => {
         expect(screen.queryByText('Demo balance')).not.toBeInTheDocument()
         expect(screen.queryByText('Simulated $10,000')).not.toBeInTheDocument()
 
-        // Shows connected wallet header details
+        // Shows connected wallet header details and disconnect boundary note
         expect(screen.getByText(/GABC\.\.\.TEST/)).toBeInTheDocument()
+        const disconnectBtn = screen.getByRole('button', { name: 'Disconnect' })
+        expect(disconnectBtn).toHaveAttribute('aria-describedby', 'wallet-disconnect-boundary-note')
+        expect(
+            screen.getByText(/Disconnecting ends your wallet session and returns to the landing screen; real balances stay separate from the \$10,000 demo portfolio\./i),
+        ).toBeInTheDocument()
     })
 
     it('recovers from a halfway demo reset failure without duplicating completed steps', async () => {

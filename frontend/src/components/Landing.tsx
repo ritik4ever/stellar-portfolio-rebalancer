@@ -172,12 +172,22 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
                             )}
                         </button>
                         <button
+                            type="button"
                             onClick={() => onNavigate('dashboard')}
+                            aria-describedby="landing-mode-boundary-note"
                             className="bg-white hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 px-8 py-4 rounded-xl font-semibold text-lg transition-colors"
                         >
-                            View Demo
+                            {publicKey ? 'Open Dashboard' : 'View Demo'}
                         </button>
                     </motion.div>
+                    <p
+                        id="landing-mode-boundary-note"
+                        className="mt-4 text-sm text-gray-600 dark:text-gray-400 max-w-2xl mx-auto"
+                    >
+                        {publicKey
+                            ? 'Wallet connected: opening the dashboard loads your real on-chain balances, kept separate from the $10,000 simulated Demo mode. Disconnect to return to Demo mode.'
+                            : 'Demo mode uses a fixed $10,000 simulated balance (40% XLM / 60% USDC). Connecting a wallet switches to your real on-chain balances without merging demo data.'}
+                    </p>
                 </div>
 
                 {/* Features Section */}
