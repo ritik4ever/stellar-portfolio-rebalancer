@@ -230,8 +230,93 @@ describe('RebalanceConfirm — execution failure recovery', () => {
     })
   })
 
-  it('keeps non-slippage failures reviewable and retryable', async () => {
-    mockMutateAsync.mockRejectedValueOnce(new Error('network down'))
+  it('recovers from wallet signature rejection with an actionable retry without duplicating', async () => {
+    const onSuccess = vi.fn()
+    mockMutateAsync.mockRejectedValueOnce(new Error('User rejected signing in wallet'))
+
+    renderReview({ onSuccess })
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /confirm rebalance/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/wallet signature rejected/i)
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent(/no transaction was submitted/i)
+
+    let resolveRetry: (value: unknown) => void = () => {}
+    mockMutateAsync.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRetry = resolve
+        }),
+    )
+
+    const retryBtn = screen.getByRole('button', { name: /retry signing/i })
+    fireEvent.click(retryBtn)
+    fireEvent.click(retryBtn)
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledTimes(2)
+    })
+
+    await act(async () => {
+      resolveRetry({ ok: true })
+    })
+
+    expect(mockMutateAsync).toHaveBeenCalledTimes(2)
+    expect(onSuccess).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks blind resubmission on lost network acknowledgement until status is checked', async () => {
+    const onSuccess = vi.fn()
+    mockMutateAsync.mockRejectedValueOnce(new Error('Network timeout: acknowledgement lost'))
+
+    renderReview({ onSuccess })
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /confirm rebalance/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/network acknowledgement lost/i)
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent(/may have already been submitted/i)
+
+    // Even if the user re-checks the acknowledgement, Confirm rebalance stays disabled
+    // until status is checked to prevent duplicate trades.
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
+    expect(screen.getByRole('button', { name: /confirm rebalance/i })).toBeDisabled()
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /check status & refresh plan/i }),
+    )
+    expect(mockRefetch).toHaveBeenCalledTimes(1)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    // After checking status and seeing trades are still needed, user can safely retry.
+    mockMutateAsync.mockResolvedValueOnce({ ok: true })
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /confirm rebalance/i }))
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledTimes(2)
+      expect(onSuccess).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('keeps generic non-slippage failures reviewable and retryable', async () => {
+    mockMutateAsync.mockRejectedValueOnce(new Error('Unexpected server error'))
 
     renderReview()
 
@@ -241,7 +326,7 @@ describe('RebalanceConfirm — execution failure recovery', () => {
     await userEvent.click(screen.getByRole('button', { name: /confirm rebalance/i }))
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(/network down/i)
+      expect(screen.getByRole('alert')).toHaveTextContent(/unexpected server error/i)
     })
     expect(screen.getByRole('alert')).toHaveTextContent(
       /review and re-acknowledge the planned trades to retry/i,
