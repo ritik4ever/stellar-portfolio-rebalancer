@@ -312,3 +312,113 @@ describe('RebalanceConfirm — duplicate submission guard', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 })
+
+describe('RebalanceConfirm — narrow widths (320px) and 200% text sizing', () => {
+  let originalInnerWidth: number
+  let originalFontSize: string
+
+  beforeEach(() => {
+    originalInnerWidth = window.innerWidth
+    originalFontSize = document.documentElement.style.fontSize
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 320,
+    })
+    document.documentElement.style.fontSize = '200%'
+  })
+
+  afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: originalInnerWidth,
+    })
+    document.documentElement.style.fontSize = originalFontSize
+  })
+
+  it('keeps predicted trade list, acknowledgement, and controls operable without horizontal clipping', async () => {
+    mockUseRebalancePlan.mockReturnValue(
+      planResult(
+        makePlan({
+          boundary: {
+            reasonCode: 'TRADES_REQUIRED',
+            trades: [
+              { asset: 'SUPERLONGASSETIDENTIFIER', action: 'buy' as const, amount: 1234567.8901234 },
+              { asset: 'USDC', action: 'sell' as const, amount: 50000 },
+            ],
+            quoteSnapshot: {
+              prices: {
+                SUPERLONGASSETIDENTIFIER: { timestamp: NOW / 1000 },
+                USDC: { timestamp: NOW / 1000 - 60 },
+              },
+              feedMeta: { degraded: false, staleOrLimited: false },
+            },
+          },
+        }),
+      ),
+    )
+
+    renderReview()
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.className).toContain('overflow-x-hidden')
+    expect(dialog.className).toContain('overflow-y-auto')
+    expect(dialog.className).toContain('min-w-0')
+
+    const tradeRegion = screen.getByRole('region', { name: /2 planned trades/i })
+    expect(tradeRegion.className).toContain('overflow-x-hidden')
+    expect(tradeRegion.className).toContain('overflow-y-auto')
+    expect(tradeRegion.className).toContain('min-w-0')
+    expect(tradeRegion).toHaveTextContent(/SUPERLONGASSETIDENTIFIER/)
+
+    const checkbox = screen.getByRole('checkbox', { name: /i reviewed the planned trades/i })
+    expect(checkbox.className).toContain('shrink-0')
+    await userEvent.click(checkbox)
+
+    const confirm = screen.getByRole('button', { name: /confirm rebalance/i })
+    const cancel = screen.getByRole('button', { name: /cancel/i })
+    expect(confirm).toBeEnabled()
+    expect(confirm.className).toContain('max-w-full')
+    expect(confirm.className).toContain('break-words')
+    expect(cancel.className).toContain('max-w-full')
+    expect(cancel.parentElement?.className).toContain('flex-wrap')
+  })
+
+  it('keeps read-only zero-trade status and close control visible and operable without horizontal clipping', async () => {
+    const onClose = vi.fn()
+    mockUseRebalancePlan.mockReturnValue(
+      planResult(
+        makePlan({
+          boundary: {
+            reasonCode: 'WITHIN_EVERY_THRESHOLD',
+            thresholdPercent: 5,
+            maxDriftPercent: 5,
+            trades: [],
+            quoteSnapshot: {
+              prices: {},
+              feedMeta: { degraded: false, staleOrLimited: false },
+            },
+          },
+        }),
+      ),
+    )
+
+    renderReview({ onClose })
+
+    const status = screen.getByRole('status')
+    expect(status).toHaveTextContent(/0 planned trades — read-only preview/i)
+    expect(status.className).toContain('overflow-x-hidden')
+    expect(status.className).toContain('overflow-y-auto')
+    expect(status.className).toContain('break-words')
+    expect(status.className).toContain('min-w-0')
+
+    const closeButton = screen.getByRole('button', { name: /close/i })
+    expect(closeButton).toBeEnabled()
+    expect(closeButton.className).toContain('max-w-full')
+    expect(screen.queryByRole('button', { name: /confirm rebalance/i })).not.toBeInTheDocument()
+
+    await userEvent.click(closeButton)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
