@@ -194,6 +194,14 @@ jobs:
           PGDATABASE: migration_ci
         run: npm run db:migrate -- --dry-run
 
+      - name: Verify migrations (PostgreSQL smoke check)
+        if: (steps.changes.outputs.migrations == 'true' || github.event_name != 'pull_request') && matrix.db == 'postgres'
+        working-directory: ./backend
+        env:
+          # Creates and drops throwaway databases on this server; the role needs CREATEDB.
+          MIGRATION_VERIFY_DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/migration_ci
+        run: npm run db:migrate:verify
+
   slack-notification:
     name: Notify Slack on failure
     needs: [openapi-contract, backend-tests, backend-coverage, migration-dry-run]
