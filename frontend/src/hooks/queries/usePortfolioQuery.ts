@@ -212,6 +212,19 @@ export const useRebalanceEstimate = (id: string | null) => {
     })
 }
 
+export function isSimulationTimeoutError(error: unknown): boolean {
+    if (!error) return false
+    if (error instanceof ApiClientError) {
+        if (error.status === 408 || error.status === 504) return true
+        if (/timeout|timed_out|etimedout/i.test(error.code)) return true
+    }
+    if (error instanceof Error) {
+        if (error.name === 'AbortError' || error.name === 'TimeoutError') return true
+        if (/timeout|timed out|aborted/i.test(error.message)) return true
+    }
+    return /timeout|timed out/i.test(String(error))
+}
+
 export const useRebalancePlan = (id: string | null, enabled = true) => {
     return useQuery({
         queryKey: [...portfolioKeys.detail(id || ''), 'rebalance-plan'],
@@ -219,6 +232,7 @@ export const useRebalancePlan = (id: string | null, enabled = true) => {
         enabled: enabled && !!id && id !== 'demo',
         staleTime: 25000,
         refetchOnWindowFocus: false,
+        retry: (failureCount, error) => !isSimulationTimeoutError(error) && failureCount < 1,
     })
 }
 
