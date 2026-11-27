@@ -145,6 +145,178 @@ describe('RebalanceConfirm — review and acknowledgement', () => {
       screen.queryByRole('button', { name: /confirm rebalance/i }),
     ).not.toBeInTheDocument()
   })
+
+  it('explains read-only status when allocation drift is already inside the threshold', async () => {
+    const onClose = vi.fn()
+    mockUseRebalancePlan.mockReturnValue(
+      planResult(
+        makePlan({
+          estimatedFees: { xlm: 0, usd: 0, tradeCount: 0 },
+          boundary: {
+            reasonCode: 'WITHIN_EVERY_THRESHOLD',
+            thresholdPercent: 5,
+            maxDriftPercent: 2.5,
+            trades: [],
+            quoteSnapshot: {
+              prices: {},
+              feedMeta: { degraded: false, staleOrLimited: false },
+            },
+          },
+        }),
+      ),
+    )
+
+    renderReview({ onClose })
+
+    const status = screen.getByRole('status')
+    expect(status).toHaveAttribute('id', 'dry-run-boundary-status')
+    expect(status).toHaveTextContent(/0 planned trades — read-only preview/i)
+    expect(status).toHaveTextContent(/largest observed drift is 2\.50 percentage points/i)
+    expect(status).toHaveTextContent(/allowed drift is ±5\.00 percentage points or less from target/i)
+    expect(status).toHaveTextContent(/no trades are required and there is no network fee/i)
+
+    expect(screen.queryByRole('list')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /confirm rebalance/i }),
+    ).not.toBeInTheDocument()
+
+    const closeButton = screen.getByRole('button', { name: /^close$/i })
+    expect(closeButton).toHaveAttribute('aria-describedby', 'dry-run-boundary-status')
+
+    await userEvent.click(closeButton)
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(mockMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('treats drift exactly at the threshold boundary as read-only with no trades', () => {
+    mockUseRebalancePlan.mockReturnValue(
+      planResult(
+        makePlan({
+          estimatedFees: { xlm: 0, usd: 0, tradeCount: 0 },
+          boundary: {
+            reasonCode: 'WITHIN_EVERY_THRESHOLD',
+            thresholdPercent: 5,
+            maxDriftPercent: 5,
+            trades: [],
+            quoteSnapshot: {
+              prices: {},
+              feedMeta: { degraded: false, staleOrLimited: false },
+            },
+          },
+        }),
+      ),
+    )
+
+    renderReview()
+
+    const status = screen.getByRole('status')
+    expect(status).toHaveTextContent(/0 planned trades — read-only preview/i)
+    expect(status).toHaveTextContent(/largest observed drift is 5\.00 percentage points/i)
+    expect(status).toHaveTextContent(/an allocation exactly at ±5\.00 percentage points is still inside the threshold/i)
+    expect(
+      screen.queryByRole('button', { name: /confirm rebalance/i }),
+    ).not.toBeInTheDocument()
+  })
+})
+
+describe('RebalanceConfirm — dry-run simulation timeout and recovery', () => {
+  it('shows timeout recovery controls, prevents duplicate retries while fetching, and recovers to predicted trades', async () => {
+    const onSuccess = vi.fn()
+    mockUseRebalancePlan.mockReturnValue(
+      planResult(undefined, {
+        isError: true,
+        error: new Error('Simulation request timed out after 10000ms'),
+      }),
+    )
+
+    const { rerender } = renderReview({ onSuccess })
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(
+      /the simulation request timed out\. retry loading the plan, or cancel to abandon\./i,
+    )
+    expect(
+      screen.queryByRole('button', { name: /confirm rebalance/i }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('list')).not.toBeInTheDocument()
+
+    const retryButton = screen.getByRole('button', { name: /retry loading plan/i })
+    expect(retryButton).toBeEnabled()
+
+    await userEvent.click(retryButton)
+    expect(mockRefetch).toHaveBeenCalledTimes(1)
+
+    // While the retry is in flight, the retry button is disabled to avoid duplicate requests.
+    mockUseRebalancePlan.mockReturnValue(
+      planResult(undefined, {
+        isError: true,
+        isFetching: true,
+        error: new Error('Simulation request timed out after 10000ms'),
+      }),
+    )
+    rerender(
+      <RebalanceConfirm portfolioId="p1" open onClose={vi.fn()} onSuccess={onSuccess} />,
+    )
+    expect(screen.getByRole('button', { name: /retry loading plan/i })).toBeDisabled()
+
+    // Once the simulation recovers, predicted trades render and double-clicking Confirm submits once.
+    let resolveSubmit: (value: unknown) => void = () => {}
+    mockMutateAsync.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSubmit = resolve
+        }),
+    )
+
+    mockUseRebalancePlan.mockReturnValue(planResult(makePlan()))
+    rerender(
+      <RebalanceConfirm portfolioId="p1" open onClose={vi.fn()} onSuccess={onSuccess} />,
+    )
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText(/2 planned trades/i)).toBeInTheDocument()
+    expect(screen.getByText(/Buy 100/)).toHaveTextContent(/XLM/)
+    expect(screen.getByText(/Sell 50/)).toHaveTextContent(/USDC/)
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /i reviewed the planned trades/i }),
+    )
+    const confirm = screen.getByRole('button', { name: /confirm rebalance/i })
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
+
+    expect(mockMutateAsync).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      resolveSubmit({ ok: true })
+    })
+
+    expect(mockMutateAsync).toHaveBeenCalledTimes(1)
+    expect(onSuccess).toHaveBeenCalledTimes(1)
+  })
+
+  it('allows abandoning a timed-out simulation without triggering execution', async () => {
+    const onClose = vi.fn()
+    mockUseRebalancePlan.mockReturnValue(
+      planResult(undefined, {
+        isError: true,
+        error: new Error('Gateway timeout'),
+      }),
+    )
+
+    renderReview({ onClose })
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/simulation request timed out/i)
+
+    const cancelButtons = screen.getAllByRole('button', { name: /^cancel$/i })
+    await userEvent.click(cancelButtons[0])
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(mockMutateAsync).not.toHaveBeenCalled()
+  })
 })
 
 describe('RebalanceConfirm — slippage tolerance changes before approval', () => {
