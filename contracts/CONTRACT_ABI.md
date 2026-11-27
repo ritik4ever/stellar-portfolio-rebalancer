@@ -244,7 +244,7 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 
 - **Purpose:** Computes current drift versus target allocations using Reflector prices.
 - **Parameters:** `portfolio_id`.
-- **Returns:** `true` when any tracked asset drift exceeds `rebalance_threshold`, else `false`.
+- **Returns:** `true` when any tracked asset drift exceeds `rebalance_threshold`, else `false`. The comparison is strict: drift (in basis points) exactly equal to `rebalance_threshold * 100` returns `false`, one basis point more returns `true`. This holds at both `MIN_REBALANCE_THRESHOLD` (1) and `MAX_REBALANCE_THRESHOLD` (50), and the stored portfolio configuration is never modified by the check.
 - **Preconditions / failure behavior:**
   - Portfolio and `ReflectorAddress` must exist in storage (panics on missing values).
   - Reflector timeout/unavailability semantics: if any held asset has missing or stale price data, the function returns `false` because a deterministic rebalance decision cannot be made.
